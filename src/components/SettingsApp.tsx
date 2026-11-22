@@ -17,8 +17,10 @@ interface Props {
   wallpapers: {
     lockWp: string;
     homeWp: string;
+    chatBg: string;
     setLockWp: (v: string | ((p: string) => string)) => void;
     setHomeWp: (v: string | ((p: string) => string)) => void;
+    setChatBg: (v: string | ((p: string) => string)) => void;
   };
 }
 
@@ -303,12 +305,13 @@ function PasscodeSection({ onLock }: { onLock: () => void }) {
   );
 }
 
-/** 锁屏 / 桌面背景上传替换 */
+/** 锁屏 / 桌面 / 聊天背景上传替换 */
 function WallpaperSection({ wallpapers }: { wallpapers: Props["wallpapers"] }) {
   return (
-    <div className="glass grid grid-cols-2 gap-3 rounded-2xl p-3.5">
+    <div className="glass grid grid-cols-3 gap-3 rounded-2xl p-3.5">
       <WallpaperPicker label="锁屏背景" value={wallpapers.lockWp} onChange={wallpapers.setLockWp} />
       <WallpaperPicker label="桌面背景" value={wallpapers.homeWp} onChange={wallpapers.setHomeWp} />
+      <WallpaperPicker label="聊天背景" value={wallpapers.chatBg} onChange={wallpapers.setChatBg} />
     </div>
   );
 }

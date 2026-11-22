@@ -10,19 +10,25 @@ import { RoleChatApp } from "./RoleChatApp";
 import { WorldBookApp } from "./WorldBookApp";
 import { StickerApp } from "./StickerApp";
 import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
-import { usePasscode, useLockWallpaper, useHomeWallpaper } from "@/lib/lock-store";
+import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 
 interface Props {
   config: AiConfig;
   onSaveConfig: (cfg: AiConfig) => void;
 }
 
+/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App */
+const vpParams = new URLSearchParams(window.location.search);
+
 export function PhoneShell({ config, onSaveConfig }: Props) {
-  const [locked, setLocked] = useState(true);
-  const [screen, setScreen] = useState<ScreenId>("home");
+  const [locked, setLocked] = useState(!vpParams.has("vpDesk"));
+  const [screen, setScreen] = useState<ScreenId>(
+    (vpParams.get("vpApp") as ScreenId) || "home",
+  );
   const [passcode] = usePasscode();
   const [lockWp, setLockWp] = useLockWallpaper();
   const [homeWp, setHomeWp] = useHomeWallpaper();
+  const [chatBg, setChatBg] = useChatBackground();
 
   const goHome = () => setScreen("home");
   const lock = () => {
@@ -57,13 +63,13 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                   onSave={onSaveConfig}
                   onBack={goHome}
                   onLock={lock}
-                  wallpapers={{ lockWp, homeWp, setLockWp, setHomeWp }}
+                  wallpapers={{ lockWp, homeWp, chatBg, setLockWp, setHomeWp, setChatBg }}
                 />
               )}
               {screen === "chat" && (
                 <ChatApp config={config} onBack={goHome} onOpenSettings={() => setScreen("settings")} />
               )}
-              {screen === "rolechat" && <RoleChatApp config={config} onBack={goHome} />}
+              {screen === "rolechat" && <RoleChatApp config={config} background={chatBg} onBack={goHome} />}
               {screen === "worldbook" && <WorldBookApp onBack={goHome} />}
               {screen === "sticker" && <StickerApp onBack={goHome} />}
               {screen === "album" && <AlbumApp onBack={goHome} />}

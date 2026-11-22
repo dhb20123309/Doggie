@@ -92,10 +92,8 @@ export function ChatApp({ config, onBack, onOpenSettings }: Props) {
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[82%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-[12.5px] leading-relaxed shadow-sm ${
-                m.role === "user"
-                  ? "rounded-br-md bg-primary text-primary-foreground"
-                  : "rounded-bl-md bg-secondary text-secondary-foreground"
+              className={`bubble-cream max-w-[82%] whitespace-pre-wrap break-words rounded-3xl px-3.5 py-2 text-[12.5px] leading-relaxed ${
+                m.role === "user" ? "bubble-cream-me rounded-br-lg" : "rounded-bl-lg"
               }`}
             >
               {m.content}
@@ -104,11 +102,11 @@ export function ChatApp({ config, onBack, onOpenSettings }: Props) {
         ))}
         {pending && (
           <div className="flex justify-start">
-            <div className="flex items-center gap-1 rounded-2xl rounded-bl-md bg-secondary px-3 py-2.5">
+            <div className="bubble-cream flex items-center gap-1.5 rounded-3xl rounded-bl-lg px-3.5 py-2.5">
               {[0, 1, 2].map((i) => (
                 <span
                   key={i}
-                  className="typing-dot size-1.5 rounded-full bg-muted-foreground"
+                  className="typing-dot size-1.5 rounded-full bg-primary/60"
                   style={{ animationDelay: `${i * 0.15}s` }}
                 />
               ))}
@@ -117,14 +115,14 @@ export function ChatApp({ config, onBack, onOpenSettings }: Props) {
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border px-3 py-2.5">
+      <div className="glass-nav flex items-center gap-2 border-t border-white/50 px-3 py-2.5">
         <Input
           placeholder={ready ? "说点什么…" : "请先在设置中接入接口"}
           value={input}
           disabled={!ready}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          className="h-9 rounded-full bg-muted/50 text-[13px]"
+          className="h-9 rounded-full glass-input text-[13px]"
         />
         <Button
           size="icon"

@@ -40,8 +40,19 @@ import { useCharacter, useChatLog, useSendPrefs, useWorldBooks, useStickers, cle
 
 interface Props {
   config: AiConfig;
+  /** 聊天背景（用户上传替换，默认内置奶油图） */
+  background?: string;
   onBack: () => void;
 }
+
+/** 消息时间戳：当天只显示 HH:MM，跨日补上日期 */
+const fmtTime = (at: number) => {
+  const d = new Date(at);
+  const now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const sameDay = d.toDateString() === now.toDateString();
+  return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+};
 
 const EMOJIS = ["🌙", "🦊", "🐱", "🤖", "🌸", "⚡", "🫧", "🍵", "🎧", "🪐"];
 /** 自动回复倒计时：停止输入后等待时长 */
@@ -49,7 +60,7 @@ const AUTO_DELAY_MS = 2000;
 
 type View = "chat" | "edit" | "prefs" | "worldbooks" | "stickers";
 
-export function RoleChatApp({ config, onBack }: Props) {
+export function RoleChatApp({ config, background, onBack }: Props) {
   const [character, setCharacter] = useCharacter();
   const [log, setLog] = useChatLog();
   const [prefs, setPrefs] = useSendPrefs();
@@ -216,13 +227,16 @@ export function RoleChatApp({ config, onBack }: Props) {
   const showGenerate = !prefs.sendReplacesGenerate;
 
   return (
-    <div className="flex h-full flex-col bg-gradient-to-b from-[oklch(0.95_0.015_265)] to-[oklch(0.91_0.025_275)]">
+    <div
+      className="flex h-full flex-col bg-[linear-gradient(160deg,oklch(0.96_0.03_92),oklch(0.92_0.045_78))] bg-cover bg-center"
+      style={background ? { backgroundImage: `url(${background})` } : undefined}
+    >
       <div className="glass-nav flex items-center justify-between px-2 py-2">
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>
         <div className="flex items-center gap-2">
-          <Avatar character={character} size={28} />
+          <Avatar character={character} size={28} status={pending ? "typing" : ready ? "online" : "offline"} />
           <div className="text-center leading-tight">
             <span className="block text-sm font-semibold">{character.name || "未命名角色"}</span>
             <span className={`block text-[10px] ${pending ? "text-primary" : ready ? "text-success" : "text-warning"}`}>
@@ -266,6 +280,7 @@ export function RoleChatApp({ config, onBack }: Props) {
           entry.role === "user" ? (
             <div key={entry.id} className="flex flex-col items-end gap-1">
               <Bubble side="right">{entry.content}</Bubble>
+              <span className="msg-time pr-1">{fmtTime(entry.at)}</span>
               {entry.failed && !pending && (
                 <Button
                   size="sm"
@@ -279,23 +294,23 @@ export function RoleChatApp({ config, onBack }: Props) {
               )}
             </div>
           ) : (
-            <AssistantRow key={entry.id} entry={entry} character={character} stickerLib={stickers} />
+            <AssistantRow key={entry.id} entry={entry} character={character} stickerLib={stickers} online={ready} />
           )
         )}
         {pending && (
           <div className="flex items-end gap-2">
-            <Avatar character={character} size={26} />
-            <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md bg-secondary px-3 py-2.5">
+            <Avatar character={character} size={26} status="typing" />
+            <div className="bubble-cream flex items-center gap-1.5 rounded-3xl px-3.5 py-2.5">
               {[0, 1, 2].map((i) => (
-                <span key={i} className="typing-dot size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: `${i * 0.15}s` }} />
+                <span key={i} className="typing-dot size-1.5 rounded-full bg-primary/60" style={{ animationDelay: `${i * 0.15}s` }} />
               ))}
-              <span className="ml-1 text-[10px] text-muted-foreground">正在回复…</span>
+              <span className="ml-1 text-[10px] text-muted-foreground">正在输入中…</span>
             </div>
           </div>
         )}
       </div>
 
-      <div className="border-t border-white/60 px-3 py-2.5 backdrop-blur-xl">
+      <div className="glass-nav border-t border-white/50 px-3 py-2.5">
         {showGenerate && (hasDraft || awaitingReply) && !pending && ready && (
           <Button
             size="sm"
@@ -339,34 +354,36 @@ export function RoleChatApp({ config, onBack }: Props) {
 }
 
 /** 助手消息：按换行拆气泡，[表情:名字] 换成图片气泡 */
-function AssistantRow({ entry, character, stickerLib }: { entry: ChatEntry; character: Character; stickerLib: Sticker[] }) {
+function AssistantRow({ entry, character, stickerLib, online }: { entry: ChatEntry; character: Character; stickerLib: Sticker[]; online: boolean }) {
   const lines = splitBubbles(entry.content);
   const parts = lines.flatMap((line) => parseReplyToMessages(line, stickerLib));
   return (
-    <div className="flex items-start gap-2">
-      <Avatar character={character} size={26} />
-      <div className="flex max-w-[82%] flex-col items-start gap-1.5">
-        {parts.map((p, i) => (
-          <div key={i} data-reveal-delay={String(i * 60)} className="reveal reveal-up">
-            {p.type === "sticker" ? (
-              <img src={p.sticker.url} alt={p.sticker.name} className="w-24 rounded-xl shadow-lg shadow-black/15" />
-            ) : (
-              <Bubble side="left">{p.content}</Bubble>
-            )}
-          </div>
-        ))}
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2">
+        <Avatar character={character} size={26} status={online ? "online" : "offline"} />
+        <div className="flex max-w-[82%] flex-col items-start gap-1.5">
+          {parts.map((p, i) => (
+            <div key={i} data-reveal-delay={String(i * 60)} className="reveal reveal-up">
+              {p.type === "sticker" ? (
+                <img src={p.sticker.url} alt={p.sticker.name} className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
+              ) : (
+                <Bubble side="left">{p.content}</Bubble>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
+      <span className="msg-time pl-10">{fmtTime(entry.at)}</span>
     </div>
   );
 }
 
+/** 奶油浅透毛玻璃大圆角气泡：柔和淡阴影、无粗边框；我方比 TA 深一档暖黄区分方向 */
 function Bubble({ side, children }: { side: "left" | "right"; children: React.ReactNode }) {
   return (
     <div
-      className={`whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-[12.5px] leading-relaxed shadow-sm ${
-        side === "right"
-          ? "rounded-br-md bg-primary text-primary-foreground"
-          : "rounded-bl-md bg-secondary text-secondary-foreground"
+      className={`bubble-cream whitespace-pre-wrap break-words rounded-3xl px-3.5 py-2 text-[12.5px] leading-relaxed ${
+        side === "right" ? "bubble-cream-me rounded-br-lg" : "rounded-bl-lg"
       }`}
     >
       {children}
@@ -374,14 +391,27 @@ function Bubble({ side, children }: { side: "left" | "right"; children: React.Re
   );
 }
 
-function Avatar({ character, size }: { character: Character; size: number }) {
+type DotStatus = "online" | "typing" | "offline";
+
+function Avatar({ character, size, status }: { character: Character; size: number; status?: DotStatus }) {
   const isImg = character.avatar.startsWith("data:") || character.avatar.startsWith("http");
   return (
-    <span
-      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-wallpaper-from to-wallpaper-to ring-1 ring-white/30"
-      style={{ width: size, height: size, fontSize: size * 0.55 }}
-    >
-      {isImg ? <img src={character.avatar} alt="角色头像" className="size-full object-cover" /> : character.avatar || "👤"}
+    <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
+      <span
+        className="flex size-full items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-wallpaper-from to-wallpaper-to ring-1 ring-white/40"
+        style={{ fontSize: size * 0.55 }}
+      >
+        {isImg ? <img src={character.avatar} alt="角色头像" className="size-full object-cover" /> : character.avatar || "👤"}
+      </span>
+      {status && (
+        <span
+          className={`absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-white/80 ${
+            status === "online" ? "bg-success" : status === "typing" ? "bg-warning pulse-dot" : "bg-muted-foreground/50"
+          }`}
+          style={{ width: Math.max(7, size * 0.28), height: Math.max(7, size * 0.28) }}
+          aria-label={status === "online" ? "在线" : status === "typing" ? "正在输入" : "离线"}
+        />
+      )}
     </span>
   );
 }

@@ -10,13 +10,13 @@ interface Props {
 }
 
 const APPS: { id: ScreenId; name: string; icon: typeof Settings; tint: string }[] = [
-  { id: "settings", name: "设置", icon: Settings, tint: "from-slate-400/80 to-slate-600/80" },
-  { id: "rolechat", name: "短信", icon: MessageSquare, tint: "from-green-400/80 to-emerald-600/80" },
-  { id: "worldbook", name: "世界书", icon: BookText, tint: "from-amber-400/80 to-orange-600/80" },
-  { id: "album", name: "相册", icon: Images, tint: "from-sky-400/80 to-blue-600/80" },
-  { id: "camera", name: "相机", icon: Camera, tint: "from-zinc-500/80 to-zinc-700/80" },
-  { id: "memory", name: "记忆中枢", icon: BrainCircuit, tint: "from-violet-400/80 to-purple-600/80" },
-  { id: "music", name: "音乐", icon: Music, tint: "from-rose-400/80 to-pink-600/80" },
+  { id: "settings", name: "设置", icon: Settings, tint: "from-stone-500 to-stone-700" },
+  { id: "rolechat", name: "短信", icon: MessageSquare, tint: "from-lime-500 to-green-600" },
+  { id: "worldbook", name: "世界书", icon: BookText, tint: "from-amber-500 to-orange-600" },
+  { id: "album", name: "相册", icon: Images, tint: "from-yellow-500 to-amber-600" },
+  { id: "camera", name: "相机", icon: Camera, tint: "from-orange-400 to-amber-600" },
+  { id: "memory", name: "记忆中枢", icon: BrainCircuit, tint: "from-rose-400 to-orange-500" },
+  { id: "music", name: "音乐", icon: Music, tint: "from-pink-500 to-rose-600" },
 ];
 
 const DOCK: ScreenId[] = ["settings", "rolechat", "worldbook", "music"];
@@ -30,14 +30,14 @@ export function HomeScreen({ config, wallpaper, onOpen }: Props) {
     <div className="relative flex h-full flex-col px-4 pb-3" style={{ backgroundImage: `url(${wallpaper})`, backgroundSize: "cover", backgroundPosition: "center" }}>
       {/* 时间日期小组件 */}
       <div className="desk-in glass mt-9 rounded-[22px] px-4 py-3">
-        <p className="font-display text-4xl font-semibold tracking-tight text-white tabular-nums drop-shadow-sm">
+        <p className="font-display text-4xl font-semibold tracking-tight text-[oklch(0.36_0.045_80)] tabular-nums">
           {String(now.getHours()).padStart(2, "0")}:{String(now.getMinutes()).padStart(2, "0")}
         </p>
-        <div className="mt-0.5 flex items-center justify-between text-[11px] text-white/85">
+        <div className="mt-0.5 flex items-center justify-between text-[11px] text-[oklch(0.42_0.04_80)]">
           <span>
             {now.getMonth() + 1} 月 {now.getDate()} 日 · {week}
           </span>
-          <span className={`rounded-full px-2 py-0.5 font-medium ${ready ? "bg-white/30 text-white" : "bg-black/15 text-white/85"}`}>
+          <span className={`rounded-full px-2 py-0.5 font-medium ${ready ? "bg-primary/15 text-primary" : "bg-black/10 text-muted-foreground"}`}>
             {ready ? `已接入 ${config.model}` : "未接入 API"}
           </span>
         </div>
@@ -45,16 +45,16 @@ export function HomeScreen({ config, wallpaper, onOpen }: Props) {
 
       {/* 音乐小组件 */}
       <button type="button" onClick={() => onOpen("music")} className="desk-in glass mt-3 flex items-center gap-3 rounded-[22px] px-3.5 py-2.5 text-left" data-reveal-delay="80">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-purple-500 shadow-inner">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-pink-400 to-rose-500 shadow-inner">
           <Music className="size-5 text-white/95" strokeWidth={1.8} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12px] font-semibold text-white">晨间轻音乐</span>
-          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/25">
-            <span className="block h-full w-1/3 rounded-full bg-white/85" />
+          <span className="block truncate text-[12px] font-semibold text-[oklch(0.36_0.045_80)]">晨间轻音乐</span>
+          <span className="mt-1 block h-1 overflow-hidden rounded-full bg-primary/15">
+            <span className="block h-full w-1/3 rounded-full bg-primary/70" />
           </span>
         </span>
-        <span className="text-[10px] text-white/70">本地曲库</span>
+        <span className="text-[10px] text-muted-foreground">本地曲库</span>
       </button>
 
       {/* App 网格 */}
@@ -69,12 +69,12 @@ export function HomeScreen({ config, wallpaper, onOpen }: Props) {
               className="group flex flex-col items-center gap-1"
             >
               <span
-                className={`jelly-icon flex size-[52px] items-center justify-center rounded-[16px] bg-gradient-to-br ${app.tint} app-icon-glass transition-transform duration-200 group-hover:-translate-y-0.5`}
+                className={`jelly-icon flex size-[52px] items-center justify-center rounded-[16px] bg-gradient-to-br ${app.tint} shadow-[0_8px_18px_-8px_oklch(0.45_0.06_75/0.5),inset_0_1px_0_oklch(1_0_0/0.35)] transition-transform duration-200 group-hover:-translate-y-0.5`}
                 style={{ animationDelay: `${i * 40}ms` }}
               >
                 <Icon className="size-6 text-white" strokeWidth={1.8} />
               </span>
-              <span className="max-w-full truncate text-[10px] font-medium text-white drop-shadow">{app.name}</span>
+              <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{app.name}</span>
             </button>
           );
         })}

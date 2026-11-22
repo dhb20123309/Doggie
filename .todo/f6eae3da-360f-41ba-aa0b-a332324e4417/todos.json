@@ -1,37 +1,55 @@
 [
   {
-    "content": "PhoneShell/index 装配重构（去介绍页）",
+    "content": "styles.css 暖淡黄 token + 奶油 glass + 气泡/时间戳类",
+    "id": "1",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "生成默认聊天背景图",
+    "id": "2",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "lock-store.ts 新增 useChatBackground",
+    "id": "3",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "SettingsApp 壁纸区加聊天背景选择器",
     "id": "4",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "SettingsApp 换肤+改密码+背景上传",
+    "content": "PhoneShell 传递 chatBg",
+    "id": "5",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "RoleChatApp 气泡/头像圆点/输入中/时间戳/背景",
+    "id": "6",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "HomeScreen 组件文字与图标暖色适配",
     "id": "7",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "RoleChatApp 短信换肤（逻辑不动）",
+    "content": "ChatApp 旧版气泡同步",
     "id": "8",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "相册/相机/记忆中枢/音乐壳应用",
-    "id": "9",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "WorldBook/ChatApp 换肤适配",
-    "id": "10",
-    "status": "completed",
-    "skills": []
-  },
-  {
     "content": "构建+dev+截图验收",
-    "id": "11",
+    "id": "9",
     "status": "completed",
     "skills": []
   }

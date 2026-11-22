@@ -9,7 +9,7 @@ export function StatusBar({ dark = false }: { dark?: boolean }) {
   }, []);
   const hh = String(now.getHours()).padStart(2, "0");
   const mm = String(now.getMinutes()).padStart(2, "0");
-  const color = dark ? "text-white" : "text-foreground";
+  const color = dark ? "text-[oklch(0.3_0.02_80)] [text-shadow:0_1px_3px_oklch(1_0_0/0.7)]" : "text-foreground";
 
   return (
     <div className={`absolute left-0 right-0 top-0 z-40 flex items-center justify-between px-6 pt-2.5 pb-1 text-[11px] font-semibold tabular-nums ${color}`}>

@@ -3,50 +3,56 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* 外层舞台：柔和低饱和渐变衬托居中手机 */
-  --stage-from: oklch(0.93 0.02 250);
-  --stage-via: oklch(0.9 0.03 300);
-  --stage-to: oklch(0.86 0.025 210);
-  --glow: oklch(0.85 0.08 300 / 0.5);
+  /* 外层舞台：柔和低饱和暖渐变衬托居中手机 */
+  --stage-from: oklch(0.94 0.02 85);
+  --stage-via: oklch(0.91 0.035 75);
+  --stage-to: oklch(0.88 0.03 60);
+  --glow: oklch(0.9 0.07 80 / 0.5);
 
-  /* 机身：浅灰玻璃边 */
-  --frame: oklch(0.75 0.015 260);
-  --frame-edge: oklch(0.88 0.01 260);
-  --notch: oklch(0.15 0.01 270);
+  /* 机身：暖灰玻璃边 */
+  --frame: oklch(0.76 0.015 85);
+  --frame-edge: oklch(0.88 0.012 85);
+  --notch: oklch(0.16 0.01 80);
 
-  /* 屏幕内容（浅色毛玻璃 UI） */
-  --background: oklch(0.97 0.008 265);
-  --foreground: oklch(0.28 0.02 275);
-  --card: oklch(1 0 0 / 0.72);
-  --card-foreground: oklch(0.28 0.02 275);
-  --popover: oklch(0.99 0.005 270);
-  --popover-foreground: oklch(0.28 0.02 275);
-  --primary: oklch(0.58 0.14 275);
-  --primary-foreground: oklch(0.99 0.005 275);
-  --secondary: oklch(0.93 0.015 270);
-  --secondary-foreground: oklch(0.35 0.03 275);
-  --muted: oklch(0.94 0.01 268);
-  --muted-foreground: oklch(0.55 0.025 275);
-  --accent: oklch(0.92 0.03 280);
-  --accent-foreground: oklch(0.35 0.07 280);
+  /* 屏幕内容（暖淡黄毛玻璃 UI） */
+  --background: oklch(0.97 0.012 85);
+  --foreground: oklch(0.32 0.03 78);
+  --card: oklch(0.99 0.008 88 / 0.78);
+  --card-foreground: oklch(0.32 0.03 78);
+  --popover: oklch(0.99 0.01 88);
+  --popover-foreground: oklch(0.32 0.03 78);
+  --primary: oklch(0.62 0.12 78);
+  --primary-foreground: oklch(0.99 0.01 90);
+  --secondary: oklch(0.93 0.025 88);
+  --secondary-foreground: oklch(0.38 0.035 78);
+  --muted: oklch(0.94 0.018 86);
+  --muted-foreground: oklch(0.56 0.03 80);
+  --accent: oklch(0.92 0.04 82);
+  --accent-foreground: oklch(0.38 0.06 78);
   --destructive: oklch(0.58 0.2 25);
   --destructive-foreground: oklch(0.98 0.01 25);
   --success: oklch(0.65 0.15 155);
   --warning: oklch(0.72 0.14 75);
-  --border: oklch(1 0 0 / 0.55);
-  --input: oklch(0.9 0.01 270);
-  --ring: oklch(0.58 0.14 275);
+  --border: oklch(0.9 0.03 88 / 0.7);
+  --input: oklch(0.9 0.02 86);
+  --ring: oklch(0.62 0.12 78);
 
-  /* 毛玻璃层 */
-  --glass-bg: oklch(1 0 0 / 0.5);
-  --glass-strong: oklch(1 0 0 / 0.68);
+  /* 奶油毛玻璃层：半透明微黄油底 */
+  --glass-bg: oklch(0.985 0.018 90 / 0.55);
+  --glass-strong: oklch(0.98 0.022 90 / 0.72);
   --glass-border: oklch(1 0 0 / 0.6);
-  --glass-shadow: oklch(0.4 0.04 270 / 0.14);
+  --glass-shadow: oklch(0.5 0.06 75 / 0.14);
+
+  /* 聊天气泡：奶油浅透毛玻璃卡片 */
+  --bubble-ta: oklch(0.99 0.015 92 / 0.62);
+  --bubble-me: oklch(0.9 0.075 84 / 0.6);
+  --bubble-text: oklch(0.34 0.035 78);
+  --bubble-shadow: oklch(0.5 0.06 75 / 0.12);
 
   /* 默认壁纸（用户可上传替换） */
-  --wallpaper-from: oklch(0.88 0.06 300);
-  --wallpaper-via: oklch(0.82 0.07 250);
-  --wallpaper-to: oklch(0.78 0.06 200);
+  --wallpaper-from: oklch(0.92 0.06 95);
+  --wallpaper-via: oklch(0.88 0.07 80);
+  --wallpaper-to: oklch(0.85 0.06 65);
 
   --radius-sm: 0.5rem;
   --radius-md: 0.875rem;
@@ -58,20 +64,24 @@
 }
 
 .dark {
-  --background: oklch(0.22 0.015 275);
-  --foreground: oklch(0.95 0.01 275);
-  --card: oklch(0.28 0.015 275 / 0.7);
-  --card-foreground: oklch(0.95 0.01 275);
-  --primary: oklch(0.7 0.14 278);
-  --primary-foreground: oklch(0.16 0.03 280);
-  --secondary: oklch(0.32 0.015 275);
-  --secondary-foreground: oklch(0.94 0.01 275);
-  --muted: oklch(0.3 0.015 275);
-  --muted-foreground: oklch(0.7 0.02 275);
-  --border: oklch(1 0 0 / 0.18);
-  --glass-bg: oklch(0.3 0.02 275 / 0.45);
-  --glass-strong: oklch(0.25 0.02 275 / 0.6);
-  --glass-border: oklch(1 0 0 / 0.16);
+  --background: oklch(0.24 0.02 80);
+  --foreground: oklch(0.95 0.015 88);
+  --card: oklch(0.3 0.02 80 / 0.7);
+  --card-foreground: oklch(0.95 0.015 88);
+  --primary: oklch(0.74 0.12 82);
+  --primary-foreground: oklch(0.18 0.03 80);
+  --secondary: oklch(0.33 0.02 80);
+  --secondary-foreground: oklch(0.94 0.015 88);
+  --muted: oklch(0.31 0.02 80);
+  --muted-foreground: oklch(0.72 0.025 85);
+  --border: oklch(1 0 0 / 0.16);
+  --glass-bg: oklch(0.32 0.025 80 / 0.45);
+  --glass-strong: oklch(0.27 0.025 80 / 0.6);
+  --glass-border: oklch(1 0 0 / 0.14);
+  --bubble-ta: oklch(0.34 0.025 82 / 0.6);
+  --bubble-me: oklch(0.45 0.06 82 / 0.6);
+  --bubble-text: oklch(0.94 0.015 88);
+  --bubble-shadow: oklch(0.1 0.02 80 / 0.3);
 }
 
 @theme inline {
@@ -134,11 +144,11 @@ body {
 
 /* ===== 机身：柔和玻璃边框 + 大圆角 ===== */
 .phone-frame {
-  background: linear-gradient(150deg, var(--frame-edge), var(--frame) 45%, oklch(0.62 0.02 265));
+  background: linear-gradient(150deg, var(--frame-edge), var(--frame) 45%, oklch(0.63 0.02 82));
   box-shadow:
     0 0 0 1px oklch(1 0 0 / 0.5),
-    0 40px 90px -30px oklch(0.35 0.05 270 / 0.45),
-    0 12px 32px oklch(0.35 0.05 270 / 0.2),
+    0 40px 90px -30px oklch(0.45 0.06 75 / 0.4),
+    0 12px 32px oklch(0.45 0.06 75 / 0.18),
     inset 0 1px 0 oklch(1 0 0 / 0.7);
 }
 
@@ -155,54 +165,72 @@ body {
 /* ===== 壁纸：CSS 渐变或用户上传图（inline style 覆盖） ===== */
 .wallpaper {
   background:
-    radial-gradient(120% 70% at 25% 0%, oklch(0.96 0.04 320 / 0.75) 0%, transparent 55%),
-    radial-gradient(90% 60% at 85% 100%, oklch(0.9 0.06 210 / 0.6) 0%, transparent 55%),
+    radial-gradient(120% 70% at 25% 0%, oklch(0.97 0.05 95 / 0.75) 0%, transparent 55%),
+    radial-gradient(90% 60% at 85% 100%, oklch(0.9 0.08 65 / 0.6) 0%, transparent 55%),
     linear-gradient(160deg, var(--wallpaper-from), var(--wallpaper-via) 52%, var(--wallpaper-to));
   background-size: cover;
   background-position: center;
 }
 
-/* ===== 毛玻璃原子 ===== */
+/* ===== 奶油毛玻璃原子 ===== */
 .glass {
   background: var(--glass-bg);
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
   border: 1px solid var(--glass-border);
   box-shadow: 0 10px 30px -12px var(--glass-shadow), inset 0 1px 0 oklch(1 0 0 / 0.45);
 }
 .glass-strong {
   background: var(--glass-strong);
-  backdrop-filter: blur(26px) saturate(170%);
-  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  backdrop-filter: blur(26px) saturate(160%);
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
   border: 1px solid var(--glass-border);
   box-shadow: 0 14px 36px -14px var(--glass-shadow), inset 0 1px 0 oklch(1 0 0 / 0.5);
 }
 .glass-input {
-  background: oklch(1 0 0 / 0.45);
+  background: oklch(0.99 0.015 92 / 0.5);
   border: 1px solid oklch(1 0 0 / 0.55);
-  box-shadow: inset 0 1px 3px oklch(0.4 0.03 270 / 0.08);
+  box-shadow: inset 0 1px 3px oklch(0.5 0.05 75 / 0.08);
 }
 .glass-nav {
-  background: oklch(0.98 0.01 270 / 0.55);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: oklch(0.985 0.018 90 / 0.6);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
   border-bottom: 1px solid oklch(1 0 0 / 0.5);
+}
+
+/* 聊天气泡：大圆角奶油浅透毛玻璃卡片，柔和淡阴影、无粗边框 */
+.bubble-cream {
+  background: var(--bubble-ta);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  color: var(--bubble-text);
+  box-shadow: 0 4px 14px -6px var(--bubble-shadow);
+}
+.bubble-cream-me {
+  background: var(--bubble-me);
+}
+
+/* 消息时间戳：小号浅灰 */
+.msg-time {
+  font-size: 9.5px;
+  line-height: 1;
+  color: oklch(0.6 0.03 82 / 0.75);
+  letter-spacing: 0.02em;
 }
 
 /* 锁屏压暗层：整屏均匀加深，浅色壁纸上保证白字与玻璃键可读 */
 .lock-scrim {
-  background: rgba(30, 26, 52, 0.34);
+  background: rgba(42, 34, 20, 0.34);
 }
 
 /* 锁屏数字键：半透明白底，无 backdrop-filter（避免祖先动画期间被浏览器降级为模糊快照） */
 .key-soft {
   background: oklch(1 0 0 / 0.32);
   border: 1px solid oklch(1 0 0 / 0.45);
-  box-shadow: 0 4px 14px -6px oklch(0.35 0.05 270 / 0.3), inset 0 1px 0 oklch(1 0 0 / 0.5);
+  box-shadow: 0 4px 14px -6px oklch(0.4 0.05 75 / 0.3), inset 0 1px 0 oklch(1 0 0 / 0.5);
+  text-shadow: 0 1px 6px rgba(52, 40, 18, 0.55);
 }
-
-/* 锁屏数字键文字投影：浅色壁纸上保证可读 */
-.key-soft { text-shadow: 0 1px 6px rgba(40, 32, 70, 0.55); }
 
 /* 锁屏内容层：仅做 opacity 入场（transform 祖先会导致后代 backdrop-filter 降级模糊） */
 @keyframes lock-fade {
@@ -217,7 +245,7 @@ body {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid oklch(1 0 0 / 0.55);
-  box-shadow: 0 8px 20px -8px oklch(0.35 0.05 270 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.6);
+  box-shadow: 0 8px 20px -8px oklch(0.4 0.05 75 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.6);
 }
 
 /* ===== 动画 ===== */

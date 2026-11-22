@@ -16,7 +16,9 @@
 - `src/lib/photo-store.ts`：相册 usePhotos（复用 chat-store 的 usePersisted，key vp-phone:photos:v1），相机拍照与导入均写这里。
 - `src/components/LockScreen.tsx`：壁纸独立 absolute 层 + lock-scrim 遮罩 + 内容 relative z-10；数字键盘校验通过才触发 lock-unlock 上滑动画。
 - `src/components/ShellApps.tsx`：相册/相机/记忆中枢/音乐四个壳应用 + 共享 ShellNav（glass-nav 顶栏）；音乐为本地演示曲库不含真实音源。
-- `src/components/PhoneShell.tsx`：locked 状态入口，LockScreen → 桌面路由分发；SettingsApp 收 wallpapers setter 与 onLock。
+- `src/components/PhoneShell.tsx`：locked 状态入口，LockScreen → 桌面路由分发；SettingsApp 收 wallpapers setter 与 onLock；URL 参数 vpDesk/vpApp 仅供截图验收直达页面。
+- 聊天背景可上传替换：lock-store.useChatBackground（key vp-phone:chat-bg:v1，默认 CDN 奶油图）→ PhoneShell → SettingsApp 第三个 WallpaperPicker + RoleChatApp background prop。
+- 暖淡黄设计系统：styles.css token hue 75-92；气泡用 .bubble-cream/.bubble-me（大圆角奶油毛玻璃、无粗边框）；时间戳 .msg-time（读 ChatEntry.at 纯展示）；Avatar status 属性叠加在线/输入中/离线圆点。
 
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。

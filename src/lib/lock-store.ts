@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 const PWD_KEY = "vp-phone:lockpass:v1";
 const LOCK_WP_KEY = "vp-phone:lock-wallpaper:v1";
 const HOME_WP_KEY = "vp-phone:home-wallpaper:v1";
+const CHAT_BG_KEY = "vp-phone:chat-bg:v1";
 
 /** 初始固定密码 */
 export const DEFAULT_PASSCODE = "0517";
@@ -13,6 +14,8 @@ export const DEFAULT_LOCK_WALLPAPER =
   "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/锁屏壁纸.png?auth_key=6b7d924b2b56a07a1771b1ecca3a5b572e8092ca8b319c10bd24626ec17b9eb1";
 export const DEFAULT_HOME_WALLPAPER =
   "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/桌面壁纸.png?auth_key=4583818c344ecffea76a6d904bf6f3efaf12108567f007f6cb00aa28db0047c3";
+export const DEFAULT_CHAT_BACKGROUND =
+  "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/聊天背景默认.png?auth_key=3560dae87179a8fa854ef45b80c274eda187956799340604561e589e415635fb";
 
 function readStr(key: string, fallback: string): string {
   try {
@@ -63,4 +66,8 @@ export function useLockWallpaper(): [string, Setter<string>] {
 
 export function useHomeWallpaper(): [string, Setter<string>] {
   return usePersistedStr(HOME_WP_KEY, DEFAULT_HOME_WALLPAPER);
+}
+
+export function useChatBackground(): [string, Setter<string>] {
+  return usePersistedStr(CHAT_BG_KEY, DEFAULT_CHAT_BACKGROUND);
 }

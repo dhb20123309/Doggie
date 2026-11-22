@@ -63,6 +63,7 @@ import {
 import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
 import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
+import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 
 interface Props {
@@ -187,11 +188,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           buildWorldSection(activeBooks)
         );
       }
+      // 真人打字习惯协议（世界书《你是真人在打字不是人机呀》改编）：仅私聊链路注入，剧情模式保持叙事文体。
+      // 条数轮换锚点：模型看不见自己的"发送行为"，把最近 5 轮各自几条显式喂回去才能做到相邻两轮不同
+      const recentCounts = readLastEntries(ch.id, 30)
+        .filter((e) => e.role === "assistant" && !e.failed && !e.story)
+        .slice(-5)
+        .map((e) => countReplyLines(e.content));
       return (
         `你现在扮演以下角色，请始终以该身份回复，不要跳出角色。\n名字：${
           ch.name || "无名角色"
         }\n\n${ch.persona || "无额外设定"}\n` +
         CHAT_LIVENESS +
+        HUMAN_TYPING_PROTOCOL +
+        buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         buildWorldSection(activeBooks) +
         "\n\n" +
@@ -239,7 +248,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       return out;
     };
     console.log(
-      `[reply] start char=${ch.id} msg=${userMsgId} story=${storyMode ? "on" : "off"} → pending(正在输入中) sysLen=${sysPrompt.length}`
+      `[reply] start char=${ch.id} msg=${userMsgId} story=${storyMode ? "on" : "off"} typing=${storyMode ? "narrative" : "human-protocol"} → pending(正在输入中) sysLen=${sysPrompt.length}`
     );
     setPending(true);
     scrollBottom();
@@ -478,7 +487,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         PROACTIVE_PROTOCOL.replace("{{char}}", ch.name || "TA") +
         "\n\n" +
         pickTopicSeeds() +
-        "\n请像日常手机聊天一样，主动发来 1-2 条你想说的话：只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
+        "\n请像日常手机聊天一样主动找对方说话（真人打字习惯协议照常执行）：每条最多 10 个字，超过就拆行发；条数参考上面【你的发送节奏】换着来，别总是同一个条数；只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
       const history: { role: string; content: string }[] = [
         { role: "system", content: sys },
         ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),

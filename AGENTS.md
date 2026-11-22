@@ -6,6 +6,7 @@
 ## 架构
 - `src/lib/types.ts`：共享契约（AiConfig 含 temperature / TestResult / ScreenId：home|settings|chat|rolechat|worldbook|sticker|diary|phonepeek|bond|preference|theater|profile / normalizeBaseUrl）。
 - `src/lib/ai-api.ts`：OpenAI 兼容对接层。getCandidates 候选地址兜底（不带 /vN 时自动补 /v1 再试一次，404 才换候选）；fetchModelList 拉模型列表；testConnection/chatCompletion 均走候选；错误按状态码翻译成人话。
+- `src/lib/human-typing.ts`：世界书《你是真人在打字不是人机呀》by十愈 改编接入（用户 docx 全文提取后按"理解感觉不抄示例"元规则提炼）——HUMAN_TYPING_PROTOCOL 十条硬性规则（单条≤10字必须拆行、1~3条条数轮换1条优先相邻两轮不同、单字/单标点即完整回复、松散感/选择性忽略/错字漏字/词内拆分/倒装、情绪影响打字速度、接梗玩梗、表情不计条数用[表情:名字]、禁用层=安慰与重要信息时归零、禁解释道歉）拼入 buildSys 私聊分支；buildCountHint+countReplyLines 把最近5轮各自回复条数显式喂回 system（模型看不见自己的发送行为，需【你的发送节奏】锚点才能轮换）；剧情模式不注入（保持叙事文体），fireOne 结尾同步改为按协议发（≤10字/参考节奏轮换）。日志 [reply] start typing=human-protocol/narrative。
 - `src/lib/proactive-protocol.ts`：主动消息活人感协议（改编自用户提供的 by小K Avail 文档，话题库按原文全量收录不删减）——PROACTIVE_PROTOCOL 拼入 fireOne 的 system（具体起点+连接点+落脚点三段式、话题型70%/报备型30%、禁"在干嘛/醒了没/想你了"等句式）；TOPIC_LIBRARY 十大类话题种子 + pickTopicSeeds() 每次随机取两类作引子、明令禁止照抄。PROACTIVE_LINES 兜底池同步改为带细节句式。
 - `src/lib/worldbook.ts`：世界书（global/local 过滤 + 拼 system prompt）与表情包（buildStickerHint 名单约束 + parseReplyToMessages 解析 [表情:名字]，未知名字退回文字、结尾未闭合标记丢弃）。
 - `src/lib/config-store.ts`：API 配置存 localStorage（vp-phone:aiconfig:v1）；代码中禁止出现真实密钥。

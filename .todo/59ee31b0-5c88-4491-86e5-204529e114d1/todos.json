@@ -1,30 +1,30 @@
 [
   {
-    "content": "设计系统 styles.css（手机主题 token）",
+    "content": "角色契约 + 角色/聊天记录持久化存储",
     "id": "1",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "共享契约与 API 层（类型、存储、连接测试）",
+    "content": "角色设定页（名字/头像/人设）",
     "id": "2",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "设置页（接口地址/APIKey/模型名 + 连接测试）",
+    "content": "单角色聊天页（气泡拆分/正在回复/重试/连续对话）",
     "id": "3",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "虚拟手机屏幕与主首页装配",
+    "content": "桌面与机身装配新入口",
     "id": "4",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "构建验证并运行预览",
+    "content": "构建+预览+实际功能验证",
     "id": "5",
     "status": "completed",
     "skills": []

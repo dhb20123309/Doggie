@@ -11,7 +11,7 @@ export interface AiConfig {
 
 export const EMPTY_CONFIG: AiConfig = { baseUrl: "", apiKey: "", model: "" };
 
-export type ScreenId = "home" | "settings" | "chat";
+export type ScreenId = "home" | "settings" | "chat" | "rolechat";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";
 

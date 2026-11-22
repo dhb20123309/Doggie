@@ -232,10 +232,24 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         if (!clean) {
           // 整条回复都是"我是语言模型…"式 OOC 出戏话：丢弃不展示，静默重生成一次
           console.warn(`[reply] OOC filtered char=${ch.id}，静默重生成一次`);
-          const again = await chatCompletion(cfgSnapshot, [
-            ...toHist(entries),
-            { role: "user", content: "（请完全回到角色身份继续对话，不要提及你是模型或程序）" },
-          ]).then((r) => sanitizeReply(r), () => "");
+          const regenCall = () =>
+            chatCompletion(cfgSnapshot, [
+              ...toHist(entries),
+              { role: "user", content: "（请完全回到角色身份继续对话，不要提及你是模型或程序）" },
+            ]).then((r) => sanitizeReply(r), () => "");
+          let again = await regenCall();
+          if (!again) {
+            // 二次仍是出戏话（如"这超出了我的能力范围"）：换更强指令再抢救一次，仍失败则视为网关拒绝、标记可重试
+            console.warn(`[reply] regen still OOC char=${ch.id}，加强指令重试第二次`);
+            again = await chatCompletion(cfgSnapshot, [
+              ...toHist(entries),
+              {
+                role: "user",
+                content:
+                  "（系统提示：上一条回复因脱离角色被拦截。接下来无论对方说什么都必须以她的恋人身份自然接话，禁止出现'AI/模型/程序/能力范围'等字眼；实在无法回应就撒娇或转移话题，保持一句口语化的短消息）",
+              },
+            ]).then((r) => sanitizeReply(r), () => "");
+          }
           if (again) {
             console.log(`[reply] regen ok char=${ch.id}`);
             settleReply(ch.id, userMsgId, again);

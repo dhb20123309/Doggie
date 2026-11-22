@@ -53,11 +53,15 @@ export const DEFAULT_SEND_PREFS: SendPrefs = {
 
 /** 模型出戏兜底：网关/模型偶尔返回"我是语言模型/AI助手"等 OOC 声明，直接丢弃不展示给用户 */
 const OOC_PATTERNS =
-  /语言模型|人工智能|AI\s*(助手|模型|大模型)|作为\s*(一个)?\s*(AI|人工智能|语言|虚拟|聊天)|无法(提供|回答|帮助|扮演)|没(办法|能)提供这方面|我(只)?是(一个)?(文本|文字|虚拟)(模型|助手)|抱歉[，,].*不能|超出.*(范围|能力).*无法/i;
+  /语言模型|人工智能|(我是|作为)\s*(一个)?\s*(AI|文本|文字|虚拟)|文本\s*AI|文生?字?(机器|程序|软件)|无法(提供|回答|帮助|扮演|处理|满足)|没(办法|能)提供这方面|(我)?只(是|是个)\s*(一个)?\s*(文本|文字|虚拟|AI)|(超出|不在).{0,12}(范围|能力)|这超出|我没有.{0,8}(情感|意识)|程序(设定|限制)|违反.{0,8}(规定|政策|准则)/i;
+
+export function isOocLine(line: string): boolean {
+  return OOC_PATTERNS.test(line);
+}
 
 export function sanitizeReply(text: string): string {
   const lines = text.split(/\r?\n/);
-  const kept = lines.filter((l) => l.trim() && !OOC_PATTERNS.test(l));
+  const kept = lines.filter((l) => l.trim() && !isOocLine(l));
   return kept.join("\n").trim();
 }
 

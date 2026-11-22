@@ -383,7 +383,7 @@ export function OpenerCard({ profile, onCollapse }: {
   return (
     <div className="mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-white shadow-sm">
       <ProfileBody profile={profile} />
-      <div className="sticky bottom-0 flex justify-center rounded-b-2xl px-3 pb-2 pt-1">
+      <div className="flex justify-center px-3 pb-2 pt-1">
         <button
           type="button"
           onClick={onCollapse}

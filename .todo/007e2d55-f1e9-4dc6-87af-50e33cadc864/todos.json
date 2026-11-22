@@ -1,0 +1,20 @@
+[
+  {
+    "id": "1",
+    "status": "completed",
+    "content": "character-profile.ts：tags字段+预置档案改造（标题行/×分隔）",
+    "skills": []
+  },
+  {
+    "id": "2",
+    "status": "completed",
+    "content": "ProfileSheet.tsx：档案UI复刻酒馆截图（居中标题+胶囊标签+图文并置+竖线子标题）",
+    "skills": []
+  },
+  {
+    "id": "3",
+    "status": "completed",
+    "content": "styles.css 装饰 token + build/dev 双门禁 + 截图验收 + AGENTS.md",
+    "skills": []
+  }
+]

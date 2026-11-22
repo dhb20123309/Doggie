@@ -163,7 +163,16 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   }, []);
   const [books, setBooks] = useWorldBooks();
   const [stickers, setStickers] = useStickers();
-  const [view, setView] = useState<View>("list");
+  const [view, setView] = useState<View>(() => {
+    // 截图验收直达指定会话：?vpApp=rolechat&vpChar=<charId>（activeId 在 effect 里校正，见下）
+    try {
+      const cid = new URLSearchParams(window.location.search).get("vpChar");
+      if (cid) return "chat";
+    } catch {
+      /* ignore */
+    }
+    return "list";
+  });
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState<string | null>(null);
@@ -212,17 +221,104 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     setToolboxOpen(false);
     setProfileMode("none");
     setOpenerExpanded(false);
+    // 进会话默认展开完整档案卡（用户主动收起只作用于本次停留）
     setOpenerCollapsed(false);
     setProfileImportOpen(false);
+    console.log(`[profile] enter chat char=${active?.id} opener default expanded`);
   }
 
-  /** 消息流滚动：开场白展开期间向下滚动即收起为白条（仅本次进会话生效一次） */
+  // 兜底：预置角色存储档案缺 opener（旧版数据）时现取预置解析结果，保证进会话默认展开档案卡
+  const effectiveProfile: CharacterProfile | null =
+    profile && !profile.opener && active?.id.startsWith("zhou-") ? presetProfileFor(active.id) ?? profile : profile;
+
+  /** 开场白完整档案卡是否展示：有档案且未清空记录、非工具箱内联展开态 */
+  const openerShown = !!(active && effectiveProfile?.opener && !chatCleared[active.id] && !openerExpanded);
+
+  // 诊断日志：确认渲染分支与收起状态（排查"进会话看不到默认开场白 / 无法下滑只能收起"）
+  console.log(`[profile] render char=${active?.id} openerShown=${openerShown} collapsed=${openerCollapsed} cleared=${!!(active && chatCleared[active.id])} expanded=${openerExpanded}`);
+
+  // 自愈：把缺 opener / 无 hero 分节的旧版预置存储档案刷成最新解析结果（用户自导档案不动）
+  useEffect(() => {
+    if (!profiles["zhou-chenyan"] && !profiles["zhou-fengyan"]) return;
+    setProfiles((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of ["zhou-chenyan", "zhou-fengyan"]) {
+        const old = next[id];
+        if (!old || (old.opener && old.sections.some((s) => s.key === "hero"))) continue;
+        const fresh = presetProfileFor(id);
+        if (fresh) {
+          next[id] = fresh;
+          changed = true;
+        }
+      }
+      if (changed) console.log("[profile] heal stale preset profiles → 补齐 opener/hero 分节");
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 消息流滚动：开场白卡随消息流整体下滑浏览；展开期间一旦触底（已看完）自动收起为白条 */
   const handleListScroll = (e: UIEvent<HTMLDivElement>) => {
-    if (!openerCollapsed && e.currentTarget.scrollTop > 48) {
+    if (!openerShown || openerCollapsed) return;
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
       setOpenerCollapsed(true);
-      console.log(`[profile] opener auto-collapsed char=${active?.id} on scroll`);
+      console.log(`[profile] opener auto-collapsed char=${active?.id} on scroll-to-bottom`);
     }
   };
+
+  // bugfix：内容不足一屏时不会触发滚动事件，旧逻辑会在 1.5s 后强制收起档案卡——这正是"无法下滑只能收起"的根源。
+  // 新策略：不足一屏保持展开（本来就无需下滑）；超高内容由 handleListScroll 触底自动收起。
+  useEffect(() => {
+    if (!openerShown || openerCollapsed) return;
+    const t = setTimeout(() => {
+      const el = listRef.current;
+      console.log(`[profile] fit-check char=${active?.id} scrollH=${el?.scrollHeight} clientH=${el?.clientHeight} → ${el && el.scrollHeight > el.clientHeight + 8 ? "可下滑浏览" : "不足一屏，保持展开"}`);
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openerShown, active?.id]);
+
+  // bugfix：chatCleared 残留会永久隐藏开场白（旧版误把"清空记录"标记持久化）。
+  // 只要该角色有可用开场白，进会话即清除残留标记，恢复默认展开；用户真正清空后重发消息同样走此路径恢复。
+  useEffect(() => {
+    if (!active) return;
+    if (!chatCleared[active.id]) return;
+    if (effectiveProfile?.opener) {
+      setChatCleared((prev) => ({ ...prev, [active.id]: false }));
+      console.log(`[profile] heal stale chatCleared char=${active.id} log=${log.length} → 恢复开场白默认展开`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, !!effectiveProfile?.opener]);
+
+  // 截图验收直达会话校正：vpChar 优先；否则若进 chat 但无活动角色，落到第一个角色（修复空 activeId 导致开场白不展示）
+  const vpCharChecked = useRef(false);
+  useEffect(() => {
+    if (view !== "chat" || characters.length === 0) return;
+    let cid: string | null = null;
+    try {
+      cid = new URLSearchParams(window.location.search).get("vpChar");
+    } catch {
+      /* ignore */
+    }
+    if (cid && activeId !== cid) {
+      setActiveId(cid);
+      console.log(`[profile] vpChar corrected activeId=${cid}`);
+    } else if (!cid && !characters.some((c) => c.id === activeId)) {
+      setActiveId(characters[0].id);
+      console.log(`[profile] fallback activeId=${characters[0].id} (was empty/invalid)`);
+    }
+    vpCharChecked.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, characters.length, activeId]);
+
+  // 诊断：进入会话视图即打印关键状态（排查"哥哥会话看不到默认开场白"）
+  useEffect(() => {
+    if (view !== "chat") return;
+    console.log(`[profile] view=chat char=${active?.id} profileOpenerLen=${profile?.opener.length ?? -1} effOpenerLen=${effectiveProfile?.opener.length ?? -1} cleared=${!!(active && chatCleared[active.id])} shown=${openerShown} collapsed=${openerCollapsed}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, active?.id, openerShown, openerCollapsed]);
 
   /** 开局引子一键加载到互动剧情模式：作为首条剧情内容写入会话（记忆互通、完整保留），并开启该角色 storyMode */
   const loadIntroToStory = () => {
@@ -889,20 +985,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       </div>
 
       {/* 前情提要：一句话小灰框，不展开完整设定 */}
-      {recapLine && (
+      {recapLine && !openerShown && (
         <div className="fade-up mx-3 mt-2 rounded-xl bg-black/[0.06] px-3 py-1.5 text-[10.5px] leading-relaxed text-muted-foreground backdrop-blur-sm">
           {recapLine}
         </div>
       )}
 
-      {/* 开场白：进入会话默认已展开（完整档案卡，下滑可收起）；清空记录后消失不再自动弹出 */}
-      {profile?.opener && !chatCleared[active.id] && !openerExpanded && !openerCollapsed && (
-        <div className="px-3 pt-2">
-          <OpenerCard profile={profile} onCollapse={() => setOpenerCollapsed(true)} />
-        </div>
-      )}
-
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3" onScroll={handleListScroll}>
+        {/* 开场白：进入会话默认已展开（完整档案卡，随消息流整体下滑浏览、触底自动收起）；清空记录后消失不再自动弹出 */}
+        {openerShown && !openerCollapsed && (
+          <OpenerCard profile={effectiveProfile!} onCollapse={() => setOpenerCollapsed(true)} />
+        )}
         {/* 工具箱→角色开场白：在聊天流内一次性完整展开档案（禁止局部折叠/分步加载），底部固定一键收起 */}
         {openerExpanded && profile && (
           <InlineProfileCard
@@ -915,9 +1008,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           />
         )}
         {/* 折叠后的开场白条：位于消息流顶部，点击打开侧边抽屉 */}
-        {profile?.opener && !chatCleared[active.id] && !openerExpanded && openerCollapsed && (
+        {effectiveProfile?.opener && !chatCleared[active.id] && !openerExpanded && openerCollapsed && (
           <OpenerStrip
-            opener={profile.opener}
+            opener={effectiveProfile.opener}
             expanded={false}
             onToggle={() => {
               console.log(`[profile] opener tapped char=${active.id} → 抽屉展开`);
@@ -925,7 +1018,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             }}
           />
         )}
-        {log.length === 0 && !pending && (
+        {log.length === 0 && !pending && !openerShown && (
           <p className="pt-10 text-center text-xs text-muted-foreground">
             和 {active.name || "TA"} 说点什么吧
             {!ready && <><br />（先在「设置」里接好 API）</>}

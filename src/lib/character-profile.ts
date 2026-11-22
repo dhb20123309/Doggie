@@ -102,7 +102,11 @@ export function parseProfileMd(text: string, charId: string, fallbackName: strin
   if (cur) sections.push(cur);
 
   const findParas = (kw: string) => sections.find((s) => s.title.includes(kw))?.paras ?? [];
-  const opener = findParas("精简开场白").join("\n").replace(/^>\s?/gm, "");
+  let opener = findParas("精简开场白").join("\n").replace(/^>\s?/gm, "");
+  // 旧版预置档案（无 hero 分节）缺"点开看档案"引导句：存储自愈时补齐，保证开场白卡有入口文案
+  if (!sections.some((s) => s.key === "hero") && opener && !opener.includes("完整档案")) {
+    opener += "点开看看 TA 的完整档案吧。";
+  }
   const introSec = sections.find((s) => s.kind === "story");
   const intro = introSec ? introSec.paras.join("\n\n") : "";
   // 系列标签：从"基础信息"里"系列标签：a｜b｜c"行提取，渲染为居中胶囊横排（酒馆排版）

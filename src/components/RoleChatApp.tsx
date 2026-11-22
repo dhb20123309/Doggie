@@ -127,7 +127,12 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     queueMicrotask(() => {
       try {
         const stored = JSON.parse(localStorage.getItem(`vp-phone:rolechat-log:${logKeyRef.current}`) || "[]") as ChatEntry[];
-        setLog((cur) => (stored.length > cur.length ? stored : cur));
+        // 以存储为准对齐（曾只比长度：发送后本地 state 比存储多一条用户消息时对齐失效，气泡要退出重进才可见）
+        setLog((cur) => {
+          if (JSON.stringify(cur) === JSON.stringify(stored)) return cur;
+          console.log(`[reply] align char=${logKeyRef.current} ui=${cur.length} stored=${stored.length}`);
+          return stored;
+        });
       } catch {
         /* ignore */
       }
@@ -291,7 +296,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const text = input.trim();
     if (!text || pending || !ready) return false;
     const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now() };
-    // 用户消息也直写该角色存储，退出页面后后台回复仍能基于完整上下文落库
+    // 先同步更新界面（用户气泡必须立刻出现），再直写该角色存储保证后台回复基于完整上下文；
+    // 顺序反了会被后续 setLog(stored) 用旧快照覆盖掉刚发的消息（曾导致自己发的消息要退出重进才可见）
+    setLog((prev) => [...prev, userMsg]);
     writeLogNow(active?.id ?? "", (prev) => [...prev, userMsg]);
     setInput("");
     scrollBottom();
@@ -335,8 +342,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: draft, at: Date.now() };
       entries = [...entries, userMsg];
       targetId = userMsg.id;
-      writeLogNow(active.id, (prev) => [...prev, userMsg]);
+      // 与 flushDraft 同理：先同步更新界面，再直写存储，避免旧快照覆盖刚发的消息
+      console.log(`[reply] generate flush msg=${userMsg.id} → ui+storage`);
       setLog(entries);
+      writeLogNow(active.id, (prev) => [...prev, userMsg]);
       setInput("");
     } else {
       for (let i = entries.length - 1; i >= 0; i--) {

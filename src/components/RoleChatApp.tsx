@@ -265,8 +265,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         }
       }
       if (result.ok) {
-        // 复读兜底链：OOC 过滤 + 复读检测（与最近两条 assistant 逐行重合≥50%），命中即带禁复读指令重生成，最多两次
-        const recentAssistants = entries.filter((e) => e.role === "assistant" && !e.failed).slice(-2);
+        // 复读兜底链：OOC 过滤 + 近似复读检测（去标点后任一整行与旧句重复即拦），命中即带禁复读指令重生成，最多两次
+        // 比对窗口放宽到最近 6 条 assistant：跨多轮的车轱辘话也能拦住
+        const recentAssistants = entries.filter((e) => e.role === "assistant" && !e.failed).slice(-6);
+        console.log(`[reply] repeat-check char=${ch.id} window=${recentAssistants.length}条`);
         const antiRepeatHint = storyMode
           ? "（系统提示：上一条剧情因与前文重复被拦截。这次必须换全新的叙述角度与措辞推进剧情——不许复用之前的句子和意象，情感按前因后果平缓递进；保持一到两段小说正文）"
           : "（系统提示：你上一条回复因与原话重复被拦截。这次必须换全新的说法和角度接她的话——不许复用之前说过的句子和口头禅，可以提新细节、开新话题或换个反应；保持一两句口语化短消息）";
@@ -482,8 +484,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),
       ];
       let line = "";
-      // 复读检测基于该角色最近两条 assistant 消息（含历轮主动消息），连续 tick 不再车轱辘
-      const prevAssistants = readLastEntries(ch.id, 30).filter((e) => e.role === "assistant" && !e.failed).slice(-2);
+      // 复读检测基于该角色最近 6 条 assistant 消息（含历轮主动消息），近似重复即拦，连续 tick 不再车轱辘
+      const prevAssistants = readLastEntries(ch.id, 30).filter((e) => e.role === "assistant" && !e.failed).slice(-6);
+      console.log(`[proactive] repeat-check char=${ch.id} window=${prevAssistants.length}条`);
       try {
         line = sanitizeReply(await chatCompletion(config, history));
         if (line && isRepetitiveReply(line, prevAssistants)) {

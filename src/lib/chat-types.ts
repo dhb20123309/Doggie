@@ -105,24 +105,37 @@ export function lastAssistantText(entries: ChatEntry[]): string {
   return "";
 }
 
-/** 复读检测：新回复与最近两条 assistant 消息逐行重合 ≥50% 视为复读（短语气词行不计入比对） */
+/** 归一化：去掉空白与中英标点，只留文字内容参与复读比对 */
+function normalizeLine(s: string): string {
+  return s.replace(/[\s"'“”‘’、。，,.!?！？~～…：:;；()（）\-—_·]/g, "");
+}
+
+/** 两行是否近似重复：完全相同，或较长行包含较短行且长度差 ≤4（治"原句+尾巴微调"式复读） */
+function nearDup(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const [long, short] = a.length >= b.length ? [a, b] : [b, a];
+  return short.length >= 8 && long.includes(short) && long.length - short.length <= 4;
+}
+
+/** 复读检测：新回复与近期 assistant 历史逐行比对——任一整行与旧句近似重复即判复读。
+ *  窗口取最近 6 条、阈值从宽（命中一行即拦），宁可误拦也不放行明显车轱辘话。 */
 export function isRepetitiveReply(reply: string, prevEntries: ChatEntry[]): boolean {
-  const banned = new Set<string>();
-  for (const e of prevEntries) {
+  const banned: string[] = [];
+  for (const e of prevEntries.slice(-6)) {
     if (e.role !== "assistant" || e.failed) continue;
     for (const l of e.content.split(/\r?\n/)) {
-      const t = l.trim();
-      if (t.length >= 6) banned.add(t);
+      const t = normalizeLine(l);
+      if (t.length >= 5) banned.push(t);
     }
   }
-  if (banned.size === 0) return false;
+  if (banned.length === 0) return false;
   const lines = reply
     .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 6);
+    .map(normalizeLine)
+    .filter((s) => s.length >= 5);
   if (lines.length === 0) return false;
-  const dup = lines.filter((s) => banned.has(s)).length;
-  return dup / lines.length >= 0.5;
+  return lines.some((s) => banned.some((b) => nearDup(s, b)));
 }
 
 /** 组装发给模型的上下文：人设 system + 最近 20 条记录 + 新消息 */

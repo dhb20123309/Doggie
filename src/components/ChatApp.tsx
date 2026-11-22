@@ -58,8 +58,8 @@ export function ChatApp({ config, onBack, onOpenSettings }: Props) {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
-        <Button variant="ghost" size="icon" className="size-8" onClick={onBack} aria-label="返回">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
+        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>
         <div className="text-center">

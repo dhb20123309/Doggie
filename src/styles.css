@@ -3,72 +3,75 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* 桌面舞台：深空蓝紫渐变 */
-  --stage-from: oklch(0.17 0.045 265);
-  --stage-via: oklch(0.23 0.06 285);
-  --stage-to: oklch(0.13 0.03 250);
-  --glow: oklch(0.72 0.19 285 / 0.35);
+  /* 外层舞台：柔和低饱和渐变衬托居中手机 */
+  --stage-from: oklch(0.93 0.02 250);
+  --stage-via: oklch(0.9 0.03 300);
+  --stage-to: oklch(0.86 0.025 210);
+  --glow: oklch(0.85 0.08 300 / 0.5);
 
-  /* 机身 */
-  --frame: oklch(0.28 0.02 270);
-  --frame-edge: oklch(0.45 0.02 270);
-  --notch: oklch(0.12 0.01 270);
+  /* 机身：浅灰玻璃边 */
+  --frame: oklch(0.75 0.015 260);
+  --frame-edge: oklch(0.88 0.01 260);
+  --notch: oklch(0.15 0.01 270);
 
-  /* 屏幕内容（浅色 UI） */
-  --background: oklch(0.985 0.004 260);
-  --foreground: oklch(0.22 0.02 275);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.02 275);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.02 275);
-  --primary: oklch(0.55 0.22 285);
-  --primary-foreground: oklch(0.99 0.005 285);
-  --secondary: oklch(0.94 0.015 275);
-  --secondary-foreground: oklch(0.3 0.04 275);
-  --muted: oklch(0.95 0.008 270);
-  --muted-foreground: oklch(0.55 0.02 275);
-  --accent: oklch(0.93 0.03 285);
-  --accent-foreground: oklch(0.32 0.08 285);
-  --destructive: oklch(0.58 0.22 25);
+  /* 屏幕内容（浅色毛玻璃 UI） */
+  --background: oklch(0.97 0.008 265);
+  --foreground: oklch(0.28 0.02 275);
+  --card: oklch(1 0 0 / 0.72);
+  --card-foreground: oklch(0.28 0.02 275);
+  --popover: oklch(0.99 0.005 270);
+  --popover-foreground: oklch(0.28 0.02 275);
+  --primary: oklch(0.58 0.14 275);
+  --primary-foreground: oklch(0.99 0.005 275);
+  --secondary: oklch(0.93 0.015 270);
+  --secondary-foreground: oklch(0.35 0.03 275);
+  --muted: oklch(0.94 0.01 268);
+  --muted-foreground: oklch(0.55 0.025 275);
+  --accent: oklch(0.92 0.03 280);
+  --accent-foreground: oklch(0.35 0.07 280);
+  --destructive: oklch(0.58 0.2 25);
   --destructive-foreground: oklch(0.98 0.01 25);
-  --success: oklch(0.65 0.17 155);
-  --warning: oklch(0.72 0.16 75);
-  --border: oklch(0.9 0.01 270);
+  --success: oklch(0.65 0.15 155);
+  --warning: oklch(0.72 0.14 75);
+  --border: oklch(1 0 0 / 0.55);
   --input: oklch(0.9 0.01 270);
-  --ring: oklch(0.55 0.22 285);
+  --ring: oklch(0.58 0.14 275);
 
-  /* 壁纸 */
-  --wallpaper-from: oklch(0.62 0.2 292);
-  --wallpaper-via: oklch(0.5 0.18 262);
-  --wallpaper-to: oklch(0.32 0.12 250);
+  /* 毛玻璃层 */
+  --glass-bg: oklch(1 0 0 / 0.5);
+  --glass-strong: oklch(1 0 0 / 0.68);
+  --glass-border: oklch(1 0 0 / 0.6);
+  --glass-shadow: oklch(0.4 0.04 270 / 0.14);
 
-  --radius-sm: 0.375rem;
-  --radius-md: 0.625rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.5rem;
+  /* 默认壁纸（用户可上传替换） */
+  --wallpaper-from: oklch(0.88 0.06 300);
+  --wallpaper-via: oklch(0.82 0.07 250);
+  --wallpaper-to: oklch(0.78 0.06 200);
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+  --radius-xl: 1.75rem;
 
   --font-display: "Space Grotesk", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .dark {
-  --background: oklch(0.19 0.02 275);
+  --background: oklch(0.22 0.015 275);
   --foreground: oklch(0.95 0.01 275);
-  --card: oklch(0.24 0.02 275);
+  --card: oklch(0.28 0.015 275 / 0.7);
   --card-foreground: oklch(0.95 0.01 275);
-  --popover: oklch(0.24 0.02 275);
-  --popover-foreground: oklch(0.95 0.01 275);
-  --primary: oklch(0.68 0.19 288);
+  --primary: oklch(0.7 0.14 278);
   --primary-foreground: oklch(0.16 0.03 280);
-  --secondary: oklch(0.3 0.02 275);
+  --secondary: oklch(0.32 0.015 275);
   --secondary-foreground: oklch(0.94 0.01 275);
-  --muted: oklch(0.28 0.02 275);
+  --muted: oklch(0.3 0.015 275);
   --muted-foreground: oklch(0.7 0.02 275);
-  --accent: oklch(0.34 0.05 285);
-  --accent-foreground: oklch(0.94 0.02 285);
-  --border: oklch(0.35 0.02 275);
-  --input: oklch(0.35 0.02 275);
-  --ring: oklch(0.68 0.19 288);
+  --border: oklch(1 0 0 / 0.18);
+  --glass-bg: oklch(0.3 0.02 275 / 0.45);
+  --glass-strong: oklch(0.25 0.02 275 / 0.6);
+  --glass-border: oklch(1 0 0 / 0.16);
 }
 
 @theme inline {
@@ -122,21 +125,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 舞台背景 */
+/* ===== 舞台 ===== */
 .stage-bg {
   background:
-    radial-gradient(60% 45% at 50% 12%, var(--glow) 0%, transparent 60%),
+    radial-gradient(55% 40% at 50% 8%, var(--glow) 0%, transparent 62%),
     linear-gradient(160deg, var(--stage-from) 0%, var(--stage-via) 55%, var(--stage-to) 100%);
 }
 
-/* 机身 */
+/* ===== 机身：柔和玻璃边框 + 大圆角 ===== */
 .phone-frame {
-  background: linear-gradient(145deg, var(--frame-edge), var(--frame) 40%, oklch(0.2 0.02 270));
+  background: linear-gradient(150deg, var(--frame-edge), var(--frame) 45%, oklch(0.62 0.02 265));
   box-shadow:
-    0 0 0 1px oklch(0.7 0.02 270 / 0.25),
-    0 30px 80px -20px oklch(0.08 0.03 270 / 0.8),
-    0 8px 24px oklch(0.08 0.03 270 / 0.5),
-    inset 0 1px 0 oklch(0.9 0.02 270 / 0.25);
+    0 0 0 1px oklch(1 0 0 / 0.5),
+    0 40px 90px -30px oklch(0.35 0.05 270 / 0.45),
+    0 12px 32px oklch(0.35 0.05 270 / 0.2),
+    inset 0 1px 0 oklch(1 0 0 / 0.7);
 }
 
 .screen-glare::after {
@@ -145,28 +148,129 @@ body {
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  background: linear-gradient(135deg, oklch(1 0 0 / 0.14) 0%, transparent 32%);
-  z-index: 40;
+  background: linear-gradient(135deg, oklch(1 0 0 / 0.22) 0%, transparent 30%);
+  z-index: 60;
 }
 
+/* ===== 壁纸：CSS 渐变或用户上传图（inline style 覆盖） ===== */
 .wallpaper {
   background:
-    radial-gradient(120% 80% at 20% 0%, oklch(0.85 0.12 320 / 0.5) 0%, transparent 55%),
-    linear-gradient(155deg, var(--wallpaper-from), var(--wallpaper-via) 55%, var(--wallpaper-to));
+    radial-gradient(120% 70% at 25% 0%, oklch(0.96 0.04 320 / 0.75) 0%, transparent 55%),
+    radial-gradient(90% 60% at 85% 100%, oklch(0.9 0.06 210 / 0.6) 0%, transparent 55%),
+    linear-gradient(160deg, var(--wallpaper-from), var(--wallpaper-via) 52%, var(--wallpaper-to));
+  background-size: cover;
+  background-position: center;
 }
 
-/* 状态栏呼吸点 */
+/* ===== 毛玻璃原子 ===== */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 10px 30px -12px var(--glass-shadow), inset 0 1px 0 oklch(1 0 0 / 0.45);
+}
+.glass-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(26px) saturate(170%);
+  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 14px 36px -14px var(--glass-shadow), inset 0 1px 0 oklch(1 0 0 / 0.5);
+}
+.glass-input {
+  background: oklch(1 0 0 / 0.45);
+  border: 1px solid oklch(1 0 0 / 0.55);
+  box-shadow: inset 0 1px 3px oklch(0.4 0.03 270 / 0.08);
+}
+.glass-nav {
+  background: oklch(0.98 0.01 270 / 0.55);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid oklch(1 0 0 / 0.5);
+}
+
+/* 锁屏压暗层：整屏均匀加深，浅色壁纸上保证白字与玻璃键可读 */
+.lock-scrim {
+  background: rgba(30, 26, 52, 0.34);
+}
+
+/* 锁屏数字键：半透明白底，无 backdrop-filter（避免祖先动画期间被浏览器降级为模糊快照） */
+.key-soft {
+  background: oklch(1 0 0 / 0.32);
+  border: 1px solid oklch(1 0 0 / 0.45);
+  box-shadow: 0 4px 14px -6px oklch(0.35 0.05 270 / 0.3), inset 0 1px 0 oklch(1 0 0 / 0.5);
+}
+
+/* 锁屏数字键文字投影：浅色壁纸上保证可读 */
+.key-soft { text-shadow: 0 1px 6px rgba(40, 32, 70, 0.55); }
+
+/* 锁屏内容层：仅做 opacity 入场（transform 祖先会导致后代 backdrop-filter 降级模糊） */
+@keyframes lock-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.lock-content { animation: lock-fade 0.45s ease-out backwards; }
+
+/* App 图标玻璃底 */
+.app-icon-glass {
+  background: oklch(1 0 0 / 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid oklch(1 0 0 / 0.55);
+  box-shadow: 0 8px 20px -8px oklch(0.35 0.05 270 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.6);
+}
+
+/* ===== 动画 ===== */
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
 .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
 
+/* 页面/应用切换淡入上浮 */
 @keyframes screen-in {
   from { opacity: 0; transform: translateY(10px) scale(0.985); }
   to { opacity: 1; transform: none; }
 }
-.screen-in { animation: screen-in 0.24s ease-out; }
+.screen-in { animation: screen-in 0.3s cubic-bezier(0.25, 0.8, 0.35, 1); }
+
+/* 打开 App：从图标放大铺满 */
+@keyframes app-open {
+  from { opacity: 0; transform: scale(0.82); border-radius: 28px; }
+  to { opacity: 1; transform: scale(1); border-radius: 0; }
+}
+.app-open { animation: app-open 0.34s cubic-bezier(0.3, 0.9, 0.3, 1.05); }
+
+/* 锁屏解锁：上滑淡出 */
+@keyframes lock-unlock {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-42%) scale(1.04); }
+}
+.lock-unlock { animation: lock-unlock 0.45s cubic-bezier(0.5, 0, 0.6, 1) forwards; }
+
+/* 桌面迎接：轻微缩放浮现 */
+@keyframes desk-in {
+  from { opacity: 0; transform: scale(1.06); }
+  to { opacity: 1; transform: scale(1); }
+}
+.desk-in { animation: desk-in 0.5s cubic-bezier(0.25, 0.8, 0.3, 1) 0.1s backwards; }
+
+/* 密码错误抖动 */
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
+.shake-x { animation: shake-x 0.4s ease; }
+
+/* 锁屏时间呼吸进入 */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-up { animation: fade-up 0.6s ease-out backwards; }
 
 @keyframes typing-bounce {
   0%, 80%, 100% { transform: translateY(0); }
@@ -176,7 +280,7 @@ body {
 
 ::-webkit-scrollbar { width: 0; height: 0; }
 
-/* 果冻反馈：按下快压（≤0.08s），松开慢弹回带过冲；只用 transform，不与美化层冲突 */
+/* ===== 果冻反馈（保留原有手感） ===== */
 .jelly-btn,
 .jelly-icon,
 .jelly-blob {

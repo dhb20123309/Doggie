@@ -29,7 +29,7 @@ function write(key: string, value: unknown): void {
 
 type Setter<T> = (next: T | ((prev: T) => T)) => void;
 
-function usePersisted<T>(key: string, fallback: T): [T, Setter<T>] {
+export function usePersisted<T>(key: string, fallback: T): [T, Setter<T>] {
   const [value, setValue] = useState<T>(() => read(key, fallback));
   const update: Setter<T> = (next) => {
     setValue((prev) => {

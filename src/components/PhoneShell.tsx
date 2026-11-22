@@ -1,13 +1,16 @@
-// 虚拟手机机身：外壳 + 屏幕路由（桌面 / 设置 / AI 助手）
+// 虚拟手机机身：外壳 + 锁屏流程 + 屏幕路由（桌面 / 各 App）
 import { useState } from "react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
+import { LockScreen } from "./LockScreen";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsApp } from "./SettingsApp";
 import { ChatApp } from "./ChatApp";
 import { RoleChatApp } from "./RoleChatApp";
 import { WorldBookApp } from "./WorldBookApp";
 import { StickerApp } from "./StickerApp";
+import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
+import { usePasscode, useLockWallpaper, useHomeWallpaper } from "@/lib/lock-store";
 
 interface Props {
   config: AiConfig;
@@ -15,45 +18,70 @@ interface Props {
 }
 
 export function PhoneShell({ config, onSaveConfig }: Props) {
+  const [locked, setLocked] = useState(true);
   const [screen, setScreen] = useState<ScreenId>("home");
-  const darkStatus = screen === "home";
+  const [passcode] = usePasscode();
+  const [lockWp, setLockWp] = useLockWallpaper();
+  const [homeWp, setHomeWp] = useHomeWallpaper();
+
+  const goHome = () => setScreen("home");
+  const lock = () => {
+    setScreen("home");
+    setLocked(true);
+  };
 
   return (
-    <div className="phone-frame relative rounded-[44px] p-[10px]">
+    <div className="phone-frame relative rounded-[48px] p-[10px]">
       {/* 侧边按键 */}
       <span className="absolute -left-[3px] top-[90px] h-8 w-[3px] rounded-l bg-frame-edge" />
       <span className="absolute -left-[3px] top-[130px] h-12 w-[3px] rounded-l bg-frame-edge" />
       <span className="absolute -right-[3px] top-[110px] h-16 w-[3px] rounded-r bg-frame-edge" />
 
-      <div className="screen-glare relative h-[600px] w-[300px] overflow-hidden rounded-[34px] bg-background sm:h-[640px] sm:w-[320px]">
+      <div className="screen-glare relative h-[620px] w-[300px] overflow-hidden rounded-[38px] bg-background sm:h-[660px] sm:w-[320px]">
         {/* 灵动岛 */}
-        <div className="absolute left-1/2 top-2 z-30 flex h-[26px] w-[92px] -translate-x-1/2 items-center justify-end rounded-full bg-notch pr-3">
+        <div className="absolute left-1/2 top-2 z-50 flex h-[26px] w-[92px] -translate-x-1/2 items-center justify-end rounded-full bg-notch pr-3">
           <span className="size-2.5 rounded-full bg-[oklch(0.25_0.03_260)] ring-1 ring-white/10" />
         </div>
 
-        <StatusBar dark={darkStatus} />
+        {locked ? (
+          <LockScreen passcode={passcode} wallpaper={lockWp} onUnlock={() => setLocked(false)} />
+        ) : (
+          <>
+            <StatusBar dark={screen === "home"} />
 
-        <div key={screen} className="screen-in h-[calc(100%-34px)]">
-          {screen === "home" && <HomeScreen config={config} onOpen={setScreen} />}
-          {screen === "settings" && (
-            <SettingsApp config={config} onSave={onSaveConfig} onBack={() => setScreen("home")} />
-          )}
-          {screen === "chat" && (
-            <ChatApp config={config} onBack={() => setScreen("home")} onOpenSettings={() => setScreen("settings")} />
-          )}
-          {screen === "rolechat" && <RoleChatApp config={config} onBack={() => setScreen("home")} />}
-          {screen === "worldbook" && <WorldBookApp onBack={() => setScreen("home")} />}
-          {screen === "sticker" && <StickerApp onBack={() => setScreen("home")} />}
-        </div>
+            <div key={screen} className={`h-full pt-8 ${screen === "home" ? "" : "app-open"}`}>
+              {screen === "home" && <HomeScreen config={config} wallpaper={homeWp} onOpen={setScreen} />}
+              {screen === "settings" && (
+                <SettingsApp
+                  config={config}
+                  onSave={onSaveConfig}
+                  onBack={goHome}
+                  onLock={lock}
+                  wallpapers={{ lockWp, homeWp, setLockWp, setHomeWp }}
+                />
+              )}
+              {screen === "chat" && (
+                <ChatApp config={config} onBack={goHome} onOpenSettings={() => setScreen("settings")} />
+              )}
+              {screen === "rolechat" && <RoleChatApp config={config} onBack={goHome} />}
+              {screen === "worldbook" && <WorldBookApp onBack={goHome} />}
+              {screen === "sticker" && <StickerApp onBack={goHome} />}
+              {screen === "album" && <AlbumApp onBack={goHome} />}
+              {screen === "camera" && <CameraApp onBack={goHome} />}
+              {screen === "memory" && <MemoryApp onBack={goHome} />}
+              {screen === "music" && <MusicApp onBack={goHome} />}
+            </div>
 
-        {/* Home 指示条 */}
-        <button
-          type="button"
-          onClick={() => setScreen("home")}
-          aria-label="回到主屏"
-          className="absolute bottom-1.5 left-1/2 z-30 h-1.5 w-[110px] -translate-x-1/2 rounded-full bg-black/25 backdrop-blur transition-colors hover:bg-black/40"
-          style={{ backgroundColor: screen === "home" ? undefined : "oklch(0.4 0.02 275 / 0.4)" }}
-        />
+            {/* Home 指示条 */}
+            <button
+              type="button"
+              onClick={goHome}
+              aria-label="回到主屏"
+              className="absolute bottom-1.5 left-1/2 z-50 h-1.5 w-[110px] -translate-x-1/2 rounded-full backdrop-blur transition-colors hover:bg-black/40"
+              style={{ backgroundColor: screen === "home" ? "oklch(1 0 0 / 0.5)" : "oklch(0.4 0.02 275 / 0.4)" }}
+            />
+          </>
+        )}
       </div>
     </div>
   );

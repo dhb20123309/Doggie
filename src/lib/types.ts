@@ -13,7 +13,17 @@ export interface AiConfig {
 
 export const EMPTY_CONFIG: AiConfig = { baseUrl: "", apiKey: "", model: "", temperature: 0.8 };
 
-export type ScreenId = "home" | "settings" | "chat" | "rolechat" | "worldbook" | "sticker";
+export type ScreenId =
+  | "home"
+  | "settings"
+  | "chat"
+  | "rolechat"
+  | "worldbook"
+  | "sticker"
+  | "album"
+  | "camera"
+  | "memory"
+  | "music";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";
 

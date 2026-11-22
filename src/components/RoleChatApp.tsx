@@ -216,8 +216,8 @@ export function RoleChatApp({ config, onBack }: Props) {
   const showGenerate = !prefs.sendReplacesGenerate;
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
+    <div className="flex h-full flex-col bg-gradient-to-b from-[oklch(0.95_0.015_265)] to-[oklch(0.91_0.025_275)]">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>
@@ -295,12 +295,12 @@ export function RoleChatApp({ config, onBack }: Props) {
         )}
       </div>
 
-      <div className="border-t border-border px-3 py-2.5">
+      <div className="border-t border-white/60 px-3 py-2.5 backdrop-blur-xl">
         {showGenerate && (hasDraft || awaitingReply) && !pending && ready && (
           <Button
             size="sm"
             variant="outline"
-            className="jelly-blob mb-2 h-7 w-full gap-1.5 rounded-lg border-primary/40 text-[11px] font-semibold text-primary hover:bg-primary/5"
+            className="jelly-blob mb-2 h-7 w-full gap-1.5 rounded-xl border-primary/40 bg-white/50 text-[11px] font-semibold text-primary hover:bg-primary/5"
             onClick={generate}
           >
             <WandSparkles className="size-3.5" />
@@ -321,7 +321,7 @@ export function RoleChatApp({ config, onBack }: Props) {
             disabled={!ready || pending}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            className="h-9 rounded-full bg-muted/50 text-[13px] disabled:opacity-60"
+            className="h-9 rounded-full glass-input text-[13px] disabled:opacity-60"
           />
           <Button
             size="icon"
@@ -390,7 +390,7 @@ function Avatar({ character, size }: { character: Character; size: number }) {
 function StickerPanel({ stickers, onBack }: { stickers: Sticker[]; onBack: () => void }) {
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>
@@ -431,7 +431,7 @@ function PrefsEditor({ prefs, onSave, onCancel }: { prefs: SendPrefs; onSave: (p
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onCancel} aria-label="取消">
           <ChevronLeft className="size-5" />
         </Button>
@@ -483,7 +483,7 @@ function CharacterEditor({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onCancel} aria-label="取消">
           <ChevronLeft className="size-5" />
         </Button>
@@ -563,7 +563,7 @@ function WorldBookPicker({
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>

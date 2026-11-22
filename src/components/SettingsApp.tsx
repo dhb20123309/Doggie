@@ -1,17 +1,25 @@
-// 手机内「设置」应用：填写接口地址 / API Key / 模型名，并提供连接测试
-import { useEffect, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks } from "lucide-react";
+// 手机内「设置」应用：接口地址 / API Key / 模型名 / 连接测试 + 锁屏密码与壁纸自定义
+import { useEffect, useRef, useState } from "react";
+import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AiConfig, TestResult } from "@/lib/types";
 import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
+import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 
 interface Props {
   config: AiConfig;
   onSave: (cfg: AiConfig) => void;
   onBack: () => void;
+  onLock: () => void;
+  wallpapers: {
+    lockWp: string;
+    homeWp: string;
+    setLockWp: (v: string | ((p: string) => string)) => void;
+    setHomeWp: (v: string | ((p: string) => string)) => void;
+  };
 }
 
 const PROVIDERS = [
@@ -22,7 +30,7 @@ const PROVIDERS = [
   { name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
 ];
 
-export function SettingsApp({ config, onSave, onBack }: Props) {
+export function SettingsApp({ config, onSave, onBack, onLock, wallpapers }: Props) {
   const [form, setForm] = useState<AiConfig>(config);
   const [showKey, setShowKey] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
@@ -63,15 +71,15 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* 导航条 */}
-      <div className="flex items-center justify-between border-b border-border px-2 py-2">
-        <Button variant="ghost" size="icon" className="size-8" onClick={onBack} aria-label="返回">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
+        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>
-        <span className="text-sm font-semibold">设置 · API 接入</span>
+        <span className="text-sm font-semibold">设置</span>
         <Button
           size="sm"
           variant={saved ? "secondary" : "default"}
-          className="h-8 rounded-full px-3 text-xs"
+          className="jelly-btn h-8 rounded-full px-3 text-xs"
           onClick={save}
           disabled={!dirty && !saved}
         >
@@ -89,7 +97,7 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
                 key={p.name}
                 type="button"
                 onClick={() => setForm((f) => ({ ...f, baseUrl: p.baseUrl, model: p.model }))}
-                className="rounded-full border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:border-primary hover:text-primary active:scale-95"
+                className="jelly-btn rounded-full glass px-2.5 py-1 text-xs text-secondary-foreground hover:text-primary"
               >
                 {p.name}
               </button>
@@ -104,7 +112,7 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
             placeholder="https://api.xxx.com/v1"
             value={form.baseUrl}
             onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-            className="h-10 rounded-lg bg-muted/40 text-[13px]"
+            className="h-10 rounded-xl glass-input text-[13px]"
           />
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             填服务商文档里的基础地址，到版本号为止；不要带 /chat/completions 后缀。
@@ -121,7 +129,7 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
               autoComplete="off"
               value={form.apiKey}
               onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
-              className="h-10 rounded-lg bg-muted/40 pr-10 text-[13px]"
+              className="h-10 rounded-xl glass-input pr-10 text-[13px]"
             />
             <button
               type="button"
@@ -167,16 +175,16 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
             placeholder="例如 deepseek-chat / qwen-plus"
             value={form.model}
             onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-            className="h-10 rounded-lg bg-muted/40 text-[13px]"
+            className="h-10 rounded-xl glass-input text-[13px]"
           />
           {models && (
-            <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/30 p-1.5">
+            <div className="max-h-32 space-y-1 overflow-y-auto rounded-xl glass p-1.5">
               {models.map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setForm((f) => ({ ...f, model: m }))}
-                  className={`block w-full truncate rounded-md px-2 py-1 text-left text-[11px] transition-colors ${
+                  className={`block w-full truncate rounded-lg px-2 py-1 text-left text-[11px] transition-colors ${
                     form.model === m ? "bg-primary text-primary-foreground" : "hover:bg-primary/10 hover:text-primary"
                   }`}
                 >
@@ -208,7 +216,7 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
 
         <Button
           variant="outline"
-          className="w-full rounded-xl border-primary/40 py-5 text-sm font-semibold text-primary hover:bg-primary/5"
+          className="jelly-blob w-full rounded-2xl border-primary/40 py-5 text-sm font-semibold text-primary hover:bg-primary/5"
           onClick={runTest}
           disabled={testing}
         >
@@ -223,6 +231,9 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
         </Button>
 
         {result && <TestResultCard result={result} />}
+
+        <PasscodeSection onLock={onLock} />
+        <WallpaperSection wallpapers={wallpapers} />
 
         <div className="pt-1">
           <Button
@@ -244,12 +255,107 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
   );
 }
 
+/** 锁屏密码修改区：验证旧密码后设置 4-6 位新数字密码 */
+function PasscodeSection({ onLock }: { onLock: () => void }) {
+  const [passcode, setPasscode] = usePasscode();
+  const [oldVal, setOldVal] = useState("");
+  const [newVal, setNewVal] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const submit = () => {
+    if (oldVal !== passcode) {
+      setMsg({ ok: false, text: "旧密码不正确" });
+      return;
+    }
+    if (!/^\d{4,6}$/.test(newVal)) {
+      setMsg({ ok: false, text: "新密码需为 4-6 位数字" });
+      return;
+    }
+    setPasscode(newVal);
+    setOldVal("");
+    setNewVal("");
+    setMsg({ ok: true, text: "已更新，下次锁屏生效" });
+  };
+
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+        <LockKeyhole className="size-4 text-primary" />
+        锁屏密码
+        <span className="ml-auto text-[10px] font-normal text-muted-foreground">初始 {DEFAULT_PASSCODE}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Input inputMode="numeric" placeholder="旧密码" value={oldVal} onChange={(e) => setOldVal(e.target.value.replace(/\D/g, ""))} className="h-9 rounded-lg glass-input text-[12px]" />
+        <Input inputMode="numeric" placeholder="新密码 4-6 位" value={newVal} onChange={(e) => setNewVal(e.target.value.replace(/\D/g, "").slice(0, 6))} className="h-9 rounded-lg glass-input text-[12px]" />
+      </div>
+      {msg && (
+        <p className={`text-[11px] ${msg.ok ? "text-success" : "text-destructive"}`}>{msg.text}</p>
+      )}
+      <div className="flex gap-2">
+        <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={submit}>
+          修改密码
+        </Button>
+        <Button size="sm" variant="outline" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={onLock}>
+          立即锁屏
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** 锁屏 / 桌面背景上传替换 */
+function WallpaperSection({ wallpapers }: { wallpapers: Props["wallpapers"] }) {
+  return (
+    <div className="glass grid grid-cols-2 gap-3 rounded-2xl p-3.5">
+      <WallpaperPicker label="锁屏背景" value={wallpapers.lockWp} onChange={wallpapers.setLockWp} />
+      <WallpaperPicker label="桌面背景" value={wallpapers.homeWp} onChange={wallpapers.setHomeWp} />
+    </div>
+  );
+}
+
+function WallpaperPicker({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string | ((p: string) => string)) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const pick = (file?: File) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        className="jelly-icon group relative block aspect-[9/14] w-full overflow-hidden rounded-xl ring-1 ring-white/50"
+        style={{ backgroundImage: `url(${value})`, backgroundSize: "cover", backgroundPosition: "center" }}
+        aria-label={`更换${label}`}
+      >
+        <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all group-hover:bg-black/35 group-hover:opacity-100">
+          <ImageUp className="size-5" />
+        </span>
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+    </div>
+  );
+}
+
 function TestResultCard({ result }: { result: TestResult }) {
   const ok = result.status === "success";
   return (
     <div
-      className={`screen-in rounded-xl border p-3 text-[12px] ${
-        ok ? "border-success/40 bg-success/10" : "border-destructive/40 bg-destructive/10"
+      className={`screen-in rounded-2xl border p-3 text-[12px] ${
+        ok ? "border-success/40 bg-success/10 backdrop-blur-md" : "border-destructive/40 bg-destructive/10 backdrop-blur-md"
       }`}
     >
       <div className="flex items-center gap-1.5 font-semibold">

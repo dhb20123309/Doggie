@@ -1112,8 +1112,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             );
           }
           // 剧情内容统一渲染为聊天区中间的浅灰剧情框（不用消息气泡）；用户消息转第二人称"你："叙述
-          const prevStory = i > 0 && log[i - 1].story;
-          if (entry.story || prevStory) {
+          // 仅在剧情模式开启时生效：关掉后历史与新消息一律回到正常气泡样式
+          const inStory = Boolean(active.storyMode);
+          const prevStory = inStory && i > 0 && log[i - 1].story;
+          if (inStory !== Boolean(entry.story || (i > 0 && log[i - 1].story))) {
+            console.log(`[story] render char=${active.id} mode=${inStory ? "on" : "off"} entry=${entry.id} ${inStory ? "→ 剧情框" : "→ 气泡（已退出剧情模式）"}`);
+          }
+          if (inStory && (entry.story || prevStory)) {
             return (
               <div key={entry.id} className="fade-up mx-auto w-full max-w-[92%] whitespace-pre-wrap break-words rounded-xl bg-black/[0.05] px-3.5 py-2.5 text-[12px] leading-relaxed text-muted-foreground backdrop-blur-sm">
                 {entry.role === "user" ? `你：${entry.content}` : entry.content}

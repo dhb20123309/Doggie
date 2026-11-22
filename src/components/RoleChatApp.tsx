@@ -119,6 +119,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const active = characters.find((c) => c.id === activeId);
   // 会话日志严格跟随当前选中角色；未选中时用空会话，绝不回落到别的角色（修复串会话 bug）
   const [log, setLog] = useChatLog(active?.id ?? "");
+  // 兜底：进入某会话时若该会话存储里已有晚于界面的新回复（后台 requestReply 期间切出又切回），立即对齐
+  const logKeyRef = useRef(active?.id ?? "");
+  if (logKeyRef.current !== (active?.id ?? "")) {
+    logKeyRef.current = active?.id ?? "";
+    queueMicrotask(() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(`vp-phone:rolechat-log:${logKeyRef.current}`) || "[]") as ChatEntry[];
+        setLog((cur) => (stored.length > cur.length ? stored : cur));
+      } catch {
+        /* ignore */
+      }
+    });
+  }
   const [prefs, setPrefs] = useSendPrefs();
   // 老用户迁移：默认值曾为"发送只发文字需手动点生成"，现改为无需确认直接回复；仅对未动过配置的旧数据强制开启一次
   const prefsMigrated = useRef(false);
@@ -181,12 +194,20 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 
   const requestReply = async (entries: ChatEntry[], userMsgId: string) => {
     if (!active) return;
-    console.log(`[reply] start char=${active.id} msg=${userMsgId} → pending(正在输入中)`);
+    // 快照请求上下文：回复在后台继续，退出聊天页/切换会话也不会打断（结果直写该角色存储）
+    const ch = active;
+    const cfgSnapshot = config;
+    const sysPrompt = buildSys(ch);
+    const toHist = (es: ChatEntry[]) => [
+      { role: "system", content: sysPrompt },
+      ...es.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
+    ];
+    console.log(`[reply] start char=${ch.id} msg=${userMsgId} → pending(正在输入中)`);
     setPending(true);
     scrollBottom();
     // 拟真节奏：至少显示 1.2s"正在输入中"，避免秒回穿帮；期间请求已在进行
     const minTyping = new Promise((r) => setTimeout(r, 1_200));
-    const call = chatCompletion(config, toHistory(active, entries)).then(
+    const call = chatCompletion(cfgSnapshot, toHist(entries)).then(
       (reply) => ({ ok: true as const, reply }),
       (err) => ({ ok: false as const, err })
     );
@@ -197,9 +218,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         // 网关偶发 429/5xx/网络抖动不再静默丢回复：自动退避重试一次，仍失败才标记可手动重试
         const retryable = !(result.err instanceof Error && /401|403|400/.test(result.err.message));
         if (retryable) {
-          console.warn(`[reply] fail char=${active.id}，3 秒后自动重试一次:`, result.err instanceof Error ? result.err.message : result.err);
+          console.warn(`[reply] fail char=${ch.id}，3 秒后自动重试一次:`, result.err instanceof Error ? result.err.message : result.err);
           await new Promise((r) => setTimeout(r, 3_000));
-          result = await chatCompletion(config, toHistory(active, entries)).then(
+          result = await chatCompletion(cfgSnapshot, toHist(entries)).then(
             (reply) => ({ ok: true as const, reply }),
             (err) => ({ ok: false as const, err })
           );
@@ -209,32 +230,26 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         const clean = sanitizeReply(result.reply);
         if (!clean) {
           // 整条回复都是"我是语言模型…"式 OOC 出戏话：丢弃不展示，静默重生成一次
-          console.warn(`[reply] OOC filtered char=${active.id}，静默重生成一次`);
-          const again = await chatCompletion(config, [
-            ...toHistory(active, entries),
+          console.warn(`[reply] OOC filtered char=${ch.id}，静默重生成一次`);
+          const again = await chatCompletion(cfgSnapshot, [
+            ...toHist(entries),
             { role: "user", content: "（请完全回到角色身份继续对话，不要提及你是模型或程序）" },
           ]).then((r) => sanitizeReply(r), () => "");
           if (again) {
-            console.log(`[reply] regen ok char=${active.id}`);
-            setLog((prev) => [
-              ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
-              { id: `a${Date.now()}`, role: "assistant", content: again, at: Date.now() },
-            ]);
+            console.log(`[reply] regen ok char=${ch.id}`);
+            settleReply(ch.id, userMsgId, again);
           } else {
-            console.error(`[reply] regen fail char=${active.id}`);
-            setLog((prev) => prev.map((e) => (e.id === userMsgId ? { ...e, failed: true } : e)));
+            console.error(`[reply] regen fail char=${ch.id}`);
+            settleReply(ch.id, userMsgId, null);
           }
         } else {
-          if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${active.id}`);
-          console.log(`[reply] ok char=${active.id} len=${clean.length}`);
-          setLog((prev) => [
-            ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
-            { id: `a${Date.now()}`, role: "assistant", content: clean, at: Date.now() },
-          ]);
+          if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}`);
+          settleReply(ch.id, userMsgId, clean);
         }
       } else {
-        console.error(`[reply] final fail char=${active.id}:`, result.err instanceof Error ? result.err.message : result.err);
-        setLog((prev) => prev.map((e) => (e.id === userMsgId ? { ...e, failed: true } : e)));
+        console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
+        settleReply(ch.id, userMsgId, null);
       }
     } finally {
       await minTyping;
@@ -243,16 +258,42 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
   };
 
+  /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面 */
+  const settleReply = (charId: string, userMsgId: string, reply: string | null) => {
+    try {
+      const key = `vp-phone:rolechat-log:${charId}`;
+      const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
+      const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null } : e));
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now() }] : kept;
+      localStorage.setItem(key, JSON.stringify(next));
+      if (charId === activeId && view === "chat") setLog(next);
+    } catch {
+      /* ignore */
+    }
+  };
+
   const flushDraft = (): boolean => {
     const text = input.trim();
     if (!text || pending || !ready) return false;
     const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now() };
-    setLog((prev) => [...prev, userMsg]);
+    // 用户消息也直写该角色存储，退出页面后后台回复仍能基于完整上下文落库
+    writeLogNow(active?.id ?? "", (prev) => [...prev, userMsg]);
     setInput("");
     scrollBottom();
-    // 立即进入"正在输入中"并请求回复，不依赖倒计时 effect（effect 有竞态漏触发风险，曾导致发消息后无回复）
+    // 立即进入"正在输入中"并请求回复；请求发出后即与页面解耦，切走/返回也不会打断
     void requestReply([...stateRef.current.log, userMsg], userMsg.id);
     return true;
+  };
+
+  /** 立即把某函数结果写入角色会话存储（不依赖组件仍在渲染） */
+  const writeLogNow = (charId: string, fn: (prev: ChatEntry[]) => ChatEntry[]) => {
+    try {
+      const key = `vp-phone:rolechat-log:${charId}`;
+      const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
+      localStorage.setItem(key, JSON.stringify(fn(prev)));
+    } catch {
+      /* ignore */
+    }
   };
 
   /** 从表情库手动发一张表情包（用户侧） */
@@ -279,6 +320,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: draft, at: Date.now() };
       entries = [...entries, userMsg];
       targetId = userMsg.id;
+      writeLogNow(active.id, (prev) => [...prev, userMsg]);
       setLog(entries);
       setInput("");
     } else {

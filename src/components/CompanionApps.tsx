@@ -53,14 +53,28 @@ export function DiaryApp({ config, onBack }: AppProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const charId = characters[0]?.id ?? "zhou-chenyan";
+  // 可切换哥哥/弟弟：默认第一个角色，切换后各自看各自的日记
+  const [whoIdx, setWhoIdx] = useState(0);
+  const charId = characters[Math.min(whoIdx, characters.length - 1)]?.id ?? "zhou-chenyan";
   const ch = characters.find((c) => c.id === charId) ?? characters[0];
   const ready = config ? isConfigured(config) : false;
 
+  // 进入或切换角色时补齐该角色的种子日记；同时一次性清理历史重复条目（同标题+正文只留最早一条）
   useEffect(() => {
-    if (!diaries.some((d) => d.charId === charId)) setDiaries((prev) => [...prev, ...seedDiaries(charId)]);
+    setDiaries((prev) => {
+      let next = prev.filter(
+        (d, i) => prev.findIndex((o) => o.title === d.title && o.content === d.content) === i
+      );
+      const removed = prev.length - next.length;
+      if (removed > 0) console.log(`[diary] dedupe removed=${removed}`);
+      if (!next.some((d) => d.charId === charId)) {
+        console.log(`[diary] seed char=${charId}`);
+        next = [...next, ...seedDiaries(charId)];
+      }
+      return removed > 0 || next.length !== prev.length ? next : prev;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [charId]);
 
   const write = async () => {
     if (!config || !ch || busy) return;
@@ -81,7 +95,10 @@ export function DiaryApp({ config, onBack }: AppProps) {
     }
   };
 
-  const list = [...diaries].sort((a, b) => b.at - a.at);
+  // 只展示当前选中角色的日记；列表里出现重复标题时打日志便于排查
+  const list = diaries.filter((d) => d.charId === charId).sort((a, b) => b.at - a.at);
+  const dupTitles = list.length - new Set(list.map((d) => `${d.title}|${d.content}`)).size;
+  if (dupTitles > 0) console.warn(`[diary] dup-in-view char=${charId} count=${dupTitles}`);
   return (
     <div className="flex h-full flex-col">
       <ShellHeader title="TA 的日记" onBack={onBack} action={
@@ -90,6 +107,23 @@ export function DiaryApp({ config, onBack }: AppProps) {
           让 TA 写新的
         </button>
       } />
+      {/* 哥哥/弟弟切换：多角色时显示分段选择器 */}
+      {characters.length > 1 && (
+        <div className="glass mx-3 mt-2.5 flex gap-1 rounded-full p-1">
+          {characters.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setWhoIdx(i)}
+              className={`jelly-btn flex-1 rounded-full py-1.5 text-[12px] font-medium transition-colors ${
+                i === Math.min(whoIdx, characters.length - 1) ? "bg-primary text-primary-foreground" : INK
+              }`}
+            >
+              {c.name || "TA"}
+            </button>
+          ))}
+        </div>
+      )}
       {!ready && <p className={`px-4 pt-2 text-center text-[11px] ${SUB}`}>连接大脑后才能现场生成（去设置填 API）</p>}
       {err && <p className="px-4 pt-1 text-center text-[11px] text-destructive">{err}</p>}
       <div className="flex-1 space-y-2.5 overflow-y-auto px-3 pb-6 pt-3">

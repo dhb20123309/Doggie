@@ -1,0 +1,37 @@
+[
+  {
+    "id": "1",
+    "status": "completed",
+    "content": "查手机：切换查谁的手机 + 今日行踪/应用使用记录",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "2",
+    "status": "completed",
+    "content": "会话资料页：备注名 + 拉黑彩蛋弹窗（微信式入口）",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "3",
+    "status": "completed",
+    "content": "音乐源改为 js/json 歌单格式接入",
+    "priority": "medium",
+    "skills": []
+  },
+  {
+    "id": "4",
+    "status": "completed",
+    "content": "生成周晨砚/周风砚朋友圈预览图并挂进档案卡",
+    "priority": "medium",
+    "skills": []
+  },
+  {
+    "id": "5",
+    "status": "completed",
+    "content": "build+dev 双门禁与截图验收，更新 AGENTS.md",
+    "priority": "high",
+    "skills": []
+  }
+]

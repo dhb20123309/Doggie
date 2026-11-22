@@ -86,8 +86,9 @@ type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "im
 export function RoleChatApp({ config, background, onBack }: Props) {
   const [characters, setCharacters] = useCharacters();
   const [activeId, setActiveId] = useActiveCharId(characters.map((c) => c.id));
-  const active = characters.find((c) => c.id === activeId) ?? characters[0];
-  const [log, setLog] = useChatLog(active?.id ?? "none");
+  const active = characters.find((c) => c.id === activeId);
+  // 会话日志严格跟随当前选中角色；未选中时用空会话，绝不回落到别的角色（修复串会话 bug）
+  const [log, setLog] = useChatLog(active?.id ?? "");
   const [prefs, setPrefs] = useSendPrefs();
   const [books, setBooks] = useWorldBooks();
   const [stickers, setStickers] = useStickers();

@@ -218,7 +218,13 @@ export function useActiveCharId(validIds: string[]): [string, Setter<string>] {
 
 /** 某角色的聊天记录（独立 key，互不串线） */
 export function useChatLog(charId: string): [ChatEntry[], Setter<ChatEntry[]>] {
-  return usePersisted<ChatEntry[]>(`${LOG_PREFIX}${charId}`, []);
+  const [log, setLog] = usePersisted<ChatEntry[]>(`${LOG_PREFIX}${charId}`, []);
+  // bugfix 诊断：会话日志必须严格跟随传入的 charId；charId 为空时用空会话而非任何角色的记录
+  useEffect(() => {
+    console.log(`[chat-log] bind charId=${charId || "(none)"} entries=${log.length}`);
+  }, [charId, log.length]);
+  if (!charId) return [[], setLog];
+  return [log, setLog];
 }
 
 export function clearChatLog(charId: string): void {

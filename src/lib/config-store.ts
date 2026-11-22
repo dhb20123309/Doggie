@@ -13,6 +13,7 @@ export function loadConfig(): AiConfig {
       baseUrl: parsed.baseUrl ?? "",
       apiKey: parsed.apiKey ?? "",
       model: parsed.model ?? "",
+      temperature: typeof parsed.temperature === "number" ? parsed.temperature : 0.8,
     };
   } catch {
     return EMPTY_CONFIG;

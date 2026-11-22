@@ -5,6 +5,8 @@ export interface Character {
   /** 头像：emoji 或上传图的数据 URL */
   avatar: string;
   persona: string;
+  /** 绑定的局部世界书 id */
+  boundWorldBookIds?: string[];
 }
 
 export const DEFAULT_CHARACTER: Character = {

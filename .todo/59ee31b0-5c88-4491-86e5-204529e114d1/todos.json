@@ -1,31 +1,13 @@
 [
   {
-    "content": "角色契约 + 角色/聊天记录持久化存储",
-    "id": "1",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "角色设定页（名字/头像/人设）",
-    "id": "2",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "单角色聊天页（气泡拆分/正在回复/重试/连续对话）",
-    "id": "3",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "桌面与机身装配新入口",
-    "id": "4",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "构建+预览+实际功能验证",
+    "content": "手机内新应用入口装配（世界书/表情包图标）",
     "id": "5",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "构建+dev+逻辑用例验证",
+    "id": "6",
     "status": "completed",
     "skills": []
   }

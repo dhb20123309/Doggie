@@ -7,11 +7,13 @@ export interface AiConfig {
   apiKey: string;
   /** 模型名，例如 gpt-4o-mini / qwen-plus / deepseek-chat */
   model: string;
+  /** 采样温度，0~2，默认 0.8 */
+  temperature?: number;
 }
 
-export const EMPTY_CONFIG: AiConfig = { baseUrl: "", apiKey: "", model: "" };
+export const EMPTY_CONFIG: AiConfig = { baseUrl: "", apiKey: "", model: "", temperature: 0.8 };
 
-export type ScreenId = "home" | "settings" | "chat" | "rolechat";
+export type ScreenId = "home" | "settings" | "chat" | "rolechat" | "worldbook" | "sticker";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";
 

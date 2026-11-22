@@ -1,5 +1,5 @@
 // 手机桌面：壁纸、时钟小组件、应用图标网格
-import { Settings, MessageSquareText, Phone, Camera, Music, Calculator, Sparkles } from "lucide-react";
+import { Settings, MessageSquareText, Phone, Camera, Calculator, Sparkles, BookText, SmilePlus } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { isConfigured } from "@/lib/types";
 
@@ -12,10 +12,11 @@ const APPS = [
   { id: "settings" as ScreenId, name: "设置", icon: Settings, tint: "from-slate-500 to-slate-700" },
   { id: "chat" as ScreenId, name: "AI 助手", icon: MessageSquareText, tint: "from-violet-500 to-fuchsia-600" },
   { id: "rolechat" as ScreenId, name: "TA 的聊天", icon: Sparkles, tint: "from-sky-500 to-indigo-600" },
+  { id: "worldbook" as ScreenId, name: "世界书", icon: BookText, tint: "from-amber-500 to-orange-700" },
+  { id: "sticker" as ScreenId, name: "表情包", icon: SmilePlus, tint: "from-pink-500 to-rose-600" },
   { id: null, name: "电话", icon: Phone, tint: "from-emerald-500 to-green-600" },
   { id: null, name: "相机", icon: Camera, tint: "from-zinc-600 to-zinc-800" },
-  { id: null, name: "音乐", icon: Music, tint: "from-rose-500 to-pink-600" },
-  { id: null, name: "计算器", icon: Calculator, tint: "from-amber-500 to-orange-600" },
+  { id: null, name: "计算器", icon: Calculator, tint: "from-teal-500 to-cyan-700" },
 ];
 
 export function HomeScreen({ config, onOpen }: Props) {

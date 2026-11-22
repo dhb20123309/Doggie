@@ -175,3 +175,16 @@ body {
 .typing-dot { animation: typing-bounce 1s infinite; }
 
 ::-webkit-scrollbar { width: 0; height: 0; }
+
+/* 果冻反馈：按下快压（≤0.08s），松开慢弹回带过冲；只用 transform，不与美化层冲突 */
+.jelly-btn,
+.jelly-icon,
+.jelly-blob {
+  transition: transform 0.65s cubic-bezier(0.34, 1.9, 0.4, 1),
+    box-shadow 0.65s cubic-bezier(0.34, 1.9, 0.4, 1);
+}
+.jelly-btn:active { transform: scale(0.88); transition-duration: 0.08s; }
+.jelly-icon { transition-duration: 0.7s; transition-timing-function: cubic-bezier(0.32, 2.2, 0.4, 1); }
+.jelly-icon:active { transform: scale(0.82) rotate(-4deg); transition-duration: 0.08s; }
+.jelly-blob { transform-origin: center bottom; transition-duration: 0.75s; transition-timing-function: cubic-bezier(0.28, 2.6, 0.35, 1); }
+.jelly-blob:active { transform: scale(1.12, 0.78); transition-duration: 0.06s; }

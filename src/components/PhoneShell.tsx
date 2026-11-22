@@ -6,6 +6,8 @@ import { HomeScreen } from "./HomeScreen";
 import { SettingsApp } from "./SettingsApp";
 import { ChatApp } from "./ChatApp";
 import { RoleChatApp } from "./RoleChatApp";
+import { WorldBookApp } from "./WorldBookApp";
+import { StickerApp } from "./StickerApp";
 
 interface Props {
   config: AiConfig;
@@ -40,6 +42,8 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
             <ChatApp config={config} onBack={() => setScreen("home")} onOpenSettings={() => setScreen("settings")} />
           )}
           {screen === "rolechat" && <RoleChatApp config={config} onBack={() => setScreen("home")} />}
+          {screen === "worldbook" && <WorldBookApp onBack={() => setScreen("home")} />}
+          {screen === "sticker" && <StickerApp onBack={() => setScreen("home")} />}
         </div>
 
         {/* Home 指示条 */}

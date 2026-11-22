@@ -1,12 +1,12 @@
 // 手机内「设置」应用：填写接口地址 / API Key / 模型名，并提供连接测试
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2 } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AiConfig, TestResult } from "@/lib/types";
 import { normalizeBaseUrl } from "@/lib/types";
-import { testConnection } from "@/lib/ai-api";
+import { testConnection, fetchModelList } from "@/lib/ai-api";
 
 interface Props {
   config: AiConfig;
@@ -28,6 +28,9 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
   const [result, setResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelError, setModelError] = useState("");
 
   // 外部配置变化时同步（例如其他入口保存后）
   useEffect(() => {
@@ -135,7 +138,30 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="model">模型名</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="model">模型名</Label>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="jelly-btn h-6 gap-1 px-2 text-[11px] text-primary"
+              disabled={loadingModels}
+              onClick={async () => {
+                setLoadingModels(true);
+                setModelError("");
+                try {
+                  setModels(await fetchModelList({ ...form, baseUrl: normalizeBaseUrl(form.baseUrl) }));
+                } catch (e) {
+                  setModels(null);
+                  setModelError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setLoadingModels(false);
+                }
+              }}
+            >
+              {loadingModels ? <LoaderCircle className="size-3 animate-spin" /> : <ListChecks className="size-3" />}
+              拉取模型列表
+            </Button>
+          </div>
           <Input
             id="model"
             placeholder="例如 deepseek-chat / qwen-plus"
@@ -143,6 +169,41 @@ export function SettingsApp({ config, onSave, onBack }: Props) {
             onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
             className="h-10 rounded-lg bg-muted/40 text-[13px]"
           />
+          {models && (
+            <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/30 p-1.5">
+              {models.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, model: m }))}
+                  className={`block w-full truncate rounded-md px-2 py-1 text-left text-[11px] transition-colors ${
+                    form.model === m ? "bg-primary text-primary-foreground" : "hover:bg-primary/10 hover:text-primary"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+          {modelError && <p className="text-[11px] leading-relaxed text-destructive">{modelError}</p>}
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="temperature">采样温度</Label>
+            <span className="text-[11px] tabular-nums text-muted-foreground">{(form.temperature ?? 0.8).toFixed(1)}</span>
+          </div>
+          <input
+            id="temperature"
+            type="range"
+            min={0}
+            max={2}
+            step={0.1}
+            value={form.temperature ?? 0.8}
+            onChange={(e) => setForm((f) => ({ ...f, temperature: Number(e.target.value) }))}
+            className="w-full accent-[var(--primary)]"
+          />
+          <p className="text-[11px] text-muted-foreground">低更稳重，高更有创意；默认 0.8。</p>
         </div>
 
         <Button

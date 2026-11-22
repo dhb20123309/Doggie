@@ -1112,15 +1112,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             );
           }
           // 剧情内容统一渲染为聊天区中间的浅灰剧情框（不用消息气泡）；用户消息转第二人称"你："叙述
-          // 仅在剧情模式开启时生效：关掉后历史与新消息一律回到正常气泡样式
+          // 退出剧情模式后：新发的普通消息走正常气泡；带 story 标记的历史剧情内容仍居中展示，
+          // 绝不能退回左右气泡——否则玩家的叙述会被显示成"角色发的消息"
           const inStory = Boolean(active.storyMode);
           const prevStory = inStory && i > 0 && log[i - 1].story;
-          if (inStory !== Boolean(entry.story || (i > 0 && log[i - 1].story))) {
-            console.log(`[story] render char=${active.id} mode=${inStory ? "on" : "off"} entry=${entry.id} ${inStory ? "→ 剧情框" : "→ 气泡（已退出剧情模式）"}`);
-          }
-          if (inStory && (entry.story || prevStory)) {
+          if (entry.story || prevStory) {
+            console.log(`[story] render char=${active.id} mode=${inStory ? "on" : "off"} entry=${entry.id} role=${entry.role} → 居中剧情展示（非气泡、不归属角色）`);
             return (
-              <div key={entry.id} className="fade-up mx-auto w-full max-w-[92%] whitespace-pre-wrap break-words rounded-xl bg-black/[0.05] px-3.5 py-2.5 text-[12px] leading-relaxed text-muted-foreground backdrop-blur-sm">
+              <div key={entry.id} className={`fade-up mx-auto w-full max-w-[92%] whitespace-pre-wrap break-words rounded-xl px-3.5 py-2.5 text-[12px] leading-relaxed backdrop-blur-sm ${inStory ? "bg-black/[0.05] text-muted-foreground" : "bg-transparent text-muted-foreground/70"}`}>
                 {entry.role === "user" ? `你：${entry.content}` : entry.content}
               </div>
             );

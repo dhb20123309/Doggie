@@ -37,6 +37,8 @@
 
 - **热梗世界书（第37轮，用户 docx《网上冲浪·热梗世界书》by年年 300条接入）**：`src/lib/meme-worldbook.ts` 纯函数层——MemeEntry{title/keys/usage/demo}、parseMemeBook（标题/触发词/触发内容/对方/角色 标记式解析，续行归入当前字段）、matchMemes（用户消息含≥2字触发词即命中，上限4条）、buildMemeHint（命中片段：气氛合适才接、严禁硬塞与解释出处）、buildMemeDigest（300条"梗名+40字用法"常驻摘要）、MemePrefs{enabled,alwaysInject}+buildMemeSection（关闭=空串；默认仅触发词命中注入省 token；alwaysInject=全量摘要，digestCache 引用缓存）。`src/lib/meme-book-data.ts` 由 docx word/document.xml python 提取段落→node 内联同款解析器生成 PRESET_MEME_BOOK（300条，27条带示例对）。RoleChatApp 接线：usePersisted vp-phone:memebook:prefs:v1；memeFor(entries) 取本轮最后一条用户消息现算片段，buildSys 第三参 memeText 注入私聊（世界设定段后）与剧情链路；fireOne 主动消息用 memeFor(last?[last]:[])（无用户输入且非全量=不注入）；日志 [meme] inject hits len / enabled / alwaysInject。WorldBookApp 顶部新增"网上冲浪·热梗世界书 300条"入口卡→MemeBookPanel（启用/全量常驻两 Switch + 梗名/触发词搜索 + 手风琴浏览）。
 
+- **剧情框渲染修正（第39轮）**：`RoleChatApp.tsx` 消息渲染层——灰框分支改为 `entry.story || prevStory`（prevStory 仅在 storyMode 开启时计算）：退出剧情模式后新发的普通消息走正常左右气泡，但带 story 标记的历史剧情内容**必须仍居中展示**（淡化为 bg-transparent 浅灰文字），绝不能退回左右气泡——否则玩家"二你"叙述会被显示成角色发的消息。曾一度把整个灰框分支用 inStory 短路导致历史剧情变气泡，属修复过头。日志 [story] render mode=on/off entry=… → 居中剧情展示。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

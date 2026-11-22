@@ -33,6 +33,7 @@ import {
   type SendPrefs,
   splitBubbles,
   sanitizeReply,
+  CHAT_LIVENESS,
 } from "@/lib/chat-types";
 import {
   type WorldBook,
@@ -178,7 +179,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         `你现在扮演以下角色，请始终以该身份回复，不要跳出角色。\n名字：${
           ch.name || "无名角色"
         }\n\n${ch.persona || "无额外设定"}\n` +
-        "输出格式硬性要求：像日常手机聊天——每条消息单独占一行，按内容自然分条；正文尽量只写角色说出口的话，不带旁白和动作描写；不要任何解释或格式标记。" +
+        CHAT_LIVENESS +
+        `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         buildWorldSection(activeBooks) +
         "\n\n" +
         buildStickerHint(usable)
@@ -208,7 +210,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       { role: "system", content: sysPrompt },
       ...es.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
     ];
-    console.log(`[reply] start char=${ch.id} msg=${userMsgId} → pending(正在输入中)`);
+    console.log(
+      `[reply] start char=${ch.id} msg=${userMsgId} → pending(正在输入中) liveness=on sysLen=${sysPrompt.length}`
+    );
     setPending(true);
     scrollBottom();
     // 拟真节奏：至少显示 1.2s"正在输入中"，避免秒回穿帮；期间请求已在进行

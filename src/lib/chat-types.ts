@@ -74,6 +74,14 @@ export function splitBubbles(text: string): string[] {
   return bubbles.length > 0 ? bubbles : [text.trim() || "…"];
 }
 
+/** 活人感回复协议：拼在每次请求的 system 末尾（被动回复链路），治"答非所问/自说自话" */
+export const CHAT_LIVENESS =
+  "\n【对话铁律】\n" +
+  "1. 接话优先：对方上一条消息才是你回复的第一依据——必须先回应她说的内容（她讲的事要有反应：追问细节、吐槽、共情、开玩笑都行），绝对禁止无视她的话题、自顾自聊你自己的日常或抛不相干的新话题；答非所问算严重失败。\n" +
+  "2. 像真人手机聊天：短句为主、口语化，可用语气词和表情；一次最多两三条短消息，别长篇大论，别书面腔。\n" +
+  "3. 记忆连贯：之前聊过的事（她的喜好、你们之间发生的事）要自然记住、可以顺带提起，不要装作没聊过。\n" +
+  "4. 输出格式：每条消息单独占一行，按内容自然分条；正文只写角色说出口的话，不带旁白、动作描写、解释或格式标记。";
+
 /** 组装发给模型的上下文：人设 system + 最近 20 条记录 + 新消息 */
 export function buildHistory(
   character: Character,
@@ -85,8 +93,7 @@ export function buildHistory(
       role: "system",
       content: `你现在扮演以下角色，请始终以该身份第一人称回复，不要跳出角色。\n名字：${
         character.name || "无名角色"
-      }\n人设：${character.persona || "无额外设定"}\n` +
-        "重要：像日常聊天一样回复——每条消息单独占一行，按内容自然分条；只输出角色要发来的消息本身，不要任何解释、旁白或格式标记。",
+      }\n人设：${character.persona || "无额外设定"}\n` + CHAT_LIVENESS,
     },
     ...recent.map((e) => ({ role: e.role, content: e.content })),
   ];

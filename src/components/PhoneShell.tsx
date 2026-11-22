@@ -3,13 +3,14 @@ import { useState } from "react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
 import { LockScreen } from "./LockScreen";
-import { HomeScreen } from "./HomeScreen";
+import { HomeCarousel } from "./HomeCarousel";
 import { SettingsApp } from "./SettingsApp";
 import { ChatApp } from "./ChatApp";
 import { RoleChatApp } from "./RoleChatApp";
 import { WorldBookApp } from "./WorldBookApp";
 import { StickerApp } from "./StickerApp";
 import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
+import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 
 interface Props {
@@ -56,7 +57,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
             <StatusBar dark={screen === "home"} />
 
             <div key={screen} className={`h-full pt-8 ${screen === "home" ? "" : "app-open"}`}>
-              {screen === "home" && <HomeScreen config={config} wallpaper={homeWp} onOpen={setScreen} />}
+              {screen === "home" && <HomeCarousel config={config} wallpaper={homeWp} onOpen={setScreen} />}
               {screen === "settings" && (
                 <SettingsApp
                   config={config}
@@ -76,6 +77,14 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "camera" && <CameraApp onBack={goHome} />}
               {screen === "memory" && <MemoryApp onBack={goHome} />}
               {screen === "music" && <MusicApp onBack={goHome} />}
+              {screen === "diary" && <DiaryApp config={config} onBack={goHome} />}
+              {screen === "phonepeek" && <PhonePeekApp config={config} onBack={goHome} />}
+              {screen === "bond" && <BondApp config={config} onBack={goHome} />}
+              {screen === "preference" && <PreferenceApp config={config} onBack={goHome} />}
+              {screen === "theater" && <TheaterApp onBack={goHome} />}
+              {screen === "profile" && (
+                <ProfileApp onBack={goHome} onOpenChar={() => setScreen("rolechat")} onOpenSettings={() => setScreen("settings")} />
+              )}
             </div>
 
             {/* Home 指示条 */}

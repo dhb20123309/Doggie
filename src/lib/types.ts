@@ -23,7 +23,13 @@ export type ScreenId =
   | "album"
   | "camera"
   | "memory"
-  | "music";
+  | "music"
+  | "diary"
+  | "phonepeek"
+  | "bond"
+  | "preference"
+  | "theater"
+  | "profile";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";
 

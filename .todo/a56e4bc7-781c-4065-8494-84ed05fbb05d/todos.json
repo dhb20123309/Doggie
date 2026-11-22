@@ -1,56 +1,38 @@
 [
   {
+    "content": "生成萌系 App 图标宫格与头像底座背景素材",
     "id": "1",
     "status": "completed",
-    "content": "契约层：chat-types 多角色/voiceId/proactive + chat-store 新 key",
     "skills": []
   },
   {
+    "content": "新增 companion-store（日记/便签/羁绊/偏好/查手机缓存）与小剧场剧本数据",
     "id": "2",
     "status": "completed",
-    "content": "新建 lib/import-parse.ts（角色卡/世界书 md 解析）",
     "skills": []
   },
   {
+    "content": "实现 HomeCarousel 双屏轮播（屏1陪伴主屏+屏2 Bento）",
     "id": "3",
-    "status": "completed",
-    "content": "新建 lib/tts.ts + lib/media.ts（外部语音/音乐接入）",
+    "status": "in_progress",
     "skills": []
   },
   {
+    "content": "实现 CompanionApps 六个子应用（日记/查手机/心动羁绊/世界书/偏好记忆/小剧场/个人资料）",
     "id": "4",
-    "status": "completed",
-    "content": "RoleChatApp 重写：微信式列表+多角色日志+表情发送+前情提要+主动消息+照片",
+    "status": "in_progress",
     "skills": []
   },
   {
-    "id": "8",
-    "status": "completed",
-    "content": "生成两张写实日常照并上传素材库拿 CDN URL",
-    "skills": []
-  },
-  {
+    "content": "PhoneShell 接入新桌面与 Dock、styles.css 补 token",
     "id": "5",
-    "status": "completed",
-    "content": "SettingsApp 扩展：语音配置+音乐源区",
+    "status": "pending",
     "skills": []
   },
   {
+    "content": "build+dev 双门禁与截图验收",
     "id": "6",
-    "status": "completed",
-    "content": "ShellApps MusicApp/MemoryApp 接真实音源与多角色统计",
-    "skills": []
-  },
-  {
-    "id": "7",
-    "status": "completed",
-    "content": "PhoneShell/types 装配适配",
-    "skills": []
-  },
-  {
-    "id": "9",
-    "status": "completed",
-    "content": "构建+dev+截图验收+预置数据验证",
+    "status": "pending",
     "skills": []
   }
 ]

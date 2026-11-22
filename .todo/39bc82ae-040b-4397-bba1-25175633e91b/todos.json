@@ -1,0 +1,38 @@
+[
+  {
+    "content": "生成萌系 App 图标宫格与头像底座背景素材",
+    "id": "1",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "新增 companion-store（日记/便签/羁绊/偏好/查手机缓存）与小剧场剧本数据",
+    "id": "2",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "实现 HomeCarousel 双屏轮播（屏1陪伴主屏+屏2 Bento）",
+    "id": "3",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "实现 CompanionApps 六个子应用（日记/查手机/心动羁绊/世界书/偏好记忆/小剧场/个人资料）",
+    "id": "4",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "PhoneShell 接入新桌面与 Dock、styles.css 补 token",
+    "id": "5",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "build+dev 双门禁与截图验收",
+    "id": "6",
+    "status": "completed",
+    "skills": []
+  }
+]

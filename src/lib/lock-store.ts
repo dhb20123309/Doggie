@@ -13,7 +13,7 @@ export const DEFAULT_PASSCODE = "0517";
 export const DEFAULT_LOCK_WALLPAPER =
   "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/锁屏壁纸.png?auth_key=6b7d924b2b56a07a1771b1ecca3a5b572e8092ca8b319c10bd24626ec17b9eb1";
 export const DEFAULT_HOME_WALLPAPER =
-  "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/桌面壁纸.png?auth_key=4583818c344ecffea76a6d904bf6f3efaf12108567f007f6cb00aa28db0047c3";
+  "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/%E5%A4%B4%E5%83%8F%E5%BA%95%E5%BA%A7%E8%83%8C%E6%99%AF.png?auth_key=38385574f2560e0b2e4aa846fd14ab7a21d7a959c708c48b3de78a0e2344bfd3";
 export const DEFAULT_CHAT_BACKGROUND =
   "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/聊天背景默认.png?auth_key=3560dae87179a8fa854ef45b80c274eda187956799340604561e589e415635fb";
 

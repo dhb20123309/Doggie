@@ -4,7 +4,7 @@
 - 无额外第三方依赖（仅使用模板内置的 shadcn/ui、lucide-react、TanStack Router）。
 
 ## 架构
-- `src/lib/types.ts`：共享契约（AiConfig 含 temperature / TestResult / ScreenId：home|settings|chat|rolechat|worldbook|sticker / normalizeBaseUrl）。
+- `src/lib/types.ts`：共享契约（AiConfig 含 temperature / TestResult / ScreenId：home|settings|chat|rolechat|worldbook|sticker|diary|phonepeek|bond|preference|theater|profile / normalizeBaseUrl）。
 - `src/lib/ai-api.ts`：OpenAI 兼容对接层。getCandidates 候选地址兜底（不带 /vN 时自动补 /v1 再试一次，404 才换候选）；fetchModelList 拉模型列表；testConnection/chatCompletion 均走候选；错误按状态码翻译成人话。
 - `src/lib/chat-types.ts`：Character（含 boundWorldBookIds）/ ChatEntry / SendPrefs / splitBubbles。
 - `src/lib/worldbook.ts`：世界书（global/local 过滤 + 拼 system prompt）与表情包（buildStickerHint 名单约束 + parseReplyToMessages 解析 [表情:名字]，未知名字退回文字、结尾未闭合标记丢弃）。
@@ -24,6 +24,7 @@
 - `src/components/PhoneShell.tsx`：locked 状态入口，LockScreen → 桌面路由分发；SettingsApp 收 wallpapers setter 与 onLock；URL 参数 vpDesk/vpApp 仅供截图验收直达页面。
 - 聊天背景可上传替换：lock-store.useChatBackground（key vp-phone:chat-bg:v1，默认 CDN 奶油图）→ PhoneShell → SettingsApp 第三个 WallpaperPicker + RoleChatApp background prop。
 - 暖淡黄设计系统：styles.css token hue 75-92；气泡用 .bubble-cream/.bubble-me（大圆角奶油毛玻璃、无粗边框）；时间戳 .msg-time（读 ChatEntry.at 纯展示）；Avatar status 属性叠加在线/输入中/离线圆点。
+- Companion OS（第17轮）：`src/lib/companion-store.ts` 数据层——ICON_URLS（grid9 抠图萌系图标 CDN，auth_key 完整保留）、AVATAR_BG、日记 useDiaries/diaries:v1+seedDiaries 种子、便签 memo:v1、羁绊 bond:v1（startDate 自动取最早聊天）、偏好 prefs-about-me:v1、查手机缓存 phone-peek:v1、昵称 profile:v1、两个分支剧本 SCRIPTS；桌面默认壁纸改为 lock-store.DEFAULT_HOME_WALLPAPER=奶油渐变 CDN 图。`src/components/HomeCarousel.tsx` 双屏轮播（Pointer Events 拖拽 >8px 接管、±140 阻尼、|dx|>60 翻页；屏1=时钟/问候胶囊/头像底座/日记预览/音乐胶囊/5 App 网格，屏2=Bento 番茄钟+天色+便签+心事卡；底部 glass Dock 相册/消息/设置三键平齐+未读红点）。`src/components/CompanionApps.tsx` 六子应用（Diary/PhonePeek/Bond/Preference/Theater/Profile），PhoneShell 按 ScreenId 路由分发；旧 HomeScreen.tsx 已删除。头像底座用实底 oklch 渐变（半透明 backdrop-blur 会透壁纸）。
 
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。

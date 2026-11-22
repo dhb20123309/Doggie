@@ -17,6 +17,8 @@ import {
   FileInput,
   Volume2,
   X,
+  MoreVertical,
+  Ban,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +38,7 @@ import {
   CHAT_LIVENESS,
   isRepetitiveReply,
   STORY_PROTOCOL,
+  displayName,
 } from "@/lib/chat-types";
 import {
   type WorldBook,
@@ -121,7 +124,7 @@ function lastPhotoAt(charId: string): number {
   return t;
 }
 
-type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import";
+type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail";
 
 export function RoleChatApp({ config, background, onBack }: Props) {
   const [characters, setCharacters] = useCharacters();
@@ -188,6 +191,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   // ===== 工具箱-人物档案（模块独立：只负责展示与剧情加载，不碰 system/黑白名单） =====
   const [profiles, setProfiles] = useProfiles();
   const [toolboxOpen, setToolboxOpen] = useState(false);
+  /** 拉黑彩蛋问询弹窗（在聊天页展示，只有"不拉黑了ovo"一个出口） */
+  const [blockedAsk, setBlockedAsk] = useState(false);
   /** drawer=侧边抽屉（首次进会话点白条弹出）；page=独立静态页（清空记录后从工具箱进入） */
   const [profileMode, setProfileMode] = useState<"none" | "drawer" | "page">("none");
   const [openerExpanded, setOpenerExpanded] = useState(false);
@@ -555,6 +560,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const toSecondPerson = (t: string) => t.replace(/他(看着|望着|听见|听到|感觉到)/g, "你$1").replace(/「([^」\n]{1,40})」/g, "“$1”");
 
   const flushDraft = (): boolean => {
+    if (!input.trim() || pending) return false;
+    // 拉黑状态：点发送直接走拒收提示
+    if (active?.blocked) {
+      setInput("");
+      generate();
+      return true;
+    }
     const text = input.trim();
     if (!text || pending || !ready) return false;
     const story = Boolean(active?.storyMode);
@@ -598,7 +610,18 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   const generate = () => {
-    if (pending || !ready || !active) return;
+    if (pending || !active) return;
+    // 拉黑彩蛋：消息发不出去，只回显微信式拒收提示（无需 API 配置也能演）
+    if (active.blocked) {
+      console.log(`[block] send rejected char=${active.id}`);
+      const tip: ChatEntry = { id: `blk${Date.now()}`, role: "assistant", content: "「消息已发出，但被对方拒收了。」", at: Date.now(), blockedTip: true };
+      setLog((prev) => [...prev, tip]);
+      writeLogNow(active.id, (prev) => [...prev, tip]);
+      setInput("");
+      scrollBottom();
+      return;
+    }
+    if (!ready) return;
     const s = stateRef.current;
     let entries = s.log;
     let targetId: string | null = null;
@@ -924,6 +947,40 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   if (view === "stickers") {
     return <StickerPanel stickers={stickers} onSend={sendSticker} onBack={() => setView("chat")} />;
   }
+  if (view === "detail") {
+    return (
+      <CharDetailPage
+        character={active}
+        onAlias={(v) => {
+          console.log(`[detail] alias char=${active.id} →「${v}」`);
+          setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, alias: v } : x)));
+        }}
+        onBlock={() => {
+          console.log(`[detail] block char=${active.id}`);
+          setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, blocked: true } : x)));
+          setView("chat");
+          // 拉黑后立刻弹出 TA 的挽留问询（只有"不拉黑了ovo"一个选项）
+          setBlockedAsk(true);
+        }}
+        onEdit={() => setView("edit")}
+        onClearLog={() => {
+          clearChatLog(active.id);
+          setLog([]);
+          setOpenerExpanded(false);
+          setChatCleared((prev) => ({ ...prev, [active.id]: true }));
+          console.log(`[profile] chat cleared char=${active.id}（来自资料页）`);
+          setView("chat");
+        }}
+        onDelete={() => {
+          setCharacters((prev) => prev.filter((c) => c.id !== active.id));
+          clearChatLog(active.id);
+          console.log(`[detail] delete char=${active.id}`);
+          setView(characters.length > 1 ? "list" : "chat");
+        }}
+        onBack={() => setView("chat")}
+      />
+    );
+  }
 
   // ===== 主聊天视图 =====
   const hasDraft = Boolean(input.trim());
@@ -952,13 +1009,16 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         <div className="flex items-center gap-2">
           <Avatar character={active} size={28} status={pending ? "typing" : ready ? "online" : "offline"} />
           <div className="text-center leading-tight">
-            <span className="block text-sm font-semibold">{active.name || "未命名角色"}</span>
-            <span className={`block text-[10px] ${pending ? "text-primary" : ready ? "text-success" : "text-warning"}`}>
-              {pending ? "正在回复…" : ready ? "在线" : "未配置接口"}
+            <span className="block text-sm font-semibold">{displayName(active)}</span>
+            <span className={`block text-[10px] ${active.blocked ? "text-destructive" : pending ? "text-primary" : ready ? "text-success" : "text-warning"}`}>
+              {active.blocked ? "已拉黑" : pending ? "正在回复…" : ready ? "在线" : "未配置接口"}
             </span>
           </div>
         </div>
         <div className="flex">
+          <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("detail")} aria-label="对方资料设置">
+            <MoreVertical className="size-4" />
+          </Button>
           <button
             type="button"
             onClick={() => {
@@ -1043,6 +1103,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           </p>
         )}
         {log.map((entry, i) => {
+          // 拉黑拒收提示：微信式居中灰字，不走气泡
+          if (entry.blockedTip) {
+            return (
+              <p key={entry.id} className="fade-up text-center text-[10.5px] text-muted-foreground">
+                {entry.content}
+              </p>
+            );
+          }
           // 剧情内容统一渲染为聊天区中间的浅灰剧情框（不用消息气泡）；用户消息转第二人称"你："叙述
           const prevStory = i > 0 && log[i - 1].story;
           if (entry.story || prevStory) {
@@ -1139,6 +1207,26 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         </div>
       </div>
 
+      {/* 拉黑彩蛋弹窗：TA 的挽留——只有"不拉黑了ovo"一个选项，点击即恢复正常 */}
+      {blockedAsk && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 p-8">
+          <div className="drawer-panel w-full max-w-[280px] rounded-2xl bg-white p-5 text-center shadow-2xl">
+            <p className="text-[15px] font-semibold text-neutral-800">你确定要拉黑我吗？</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-neutral-500">想清楚了再点哦……我可是会一直盯着这个对话框等你的。</p>
+            <button
+              type="button"
+              onClick={() => {
+                console.log(`[block] unblock char=${active.id} → 恢复正常`);
+                setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, blocked: false } : x)));
+                setBlockedAsk(false);
+              }}
+              className="jelly-btn mt-4 h-10 w-full rounded-xl bg-primary text-[13px] font-semibold text-primary-foreground"
+            >
+              不拉黑了 ovo
+            </button>
+          </div>
+        </div>
+      )}
       {/* 工具箱菜单：角色开场白（聊天流内展开）/ 人物档案（独立静态页） */}
       {toolboxOpen && (
         <ToolboxMenu
@@ -1171,6 +1259,129 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       {/* 独立静态页：只有关闭按钮，没有一键收起 */}
       {profileMode === "page" && profile && (
         <ProfileStandalonePage profile={profile} onClose={() => setProfileMode("none")} onLoadIntro={loadIntroToStory} />
+      )}
+    </div>
+  );
+}
+
+/* ================= 会话资料页（微信式：右上角 ⋯ 进入，改备注 + 拉黑彩蛋） ================= */
+
+function CharDetailPage({
+  character,
+  onAlias,
+  onBlock,
+  onEdit,
+  onClearLog,
+  onDelete,
+  onBack,
+}: {
+  character: Character;
+  onAlias: (v: string) => void;
+  onBlock: () => void;
+  onEdit: () => void;
+  onClearLog: () => void;
+  onDelete: () => void;
+  onBack: () => void;
+}) {
+  const [alias, setAlias] = useState(character.alias ?? "");
+  const [askBlock, setAskBlock] = useState(false);
+  const saved = alias.trim() !== (character.alias ?? "").trim();
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
+        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回聊天">
+          <ChevronLeft className="size-5" />
+        </Button>
+        <span className="text-sm font-semibold">资料设置</span>
+        <span className="size-8" />
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto px-3 pb-6 pt-3">
+        {/* 名片头 */}
+        <div className="glass flex items-center gap-3 rounded-2xl p-4">
+          <Avatar character={character} size={52} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[15px] font-semibold">{displayName(character)}</p>
+            {character.alias?.trim() && <p className="truncate text-[11px] text-muted-foreground">角色本名：{character.name || "未命名"}</p>}
+            <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{(character.persona || "暂无简介").slice(0, 36)}</p>
+          </div>
+        </div>
+        {/* 设置备注 */}
+        <div className="glass rounded-2xl p-3.5">
+          <Label htmlFor="charAlias" className="text-[12.5px] font-semibold">
+            设置备注和标签
+          </Label>
+          <div className="mt-2 flex gap-2">
+            <Input
+              id="charAlias"
+              value={alias}
+              onChange={(e) => setAlias(e.target.value)}
+              placeholder={`留空则显示「${character.name || "TA"}」`}
+              maxLength={12}
+              className="h-9 flex-1 rounded-lg glass-input text-[12.5px]"
+            />
+            <Button size="sm" className="jelly-btn h-9 shrink-0 rounded-xl px-3 text-xs" disabled={!saved} onClick={() => onAlias(alias.trim())}>
+              {saved ? "保存" : "已保存"}
+            </Button>
+          </div>
+          <p className="mt-1.5 text-[10.5px] text-muted-foreground">备注会替换会话列表、聊天顶栏和查手机里显示的名字。</p>
+        </div>
+        {/* 危险操作区 */}
+        <div className="glass overflow-hidden rounded-2xl">
+          <button type="button" onClick={onEdit} className="jelly-btn flex w-full items-center justify-between border-b border-border/50 px-4 py-3 text-left text-[13px]">
+            <span className="flex items-center gap-2">
+              <Settings2 className="size-4 text-primary" />
+              编辑角色设定
+            </span>
+            <ChevronLeft className="size-4 -rotate-90 text-muted-foreground" />
+          </button>
+          <button type="button" onClick={onClearLog} className="jelly-btn flex w-full items-center justify-between border-b border-border/50 px-4 py-3 text-left text-[13px]">
+            <span className="flex items-center gap-2">
+              <Trash2 className="size-4 text-muted-foreground" />
+              清空聊天记录
+            </span>
+            <ChevronLeft className="size-4 -rotate-90 text-muted-foreground" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (character.blocked) {
+                console.log(`[detail] already blocked char=${character.id}`);
+                return;
+              }
+              setAskBlock(true);
+            }}
+            className="jelly-btn flex w-full items-center justify-between px-4 py-3 text-left text-[13px]"
+          >
+            <span className="flex items-center gap-2 text-destructive">
+              <Ban className="size-4" />
+              {character.blocked ? "已拉黑（去聊天页点「不拉黑了」恢复）" : "拉黑"}
+            </span>
+            <ChevronLeft className="size-4 -rotate-90 text-muted-foreground" />
+          </button>
+        </div>
+        <button type="button" onClick={onDelete} className="jelly-btn glass w-full rounded-2xl py-3 text-center text-[13px] font-medium text-destructive">
+          删除角色
+        </button>
+      </div>
+      {/* 拉黑问询弹窗：TA 的挽留——只有"不拉黑了ovo"一个选项按钮，点击即取消拉黑操作 */}
+      {askBlock && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 p-8">
+          <div className="drawer-panel w-full max-w-[280px] rounded-2xl bg-white p-5 text-center shadow-2xl">
+            <p className="text-[15px] font-semibold text-neutral-800">你确定要拉黑我吗？</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-neutral-500">想清楚了再点哦……我可是会一直盯着这个对话框等你的。</p>
+            <button
+              type="button"
+              onClick={() => {
+                console.log(`[detail] block confirmed char=${character.id} → 进入拉黑状态`);
+                setAskBlock(false);
+                onBlock();
+              }}
+              className="jelly-btn mt-4 h-10 w-full rounded-xl bg-primary text-[13px] font-semibold text-primary-foreground"
+            >
+              不拉黑了 ovo
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1251,7 +1462,7 @@ function ConversationList({
             <Avatar character={c} size={44} status={c.proactiveEnabled ? "online" : "offline"} badge={unreadCount(c.id, marks)} />
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-[13.5px] font-semibold">{c.name || "未命名角色"}</span>
+                <span className="truncate text-[13.5px] font-semibold">{displayName(c)}</span>
                 {last && <span className="shrink-0 text-[10px] text-muted-foreground">{fmtTime(last.at)}</span>}
               </span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">

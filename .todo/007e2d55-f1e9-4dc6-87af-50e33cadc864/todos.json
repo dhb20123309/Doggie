@@ -1,20 +1,37 @@
 [
   {
+    "content": "查手机：切换查谁的手机 + 今日行踪/应用使用记录",
     "id": "1",
-    "status": "completed",
-    "content": "character-profile.ts：tags字段+预置档案改造（标题行/×分隔）",
-    "skills": []
+    "priority": "high",
+    "skills": [],
+    "status": "in_progress"
   },
   {
+    "content": "会话资料页：备注名 + 拉黑彩蛋弹窗（微信式入口）",
     "id": "2",
-    "status": "completed",
-    "content": "ProfileSheet.tsx：档案UI复刻酒馆截图（居中标题+胶囊标签+图文并置+竖线子标题）",
-    "skills": []
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
   },
   {
+    "content": "音乐源改为 js/json 歌单格式接入",
     "id": "3",
-    "status": "completed",
-    "content": "styles.css 装饰 token + build/dev 双门禁 + 截图验收 + AGENTS.md",
-    "skills": []
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "生成周晨砚/周风砚朋友圈预览图并挂进档案卡",
+    "id": "4",
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "build+dev 双门禁与截图验收，更新 AGENTS.md",
+    "id": "5",
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
   }
 ]

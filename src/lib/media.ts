@@ -6,6 +6,8 @@ const MUSIC_KEY = "vp-phone:music-urls:v1";
 export interface MusicTrack {
   title: string;
   url: string;
+  artist?: string;
+  cover?: string;
 }
 
 /** 默认演示曲库（无真实音源）；用户在设置里填入外部音频 URL 后启用真机播放 */
@@ -16,15 +18,116 @@ export const DEMO_TRACKS: MusicTrack[] = [
   { title: "雨天白噪音", url: "" },
 ];
 
+/** 从歌单条目提取标题：兼容字符串 / {title|name|song} / 嵌套 tracks|playlist.data */
+function pickTitle(o: unknown): string {
+  if (typeof o === "string") return o.trim();
+  if (o && typeof o === "object") {
+    const r = o as Record<string, unknown>;
+    const t = r.title ?? r.name ?? r.song ?? r.songname ?? r.songName;
+    if (typeof t === "string" && t.trim()) return t.trim();
+  }
+  return "";
+}
+function pickUrl(o: unknown): string {
+  if (typeof o === "string") return /^https?:\/\//.test(o.trim()) ? o.trim() : "";
+  if (o && typeof o === "object") {
+    const r = o as Record<string, unknown>;
+    for (const k of ["url", "src", "link", "playUrl", "br", "mp3Url"]) {
+      const v = r[k];
+      if (typeof v === "number") return String(v); // 网易云 song id
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  }
+  return "";
+}
+function pickField(o: unknown, keys: string[]): string | undefined {
+  if (!o || typeof o !== "object") return undefined;
+  const r = o as Record<string, unknown>;
+  for (const k of keys) {
+    const v = r[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+/** 归一化任意数组为曲目列表 */
+function normalizeTracks(arr: unknown[]): MusicTrack[] {
+  const out: MusicTrack[] = [];
+  for (const item of arr) {
+    const url = pickUrl(item);
+    const title = pickTitle(item);
+    if (!url && !title) continue;
+    out.push({
+      title: title || `外部曲目 ${out.length + 1}`,
+      url,
+      artist: pickField(item, ["artist", "author", "singer", "ar"]),
+      cover: pickField(item, ["cover", "pic", "image", "album", "img"]),
+    });
+  }
+  return out;
+}
+
+/** 解析用户粘贴的歌单文本：支持 JSON 数组/对象、js 赋值语句（如 window.x = [...]）、每行一个 URL */
+export function parseMusicSource(raw: string): MusicTrack[] {
+  const text = raw.trim();
+  if (!text) return [];
+  // 1) 尝试提取 JSON 片段（容忍 js 文件里的赋值前缀）
+  const jsonStart = Math.min(
+    ...[text.indexOf("["), text.indexOf("{")].filter((i) => i >= 0).concat(Number.MAX_SAFE_INTEGER)
+  );
+  if (jsonStart !== Number.MAX_SAFE_INTEGER) {
+    const candidate = text.slice(jsonStart);
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      // 去掉尾部分号/注释再试
+      try {
+        parsed = JSON.parse(candidate.replace(/;\s*$/, ""));
+      } catch {
+        parsed = null;
+      }
+    }
+    if (parsed != null) {
+      // 对象：在常见字段里找数组
+      let arr: unknown[] | null = null;
+      if (Array.isArray(parsed)) arr = parsed;
+      else if (typeof parsed === "object") {
+        const obj = parsed as Record<string, unknown>;
+        for (const key of ["tracks", "list", "songs", "data", "music", "playlist", "items"]) {
+          const v = obj[key];
+          if (Array.isArray(v)) { arr = v; break; }
+          if (v && typeof v === "object") {
+            const inner = (v as Record<string, unknown>).tracks ?? (v as Record<string, unknown>).list;
+            if (Array.isArray(inner)) { arr = inner; break; }
+          }
+        }
+      }
+      if (arr) {
+        const tracks = normalizeTracks(arr);
+        if (tracks.length) return tracks;
+      }
+    }
+  }
+  // 2) 纯文本按行：每行一个 URL 或 "歌名|URL" / "歌名 - URL"
+  const tracks: MusicTrack[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const l = line.trim();
+    if (!l || l.startsWith("//") || l.startsWith("#")) continue;
+    const m = l.match(/^(.*?)[|\t]\s*(https?:\/\/\S+)$/) ?? l.match(/^(.*?)\s+-\s+(https?:\/\/\S+)$/);
+    if (m) tracks.push({ title: m[1].trim() || `曲目 ${tracks.length + 1}`, url: m[2] });
+    else if (/^https?:\/\//.test(l)) tracks.push({ title: `曲目 ${tracks.length + 1}`, url: l });
+  }
+  return tracks;
+}
+
 export function loadMusicTracks(): MusicTrack[] {
   try {
     const raw = localStorage.getItem(MUSIC_KEY);
     if (raw) {
-      const list = JSON.parse(raw) as string[];
-      const real = list.filter((u) => u.trim());
-      if (real.length) {
-        return real.map((url, i) => ({ title: `外部曲目 ${i + 1}`, url: url.trim() }));
-      }
+      const list = JSON.parse(raw) as MusicTrack[];
+      const real = list.filter((u) => u.url?.trim());
+      if (real.length) return real;
     }
   } catch {
     /* ignore */
@@ -32,9 +135,9 @@ export function loadMusicTracks(): MusicTrack[] {
   return DEMO_TRACKS;
 }
 
-export function saveMusicTracks(urls: string[]): void {
+export function saveMusicTracks(tracks: MusicTrack[]): void {
   try {
-    localStorage.setItem(MUSIC_KEY, JSON.stringify(urls));
+    localStorage.setItem(MUSIC_KEY, JSON.stringify(tracks));
   } catch {
     /* 隐私模式忽略 */
   }

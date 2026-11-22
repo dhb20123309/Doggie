@@ -144,14 +144,17 @@ export function DiaryApp({ config, onBack }: AppProps) {
 export function PhonePeekApp({ onBack }: AppProps) {
   const [characters] = useCharacters();
   const [peek, setPeek] = usePhonePeek();
-  const charId = characters[0]?.id ?? "zhou-chenyan";
+  // 可切换查谁的手机：默认第一个角色
+  const [whoIdx, setWhoIdx] = useState(0);
+  const charId = characters[Math.min(whoIdx, characters.length - 1)]?.id ?? "zhou-chenyan";
   const ch = characters.find((c) => c.id === charId) ?? characters[0];
   const data = peek?.charId === charId ? peek : makePeek(charId);
   useEffect(() => {
     if (!peek || peek.charId !== charId) setPeek(data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [charId]);
   const avatarIsImg = ch?.avatar?.startsWith("data:") || ch?.avatar?.startsWith("http");
+  const maxMins = Math.max(...data.appUsage.map((a) => a.mins), 1);
   return (
     <div className="lock-fade flex h-full flex-col">
       <ShellHeader title="查手机" onBack={onBack} action={
@@ -159,6 +162,23 @@ export function PhonePeekApp({ onBack }: AppProps) {
           <RefreshCw className="size-4" />
         </button>
       } />
+      {/* 哥哥/弟弟切换 */}
+      {characters.length > 1 && (
+        <div className="glass mx-3 mt-2.5 flex gap-1 rounded-full p-1">
+          {characters.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setWhoIdx(i)}
+              className={`jelly-btn flex-1 rounded-full py-1.5 text-[12px] font-medium transition-colors ${
+                i === Math.min(whoIdx, characters.length - 1) ? "bg-primary text-primary-foreground" : INK
+              }`}
+            >
+              {c.alias?.trim() || c.name || "TA"} 的手机
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex-1 space-y-3 overflow-y-auto px-3 pb-6 pt-3">
         {/* 模拟锁屏 */}
         <div className={`glass rounded-2xl px-4 py-5 text-center ${INK}`}>
@@ -166,7 +186,38 @@ export function PhonePeekApp({ onBack }: AppProps) {
             {String(new Date().getHours()).padStart(2, "0")}:{String(new Date().getMinutes()).padStart(2, "0")}
           </p>
           <p className="mt-1 text-2xl font-light">🔋 {data.battery}%</p>
-          <p className={`mt-1 text-[10px] ${SUB}`}>密码错误 3 次，已偷偷解锁 🔓</p>
+          <p className={`mt-1 text-[10px] ${SUB}`}>密码错误 3 次，已偷偷解锁 🔓（{ch?.name || "TA"} 的手机）</p>
+        </div>
+        {/* 今日行踪 */}
+        <div className="glass rounded-2xl p-3.5">
+          <p className={`mb-2 text-[12px] font-semibold ${INK}`}>📍 TA 今天去了哪里</p>
+          <ol className="relative space-y-2.5 pl-4">
+            <span className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-primary/25" aria-hidden />
+            {data.movements.map((m, i) => (
+              <li key={i} className="relative">
+                <span className="absolute -left-4 top-1 size-2.5 rounded-full border-2 border-primary bg-white" aria-hidden />
+                <p className={`text-[11.5px] font-semibold ${INK}`}>{m.place} <span className={`ml-1 font-normal ${SUB}`}>{m.time}</span></p>
+                <p className={`text-[10.5px] leading-relaxed ${SUB}`}>{m.note}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+        {/* 应用使用记录 */}
+        <div className="glass rounded-2xl p-3.5">
+          <p className={`mb-2 text-[12px] font-semibold ${INK}`}>⏱️ 今日屏幕使用 {Math.round(data.appUsage.reduce((s, a) => s + a.mins, 0) / 6) / 10} 小时</p>
+          <ul className="space-y-2">
+            {data.appUsage.map((a) => (
+              <li key={a.name} className={`text-[11.5px] ${INK}`}>
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">{a.icon} {a.name}</span>
+                  <span className={`text-[10.5px] ${SUB}`}>{a.mins >= 60 ? `${Math.floor(a.mins / 60)} 时 ${a.mins % 60} 分` : `${a.mins} 分钟`}</span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/50">
+                  <div className="h-full rounded-full bg-gradient-to-r from-primary/70 to-primary" style={{ width: `${Math.round((a.mins / maxMins) * 100)}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
         {/* 搜索记录 */}
         <div className="glass rounded-2xl p-3.5">

@@ -16,6 +16,15 @@ export interface Character {
   proactiveEnabled?: boolean;
   /** 互动剧情模式（对标 Mufy）：开启后聊天走第三人称剧情链路，与普通私聊互通同一份记忆 */
   storyMode?: boolean;
+  /** 会话备注名（微信式"设置备注和标签"，显示优先于角色本名） */
+  alias?: string;
+  /** 拉黑彩蛋：true 时聊天页变灰、TA 的消息被拦截为"消息已发出，但被对方拒收" */
+  blocked?: boolean;
+}
+
+/** 展示名：备注优先 */
+export function displayName(ch: Character): string {
+  return ch.alias?.trim() || ch.name || "未命名角色";
 }
 
 /** 聊天页内的消息：assistant 一条回复可拆成多个气泡 */
@@ -34,6 +43,8 @@ export interface ChatEntry {
   proactive?: boolean;
   /** 互动剧情模式产出的内容：渲染为聊天区中间浅灰剧情框，不用普通气泡 */
   story?: boolean;
+  /** 拉黑后的拒收系统提示（居中灰字，非角色消息） */
+  blockedTip?: boolean;
 }
 
 /** 会话已读水位：charId → 最后查看时间戳 */

@@ -174,7 +174,7 @@ interface MusicItem {
 export function MusicApp({ onBack }: { onBack: () => void }) {
   const items: MusicItem[] = (() => {
     const tracks = loadMusicTracks();
-    if (tracks.some((t) => t.url)) return tracks.map((t) => ({ title: t.title, sub: "外部音源", url: t.url }));
+    if (tracks.some((t) => t.url)) return tracks.map((t) => ({ title: t.title, sub: t.artist ? `${t.artist} · 外部音源` : "外部音源", url: t.url }));
     return [
       { title: "晨间轻音乐", sub: "Pocket FM · 02:41" },
       { title: "午后雨声白噪音", sub: "Ambient Lab · 05:00" },

@@ -88,6 +88,10 @@ export interface PhonePeek {
   battery: number;
   searches: string[];
   drafts: string[];
+  /** 今日行踪：时间 + 地点 + 一句话 */
+  movements: { time: string; place: string; note: string }[];
+  /** 今日应用使用记录：图标 + 名称 + 时长 */
+  appUsage: { icon: string; name: string; mins: number }[];
   at: number;
 }
 
@@ -104,10 +108,65 @@ const DRAFT_POOL: Record<string, string[]> = {
   "zhou-fengyan": ["哥哥今天又在你面前晃了吧。没关系，我会等到你自己走过来。", "草稿箱第 17 条：要不要直接告诉你，那年初吻的时候我在场。", "速写背面写了句话，不敢正面递给你，先放这里。"],
 };
 
+const MOVEMENT_POOL: Record<string, { time: string; place: string; note: string }[][]> = {
+  "zhou-chenyan": [
+    [
+      { time: "07:10", place: "校门口早餐铺", note: "买了两份小笼包，有一份没动" },
+      { time: "08:30-11:50", place: "高三(2)班教室", note: "早自习+三节课，趴桌睡了半节数学" },
+      { time: "12:40", place: "体育馆", note: "校队对抗训练，赢了首发位" },
+      { time: "16:20", place: "琴房走廊", note: "路过时站了十分钟，没进去" },
+      { time: "19:00", place: "江边步道", note: "骑摩托兜了一圈，风很大" },
+    ],
+    [
+      { time: "07:45", place: "地下车库", note: "洗车，副驾上发现一根你的头发丝" },
+      { time: "10:00-12:00", place: "年级办公室", note: "被叫去补月考卷面分" },
+      { time: "14:30", place: "篮球场", note: "单人投篮两小时，进了 148 个" },
+      { time: "18:10", place: "奶茶店", note: "点了两杯，另一杯说是顺手买的" },
+    ],
+  ],
+  "zhou-fengyan": [
+    [
+      { time: "08:00", place: "美术楼天台", note: "写生，画的全是同一个方向" },
+      { time: "10:20", place: "图书馆三楼", note: "借了本《色彩心理学》，翻到某页折了角" },
+      { time: "13:00", place: "甜品工坊", note: "白茶玛奇朵买一送一，第二杯装进了保温袋" },
+      { time: "15:40", place: "旧音乐教室", note: "弹了四十分钟琴，门没锁" },
+      { time: "20:30", place: "家里画室", note: "速写本新起一页，标题被涂掉了" },
+    ],
+    [
+      { time: "09:15", place: "花艺工作室", note: "买了一束洋桔梗，说是给社团活动用" },
+      { time: "11:30", place: "文创市集", note: "逛了两小时，摊位老板说他一直盯着某个挂件看" },
+      { time: "14:00", place: "摄影棚", note: "拍社刊封面，要求加拍一组胶片" },
+      { time: "17:50", place: "便利店门口", note: "躲雨时买了把伞——和你上次那把同款" },
+    ],
+  ],
+};
+
+const APP_POOL: Record<string, { icon: string; name: string; mins: number }[]> = {
+  "zhou-chenyan": [
+    { icon: "🏀", name: "虎扑", mins: 87 },
+    { icon: "🎵", name: "网易云音乐", mins: 64 },
+    { icon: "💬", name: "微信", mins: 52 },
+    { icon: "📷", name: "醒图", mins: 31 },
+    { icon: "🛵", name: "高德地图", mins: 18 },
+    { icon: "🎮", name: "王者荣耀", mins: 45 },
+  ],
+  "zhou-fengyan": [
+    { icon: "📷", name: "Instagram", mins: 92 },
+    { icon: "🎵", name: "Spotify", mins: 78 },
+    { icon: "✏️", name: "Procreate", mins: 66 },
+    { icon: "💬", name: "微信", mins: 41 },
+    { icon: "📖", name: "豆瓣", mins: 27 },
+    { icon: "🗺️", name: "小红书", mins: 55 },
+  ],
+};
+
 export function makePeek(charId: string): PhonePeek {
   const searches = SEARCH_POOL[charId]?.[Math.floor(Math.random() * (SEARCH_POOL[charId]?.length ?? 1))] ?? ["搜索记录为空"];
   const drafts = (DRAFT_POOL[charId] ?? []).slice(0, 3);
-  return { charId, battery: 15 + Math.floor(Math.random() * 70), searches, drafts, at: Date.now() };
+  const pool = MOVEMENT_POOL[charId] ?? [];
+  const movements = pool.length ? pool[Math.floor(Math.random() * pool.length)] : [{ time: "全天", place: "未知", note: "行程神秘失踪" }];
+  const apps = (APP_POOL[charId] ?? []).map((a) => ({ ...a, mins: Math.max(5, a.mins + Math.floor(Math.random() * 24) - 12) })).sort((x, y) => y.mins - x.mins);
+  return { charId, battery: 15 + Math.floor(Math.random() * 70), searches, drafts, movements, appUsage: apps, at: Date.now() };
 }
 
 /* ---------- 个人资料（称呼昵称） ---------- */

@@ -10,7 +10,7 @@ import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, type VoiceConfig } from "@/lib/tts";
-import { loadMusicTracks, saveMusicTracks, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, type ImageConfig } from "@/lib/media";
+import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, type ImageConfig } from "@/lib/media";
 
 interface Props {
   config: AiConfig;
@@ -472,27 +472,43 @@ function VoiceSection() {
   );
 }
 
-/** 外部音乐真机播放：每行一个音频 URL */
+/** 外部音乐歌单：粘贴 JSON / JS 歌单文件或每行一条 URL，解析后真机播放 */
 function MusicSourceSection() {
-  const [text, setText] = useState(() => loadMusicTracks().map((t) => t.url).filter(Boolean).join("\n"));
-  const [savedMsg, setSavedMsg] = useState(false);
+  const [text, setText] = useState(() => {
+    const tracks = loadMusicTracks().filter((t) => t.url);
+    return tracks.length ? JSON.stringify(tracks.map(({ title, url }) => ({ title, url })), null, 2) : "";
+  });
+  const [savedMsg, setSavedMsg] = useState("");
 
   const save = () => {
-    saveMusicTracks(
-      text.split(/\r?\n/).map((u) => u.trim()).filter(Boolean)
-    );
-    setSavedMsg(true);
-    setTimeout(() => setSavedMsg(false), 1500);
+    const tracks = parseMusicSource(text);
+    if (!tracks.length) {
+      setSavedMsg("没解析到任何曲目，检查一下格式");
+      setTimeout(() => setSavedMsg(""), 2500);
+      return;
+    }
+    saveMusicTracks(tracks);
+    console.log(`[music] source saved tracks=${tracks.length}`);
+    setSavedMsg(`已解析 ${tracks.length} 首，重开音乐 App 生效`);
+    setTimeout(() => setSavedMsg(""), 2500);
   };
 
   return (
     <div className="glass space-y-2.5 rounded-2xl p-3.5">
-      <p className="text-[13px] font-semibold">音乐 App 音源</p>
-      <Textarea rows={4} placeholder={"每行一个可公网访问的音频直链\nhttps://example.com/song.mp3"} value={text} onChange={(e) => setText(e.target.value)} className="resize-none rounded-lg glass-input text-[11.5px] leading-relaxed" />
+      <p className="text-[13px] font-semibold">音乐 App 歌单源（JSON / JS）</p>
+      <Textarea
+        rows={6}
+        placeholder={'直接粘贴歌单，支持三种格式：\n\n1. JSON 数组：[{"title":"晴天","url":"https://.../mp3"}]\n2. JS 文件内容：const list = [{"name":"晴天","src":"https://..."}];\n3. 每行一条："歌名|音频直链"'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="resize-none rounded-lg glass-input text-[11px] leading-relaxed font-mono"
+      />
       <Button size="sm" className="jelly-btn h-8 w-full rounded-xl text-xs" onClick={save}>
-        {savedMsg ? "已保存，重开音乐 App 生效" : "保存音源"}
+        {savedMsg || "解析并保存歌单"}
       </Button>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">填写后音乐 App 用真机播放这些曲目；留空则为无音源的演示界面。</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        自动识别 title/name/song 为歌名、url/src/link 为音频地址；留空则为无音源的演示界面。
+      </p>
     </div>
   );
 }

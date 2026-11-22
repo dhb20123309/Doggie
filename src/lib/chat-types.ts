@@ -46,7 +46,7 @@ export interface SendPrefs {
 }
 
 export const DEFAULT_SEND_PREFS: SendPrefs = {
-  sendReplacesGenerate: false,
+  sendReplacesGenerate: true,
   enterSendsText: true,
   autoReplyAfterSend: false,
 };

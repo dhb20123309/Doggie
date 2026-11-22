@@ -20,7 +20,7 @@
 - `src/lib/import-parse.ts`：角色卡 md 解析（标题提取角色名 + [System Note] 起正文为人设）、世界书 md 按 ## 分节拆 local 条目、cardToCharacter 生成完整角色。
 - `src/lib/tts.ts`：外部语音通道 VoiceConfig（vp-phone:voiceconfig:v1，地址/Key 留空回落聊天接口）；synthesizeSpeech 走 /audio/speech 候选兜底；角色 voiceId 单独绑音色。
 - `src/lib/media.ts`：音乐真机播放（vp-phone:music-urls:v1 音频直链列表）+ 独立生图通道 ImageConfig（vp-phone:imageconfig:v1，mode=openai 自定义网关/pollinations 免费免 Key；留空回落聊天接口 /images/generations，全失败回落预置 CDN 日常照，auth_key 必须完整保留）；pollinations 结果必须转 data URL 持久化（blob URL 刷新裂图）。
-- `src/components/RoleChatApp.tsx`：微信式会话列表（ConversationList）→ 单会话 chat；view 含 import 一键导入；主动消息为闲置后调用 chatCompletion 实时生成（system 追加"主动开场、禁旁白"场景指令，失败回落 PROACTIVE_LINES），entry.proactive 标记；未打开会话头像红字未读角标、进入即清；列表顶栏"TA 们正在酝酿消息…"徽标；前情提要小灰框（仅角色主动找过且用户未回复时一句话）；表情库可点发（stickerUrl）；朗读按钮（voiceReady 才显示）。
+- `src/components/RoleChatApp.tsx`：微信式会话列表（ConversationList）→ 单会话 chat；view 含 import 一键导入；发送习惯默认 sendReplacesGenerate=true（点发送即自动回复、无需手动确认，旧数据经 vp-phone:send-prefs:migrated-v1 标记一次性迁移）；主动消息闲置 1 分钟即可能触发（每 20s 检查、75% 概率、一轮可连发 1-2 条间隔数秒），模型实时生成（失败回落 PROACTIVE_LINES），entry.proactive 标记；未打开会话头像红字未读角标、进入即清；列表顶栏"TA 们正在酝酿消息…"徽标；前情提要小灰框；表情库可点发（stickerUrl）；朗读按钮（voiceReady 才显示）。
 - `src/components/PhoneShell.tsx`：locked 状态入口，LockScreen → 桌面路由分发；SettingsApp 收 wallpapers setter 与 onLock；URL 参数 vpDesk/vpApp 仅供截图验收直达页面。
 - 聊天背景可上传替换：lock-store.useChatBackground（key vp-phone:chat-bg:v1，默认 CDN 奶油图）→ PhoneShell → SettingsApp 第三个 WallpaperPicker + RoleChatApp background prop。
 - 暖淡黄设计系统：styles.css token hue 75-92；气泡用 .bubble-cream/.bubble-me（大圆角奶油毛玻璃、无粗边框）；时间戳 .msg-time（读 ChatEntry.at 纯展示）；Avatar status 属性叠加在线/输入中/离线圆点。

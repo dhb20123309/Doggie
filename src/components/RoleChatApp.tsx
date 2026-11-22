@@ -77,9 +77,11 @@ const fmtTime = (at: number) => {
 
 const EMOJIS = ["🌙", "🦊", "🐱", "🤖", "🌸", "⚡", "🫧", "🍵", "🎧", "🪐", "🔥", "🎻"];
 const AUTO_DELAY_MS = 2000;
-/** 主动消息检查间隔 / 距上次用户发言超过该时长才可能"不请自来" */
-const PROACTIVE_CHECK_MS = 60_000;
-const PROACTIVE_IDLE_MS = 5 * 60_000;
+/** 主动消息检查间隔 / 距上次会话内任何消息超过该时长即可能"不请自来" */
+const PROACTIVE_CHECK_MS = 20_000;
+const PROACTIVE_IDLE_MS = 60_000;
+/** 每轮定时器最多连发几条，让角色更像连着碎碎念 */
+const PROACTIVE_MAX_PER_TICK = 2;
 
 type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import";
 
@@ -90,6 +92,21 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   // 会话日志严格跟随当前选中角色；未选中时用空会话，绝不回落到别的角色（修复串会话 bug）
   const [log, setLog] = useChatLog(active?.id ?? "");
   const [prefs, setPrefs] = useSendPrefs();
+  // 老用户迁移：默认值曾为"发送只发文字需手动点生成"，现改为无需确认直接回复；仅对未动过配置的旧数据强制开启一次
+  const prefsMigrated = useRef(false);
+  useEffect(() => {
+    if (prefsMigrated.current) return;
+    prefsMigrated.current = true;
+    try {
+      if (!localStorage.getItem("vp-phone:send-prefs:migrated-v1")) {
+        localStorage.setItem("vp-phone:send-prefs:migrated-v1", "1");
+        if (!prefs.sendReplacesGenerate) setPrefs((p) => ({ ...p, sendReplacesGenerate: true }));
+      }
+    } catch {
+      /* 隐私模式忽略 */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [books, setBooks] = useWorldBooks();
   const [stickers, setStickers] = useStickers();
   const [view, setView] = useState<View>("list");
@@ -237,9 +254,46 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, log, pending, ready, prefs.autoReplyAfterSend, view]);
 
-  // 角色主动发消息：离开聊天页（或在列表）时，闲置足够久后由模型实时生成一条贴合人设的消息进对应会话
+  // 角色主动发消息：闲置足够久后由模型实时生成，一次 tick 可连发多条（间隔数秒），频率更高
   useEffect(() => {
     if (!ready || view === "import") return;
+    let cancelled = false;
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+    const fireOne = async (ch: Character, last: ChatEntry | null) => {
+      const sys =
+        buildSys(ch) +
+        "\n\n【场景】现在没有对方发来的消息，是你（" +
+        (ch.name || "TA") +
+        "）主动想找对方说话。请像日常手机聊天一样，主动发来 1-2 条你想说的话：只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
+      const history: { role: string; content: string }[] = [
+        { role: "system", content: sys },
+        ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),
+      ];
+      let line = "";
+      try {
+        line = await chatCompletion(config, history);
+      } catch {
+        const lines = PROACTIVE_LINES[ch.id];
+        line = lines?.length ? lines[Math.floor(Math.random() * lines.length)] : "";
+      }
+      if (cancelled) return;
+      line = line
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 3)
+        .join("\n");
+      if (!line) return;
+      setLogForChar(ch.id, {
+        id: `p${Date.now()}`,
+        role: "assistant",
+        content: line,
+        at: Date.now(),
+        proactive: true,
+      });
+    };
+
     const timer = window.setInterval(async () => {
       const candidates = characters.filter((c) => c.proactiveEnabled);
       if (!candidates.length) return;
@@ -247,44 +301,23 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const last = readLastEntry(ch.id);
       const idle = !last || Date.now() - last.at > PROACTIVE_IDLE_MS;
       if (!idle) return;
-      if (Math.random() > 0.4) return; // 不是每次都发
+      if (Math.random() > 0.75) return; // 大部分检查都会触发，偶尔放过
       setProactiveBusy(true);
       try {
-        const sys =
-          buildSys(ch) +
-          "\n\n【场景】现在没有对方发来的消息，是你（" +
-          (ch.name || "TA") +
-          "）主动想找对方说话。请像日常手机聊天一样，主动发来 1-2 条你想说的话：只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
-        const history: { role: string; content: string }[] = [
-          { role: "system", content: sys },
-          ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),
-        ];
-        let line = "";
-        try {
-          line = await chatCompletion(config, history);
-        } catch {
-          const lines = PROACTIVE_LINES[ch.id];
-          line = lines?.length ? lines[Math.floor(Math.random() * lines.length)] : "";
+        const count = 1 + Math.floor(Math.random() * PROACTIVE_MAX_PER_TICK);
+        for (let i = 0; i < count; i++) {
+          if (cancelled) break;
+          await fireOne(ch, i === 0 ? last : readLastEntry(ch.id));
+          if (i < count - 1 && !cancelled) await sleep(4_000 + Math.random() * 6_000);
         }
-        line = line
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .slice(0, 3)
-          .join("\n");
-        if (!line) return;
-        setLogForChar(ch.id, {
-          id: `p${Date.now()}`,
-          role: "assistant",
-          content: line,
-          at: Date.now(),
-          proactive: true,
-        });
       } finally {
-        setProactiveBusy(false);
+        if (!cancelled) setProactiveBusy(false);
       }
     }, PROACTIVE_CHECK_MS);
-    return () => clearInterval(timer);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, view, characters, buildSys, config]);
 

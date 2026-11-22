@@ -27,6 +27,22 @@ export interface ChatEntry {
   at: number;
 }
 
+/** 输入与发送习惯（对应 SullyOS「聊天设置 → 输入与发送」） */
+export interface SendPrefs {
+  /** 发送按钮代替生成按钮：点发送即请求回复（模式01/04） */
+  sendReplacesGenerate: boolean;
+  /** 回车发送文字；关闭时回车只暂存草稿（模式02） */
+  enterSendsText: boolean;
+  /** 发完后自动生成回复：无草稿且停止输入 2 秒后触发（模式03） */
+  autoReplyAfterSend: boolean;
+}
+
+export const DEFAULT_SEND_PREFS: SendPrefs = {
+  sendReplacesGenerate: false,
+  enterSendsText: true,
+  autoReplyAfterSend: false,
+};
+
 /** 按真实换行拆分回复为气泡，去掉空行；整段一行时即一个气泡 */
 export function splitBubbles(text: string): string[] {
   const bubbles = text

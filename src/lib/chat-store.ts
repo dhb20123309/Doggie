@@ -1,9 +1,10 @@
 // 角色与聊天记录的本地持久化（localStorage），刷新后保留
 import { useEffect, useState } from "react";
-import { type Character, type ChatEntry, DEFAULT_CHARACTER } from "./chat-types";
+import { type Character, type ChatEntry, type SendPrefs, DEFAULT_CHARACTER, DEFAULT_SEND_PREFS } from "./chat-types";
 
 const CHAR_KEY = "vp-phone:character:v1";
 const LOG_KEY = "vp-phone:rolechat-log:v1";
+const PREFS_KEY = "vp-phone:send-prefs:v1";
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -57,6 +58,10 @@ export function useCharacter(): [Character, Setter<Character>] {
 
 export function useChatLog(): [ChatEntry[], Setter<ChatEntry[]>] {
   return usePersisted(LOG_KEY, [] as ChatEntry[]);
+}
+
+export function useSendPrefs(): [SendPrefs, Setter<SendPrefs>] {
+  return usePersisted(PREFS_KEY, DEFAULT_SEND_PREFS);
 }
 
 export function clearChatLog(): void {

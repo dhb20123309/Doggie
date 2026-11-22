@@ -59,11 +59,14 @@ import {
   useWorldBooks,
   useStickers,
   PROACTIVE_LINES,
+  usePersisted,
 } from "@/lib/chat-store";
 import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
 import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
+import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
+import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 
 interface Props {
@@ -168,6 +171,73 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const [marks, setMarks] = useReadMarks();
   const listRef = useRef<HTMLDivElement>(null);
   const ready = isConfigured(config);
+
+  // ===== 工具箱-人物档案（模块独立：只负责展示与剧情加载，不碰 system/黑白名单） =====
+  const [profiles, setProfiles] = useProfiles();
+  const [toolboxOpen, setToolboxOpen] = useState(false);
+  /** drawer=侧边抽屉（首次进会话点白条弹出）；page=独立静态页（清空记录后从工具箱进入） */
+  const [profileMode, setProfileMode] = useState<"none" | "drawer" | "page">("none");
+  const [openerExpanded, setOpenerExpanded] = useState(false);
+  const [profileImportOpen, setProfileImportOpen] = useState(false);
+  /** 清空过记录的 charId：开场白条消失且不再自动弹出（localStorage 记忆，重新发消息后恢复） */
+  const [chatCleared, setChatCleared] = usePersisted<Record<string, boolean>>("vp-phone:chat-cleared:v1", {});
+  /** 当前角色档案：用户导入优先，缺失时回落内置预置（两份 charId 数据隔离） */
+  const profile: CharacterProfile | null = active ? profiles[active.id] ?? presetProfileFor(active.id) : null;
+  // 首次使用把两份预置档案落盘一次（导入哪份生效哪份，之后不再覆盖）
+  const presetSeeded = useRef(false);
+  useEffect(() => {
+    if (presetSeeded.current) return;
+    presetSeeded.current = true;
+    setProfiles((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of ["zhou-chenyan", "zhou-fengyan"]) {
+        if (!next[id]) {
+          const p = presetProfileFor(id);
+          if (p) { next[id] = p; changed = true; }
+        }
+      }
+      if (changed) console.log("[profile] seed preset 周晨砚/周风砚 档案落盘");
+      return changed ? next : prev;
+    });
+  }, [setProfiles]);
+  // 切会话时收起所有档案形态与展开态
+  const profileCharRef = useRef(active?.id ?? "");
+  if (profileCharRef.current !== (active?.id ?? "")) {
+    profileCharRef.current = active?.id ?? "";
+    setToolboxOpen(false);
+    setProfileMode("none");
+    setOpenerExpanded(false);
+    setProfileImportOpen(false);
+  }
+
+  /** 开局引子一键加载到互动剧情模式：作为首条剧情内容写入会话（记忆互通、完整保留），并开启该角色 storyMode */
+  const loadIntroToStory = () => {
+    if (!active || !profile?.intro) return;
+    const entry: ChatEntry = { id: `story-intro-${Date.now()}`, role: "assistant", content: profile.intro, at: Date.now(), story: true };
+    writeLogNow(active.id, (prev) => [...prev, entry]);
+    setLog((prev) => [...prev, entry]);
+    setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, storyMode: true } : x)));
+    setProfileMode("none");
+    setToolboxOpen(false);
+    scrollBottom();
+    console.log(`[profile] intro→story char=${active.id} len=${profile.intro.length}`);
+  };
+  const saveCover = (dataUrl: string) => {
+    if (!active || !profile) return;
+    setProfiles((prev) => ({ ...prev, [active.id]: { ...profile, coverUrl: dataUrl, updatedAt: Date.now() } }));
+    console.log(`[profile] cover saved char=${active.id}`);
+  };
+  const importProfile = (name: string, text: string) => {
+    if (!active) return;
+    const p = parseProfileMd(text, active.id, name);
+    p.name = name || p.name;
+    if (profile?.coverUrl) p.coverUrl = profile.coverUrl;
+    setProfiles((prev) => ({ ...prev, [active.id]: p }));
+    setProfileImportOpen(false);
+    setProfileMode("page");
+    console.log(`[profile] import char=${active.id} sections=${p.sections.length} intro=${p.intro.length ? "有" : "无"}`);
+  };
 
   const stateRef = useRef({ log, input, pending, ready, prefs });
   stateRef.current = { log, input, pending, ready, prefs };
@@ -366,6 +436,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // 顺序反了会被后续 setLog(stored) 用旧快照覆盖掉刚发的消息（曾导致自己发的消息要退出重进才可见）
     setLog((prev) => [...prev, userMsg]);
     writeLogNow(active?.id ?? "", (prev) => [...prev, userMsg]);
+    // 重新产生记录即恢复开场白条（清空记录的隐藏标记只作用于空会话期间）
+    if (chatCleared[active?.id ?? ""]) setChatCleared((prev) => ({ ...prev, [active?.id ?? ""]: false }));
     setInput("");
     scrollBottom();
     // 立即进入"正在输入中"并请求回复；请求发出后即与页面解耦，切走/返回也不会打断
@@ -791,6 +863,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             onClick={() => {
               clearChatLog(active.id);
               setLog([]);
+              // 清空记录后开场白条消失、不再自动弹出；查看档案只能走左下角工具箱
+              setOpenerExpanded(false);
+              setChatCleared((prev) => ({ ...prev, [active.id]: true }));
+              console.log(`[profile] chat cleared char=${active.id} → 白条隐藏，档案仅工具箱可达`);
             }}
             aria-label="清空聊天记录"
           >
@@ -806,7 +882,32 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         </div>
       )}
 
+      {/* 开场白条：会话有记录时默认折叠展示；清空记录后消失不再自动弹出（对齐"清除聊天记录之后白条消失"要求） */}
+      {profile?.opener && log.length > 0 && !chatCleared[active.id] && !openerExpanded && (
+        <div className="px-3 pt-2">
+          <OpenerStrip
+            opener={profile.opener}
+            expanded={false}
+            onToggle={() => {
+              console.log(`[profile] opener tapped char=${active.id} → 抽屉展开`);
+              setProfileMode("drawer");
+            }}
+          />
+        </div>
+      )}
+
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        {/* 工具箱→角色开场白：在聊天流内一次性完整展开档案（禁止局部折叠/分步加载），底部固定一键收起 */}
+        {openerExpanded && profile && (
+          <InlineProfileCard
+            profile={profile}
+            onCollapse={() => {
+              console.log(`[profile] inline collapse char=${active.id}`);
+              setOpenerExpanded(false);
+            }}
+            onLoadIntro={loadIntroToStory}
+          />
+        )}
         {log.length === 0 && !pending && (
           <p className="pt-10 text-center text-xs text-muted-foreground">
             和 {active.name || "TA"} 说点什么吧
@@ -883,6 +984,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           </Button>
         )}
         <div className="flex items-center gap-2">
+          <ToolboxButton open={toolboxOpen} onClick={() => setToolboxOpen((v) => !v)} />
           <Input
             placeholder={
               !ready
@@ -908,6 +1010,40 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           </Button>
         </div>
       </div>
+
+      {/* 工具箱菜单：角色开场白（聊天流内展开）/ 人物档案（独立静态页） */}
+      {toolboxOpen && (
+        <ToolboxMenu
+          hasProfile={Boolean(profile)}
+          onShowOpener={() => {
+            console.log(`[profile] toolbox→opener char=${active.id} 聊天流内展开`);
+            setToolboxOpen(false);
+            setOpenerExpanded(true);
+          }}
+          onOpenProfile={() => {
+            console.log(`[profile] toolbox→档案独立页 char=${active.id}`);
+            setToolboxOpen(false);
+            setProfileMode("page");
+          }}
+          onImport={() => {
+            console.log(`[profile] toolbox→导入面板 char=${active.id}`);
+            setToolboxOpen(false);
+            setProfileImportOpen(true);
+          }}
+          onClose={() => setToolboxOpen(false)}
+        />
+      )}
+      {profileImportOpen && (
+        <ProfileImportPanel defaultName={active.name || "TA"} onImport={importProfile} onClose={() => setProfileImportOpen(false)} />
+      )}
+      {/* 侧边抽屉：底层聊天页叠加半透明蒙层，弹窗尺寸固定、内部纵向滚动 */}
+      {profileMode === "drawer" && profile && (
+        <ProfileDrawer profile={profile} onClose={() => setProfileMode("none")} onLoadIntro={loadIntroToStory} onUploadCover={saveCover} />
+      )}
+      {/* 独立静态页：只有关闭按钮，没有一键收起 */}
+      {profileMode === "page" && profile && (
+        <ProfileStandalonePage profile={profile} onClose={() => setProfileMode("none")} onLoadIntro={loadIntroToStory} />
+      )}
     </div>
   );
 }

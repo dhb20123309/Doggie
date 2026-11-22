@@ -1,0 +1,26 @@
+[
+  {
+    "id": "1",
+    "status": "completed",
+    "content": "character-profile.ts：档案类型/解析器/两份预置档案/存储层",
+    "skills": []
+  },
+  {
+    "id": "2",
+    "status": "completed",
+    "content": "ProfileSheet.tsx：侧边抽屉+聊天流内展开+工具箱菜单（紧耦合同文件）",
+    "skills": []
+  },
+  {
+    "id": "3",
+    "status": "completed",
+    "content": "RoleChatApp 接线：工具箱按钮、开场白条、清除联动、剧情加载桥接",
+    "skills": []
+  },
+  {
+    "id": "4",
+    "status": "completed",
+    "content": "build+dev 双门禁与截图验收、AGENTS.md 更新",
+    "skills": []
+  }
+]

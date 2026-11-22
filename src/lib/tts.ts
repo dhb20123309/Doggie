@@ -16,9 +16,9 @@ export interface VoiceConfig {
   voices: { id: string; label: string }[];
   /** MiniMax API Key（GroupID 后的 Bearer Token） */
   minimaxKey: string;
-  /** MiniMax 接口区域：cn=api.minimax.chat，global=api.minimaxi.com */
+  /** MiniMax 接口区域：cn=api.minimaxi.com（国内 platform.minimax.cn 的 Key），global=api.minimax.io（国际平台 Key） */
   minimaxRegion: "cn" | "global";
-  /** MiniMax TTS 模型名，如 speech-02 / speech-2.5-hd-preview */
+  /** MiniMax TTS 模型名，如 speech-02-hd / speech-2.8-hd */
   minimaxModel: string;
   /** MiniMax 默认音色 voice_id，如 male-qn-qingse */
   minimaxVoice: string;
@@ -39,7 +39,7 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   ],
   minimaxKey: "",
   minimaxRegion: "cn",
-  minimaxModel: "speech-02",
+  minimaxModel: "speech-02-hd",
   minimaxVoice: "male-qn-qingse",
 };
 
@@ -115,17 +115,24 @@ async function synthesizeMiniMax(
 ): Promise<string> {
   const key = vc.minimaxKey.trim();
   if (!key) throw new Error("未填写 MiniMax API Key");
-  const host = vc.minimaxRegion === "global" ? "https://api.minimaxi.com" : "https://api.minimax.chat";
+  // 官方文档：国内 platform.minimax.cn 的 Key 打 api.minimaxi.com；国际平台 Key 打 api.minimax.io
+  const host = vc.minimaxRegion === "global" ? "https://api.minimax.io" : "https://api.minimaxi.com";
   let res: Response;
   try {
     res = await fetch(`${host}/v1/t2a_v2`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
-        model: vc.minimaxModel.trim() || "speech-02",
+        model: vc.minimaxModel.trim() || "speech-02-hd",
         text: text.slice(0, 600),
-        voice_id: voiceId?.trim() || vc.minimaxVoice.trim() || "male-qn-qingse",
-        audio: { format: "mp3", sample_rate: 32000 },
+        // t2a_v2 必填结构是 voice_setting.voice_id / audio_setting（顶层 voice_id/audio 会被判 empty field）
+        voice_setting: {
+          voice_id: voiceId?.trim() || vc.minimaxVoice.trim() || "male-qn-qingse",
+          speed: 1,
+          vol: 1,
+          pitch: 0,
+        },
+        audio_setting: { format: "mp3", sample_rate: 32000, bitrate: 128000, channel: 1 },
         stream: false,
       }),
     });
@@ -152,7 +159,7 @@ async function synthesizeMiniMax(
   }
   const hex = json.data?.audio;
   if (!hex) throw new Error("接口通了但没返回音频，检查模型/音色名是否正确");
-  console.log(`[tts] synth ok provider=minimax chars=${text.length}`);
+  console.log(`[tts] synth ok provider=minimax host=${host} model=${vc.minimaxModel} voice=${voiceId || vc.minimaxVoice} chars=${text.length}`);
   return hexToAudioUrl(hex);
 }
 

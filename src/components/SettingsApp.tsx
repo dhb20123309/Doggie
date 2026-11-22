@@ -487,17 +487,17 @@ function VoiceSection({ config }: { config: AiConfig }) {
               onClick={() => setForm((f) => ({ ...f, minimaxRegion: "cn" }))}
               className={`jelly-btn rounded-full px-3 py-1 text-[10.5px] ${form.minimaxRegion === "cn" ? "bg-primary/15 font-semibold text-primary" : "text-muted-foreground"}`}
             >
-              国内 api.minimax.chat
+              国内 api.minimaxi.com
             </button>
             <button
               type="button"
               onClick={() => setForm((f) => ({ ...f, minimaxRegion: "global" }))}
               className={`jelly-btn rounded-full px-3 py-1 text-[10.5px] ${form.minimaxRegion === "global" ? "bg-primary/15 font-semibold text-primary" : "text-muted-foreground"}`}
             >
-              国际 api.minimaxi.com
+              国际 api.minimax.io
             </button>
           </div>
-          <Input placeholder="模型名，如 speech-02 / speech-2.5-hd-preview" value={form.minimaxModel} onChange={(e) => setForm((f) => ({ ...f, minimaxModel: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <Input placeholder="模型名，如 speech-02-hd / speech-2.8-hd" value={form.minimaxModel} onChange={(e) => setForm((f) => ({ ...f, minimaxModel: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
           <Input placeholder="默认音色 voice_id，如 male-qn-qingse" value={form.minimaxVoice} onChange={(e) => setForm((f) => ({ ...f, minimaxVoice: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
           <div className="flex flex-wrap gap-1.5">
             {MINIMAX_VOICES.map((v) => (

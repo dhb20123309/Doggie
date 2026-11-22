@@ -1,0 +1,97 @@
+# WebSearch 完整正文
+# query: MiniMax t2a_v2 API "invalid params" empty field 必填参数 voice_id model 2026
+# index: 6
+
+MiniMax
+最后更新时间： 2026-06-03 17:57:21
+本页导读
+使用方式
+参数参考
+速率限制
+本文主要介绍如何在接口中配置 MiniMax TTS。
+MiniMax TTS 提供高表现力、情感丰富的中文音色，具备先进的韵律控制能力。其语音模型以自然的语调著称，超越单调合成。如果你需要音色个性和情感表现力 ——例如虚拟陪伴或客服机器人——MiniMax TTS 是理想选择。
+使用方式
+如需使用 MiniMax 作为 TTS 引擎，请在 StartAIConversation API 的 TTSConfig 字段中传入以下 JSON：
+// json — TTSConfig
+{
+"TTSType": "minimax",
+"Model": "speech-2.8-turbo",
+"APIUrl": "https://api.minimax.io/v1/t2a_v2",
+"APIKey": "<your_minimax_api_key>",
+"GroupId": "<your_group_id>",
+"VoiceType": "female-tianmei",
+"Speed": 1.2
+}
+完整 TTSConfig 参数参考，请参阅 Text-to-Speech Configuration。
+参数参考
+字段
+类型
+必填
+说明
+TTSType
+String
+是
+固定值： "minimax" 。指定 TTS 提供商类型。
+Model
+String
+是
+TTS 模型类型。如 speech-2.8-turbo 、 speech-2.8-hd 。请参阅 MiniMax TTS 模型。
+APIUrl
+String
+是
+API 端点 URL。默认值： https://api.minimax.chat/v1/t2a_v2 。
+APIKey
+String
+是
+用于认证的 API 密钥。请从 MiniMax Platform 获取。
+GroupId
+String
+是
+与你的账号关联的 MiniMax Group ID。请从 MiniMax Platform 获取。
+VoiceType
+String
+是
+要使用的音色标识符。请参阅 MiniMax 音色列表。
+Speed
+Float
+否
+语速倍数。有效范围：[0.5, 2.0]。默认值：1.0。
+速率限制
+速率限制请参阅 MiniMax。速率限制可能导致响应延迟。
+API
+T2A V2 (语音生成)
+T2A Pro (语音生成)
+T2A (语音生成)
+T2A Stream (流式语音生成)
+T2A Stream (流式语音生成)
+模型
+speech-2.6-hd,
+speech-2.6-turbo,
+speech-02-hd,
+speech-02-turbo,
+speech-01-hd,
+speech-01-turbo
+speech-01,
+speech-02
+speech-01,
+speech-02
+speech-01
+speech-01
+用户类型 / 限制类型
+RPM
+RPM
+RPM
+RPM
+CONN (最大并发任务数)
+使用免费账号的用户
+3
+3
+3
+3
+1
+使用付费账号的用户
+20
+20
+20
+20
+3

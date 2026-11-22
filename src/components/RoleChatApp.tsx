@@ -65,6 +65,8 @@ import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
 import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
+import { PRESET_MEME_BOOK } from "@/lib/meme-book-data";
+import { type MemeEntry, type MemePrefs, DEFAULT_MEME_PREFS, buildMemeSection } from "@/lib/meme-worldbook";
 import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
 import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, OpenerCard, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
@@ -163,6 +165,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   }, []);
   const [books, setBooks] = useWorldBooks();
   const [stickers, setStickers] = useStickers();
+  /** 热梗世界书偏好（开关 + 全量常驻注入），与设置页共享 vp-phone:memebook:prefs:v1 */
+  const [memePrefs] = usePersisted<MemePrefs>("vp-phone:memebook:prefs:v1", DEFAULT_MEME_PREFS);
   const [view, setView] = useState<View>(() => {
     // 截图验收直达指定会话：?vpApp=rolechat&vpChar=<charId>（activeId 在 effect 里校正，见下）
     try {
@@ -352,9 +356,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   stateRef.current = { log, input, pending, ready, prefs };
   const autoTimer = useRef<number | null>(null);
 
-  /** 每次请求现算：人设 + 生效世界书 + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL */
+  /** 每次请求现算：人设 + 生效世界书 + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL。
+   * memeText：热梗世界书命中片段（由调用方按"本轮用户消息"现算，剧情/私聊两条链路共用注入位） */
   const buildSys = useCallback(
-    (ch: Character, story: boolean) => {
+    (ch: Character, story: boolean, memeText = "") => {
       const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
       const usable = stickers.filter((s) => s.isGlobal);
       if (story) {
@@ -364,7 +369,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             ch.persona || "无额外设定"
           }\n` +
           STORY_PROTOCOL(ch.name || "他") +
-          buildWorldSection(activeBooks)
+          buildWorldSection(activeBooks) +
+          memeText
         );
       }
       // 真人打字习惯协议（世界书《你是真人在打字不是人机呀》改编）：仅私聊链路注入，剧情模式保持叙事文体。
@@ -382,6 +388,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         buildWorldSection(activeBooks) +
+        memeText +
         "\n\n" +
         buildStickerHint(usable)
       );
@@ -396,16 +403,27 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   const toHistory = (ch: Character, entries: ChatEntry[]) => [
-    { role: "system", content: buildSys(ch, Boolean(ch.storyMode)) },
+    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries)) },
     ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
   ];
+
+  /** 热梗世界书：按本轮最后一条用户消息现算命中片段（开关/全量模式见偏好；主动消息无用户输入即空串） */
+  const memeDigestRef = useRef<{ src?: MemeEntry[]; text?: string }>({});
+  const memeFor = (entries: ChatEntry[]): string => {
+    if (!memePrefs.enabled) return "";
+    const lastUser = [...entries].reverse().find((e) => e.role === "user" && !e.failed);
+    if (!memePrefs.alwaysInject && !lastUser) return "";
+    const text = buildMemeSection(lastUser?.content ?? "", PRESET_MEME_BOOK, memePrefs, memeDigestRef.current);
+    if (text) console.log(`[meme] inject char hits=${memePrefs.alwaysInject ? "全量常驻" : (lastUser?.content.slice(0, 24) ?? "")} len=${text.length}`);
+    return text;
+  };
 
   const requestReply = async (entries: ChatEntry[], userMsgId: string, storyMode = false) => {
     if (!active) return;
     // 快照请求上下文：回复在后台继续，退出聊天页/切换会话也不会打断（结果直写该角色存储）
     const ch = active;
     const cfgSnapshot = config;
-    const sysPrompt = buildSys(ch, storyMode);
+    const sysPrompt = buildSys(ch, storyMode, memeFor(entries));
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
       if (!storyMode) return [{ role: "system", content: sysPrompt }, ...msgs.map((e) => ({ role: e.role, content: e.content }))];
@@ -661,7 +679,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       // 剧情模式下角色不"不请自来"发私聊式碎句——主动 tick 跳过带 storyMode 的角色
       if (ch.storyMode) return;
       const sys =
-        buildSys(ch, false) +
+        buildSys(ch, false, memeFor(last ? [last] : [])) +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
         (ch.name || "TA") +
         "）主动想找对方说话。" +

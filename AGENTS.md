@@ -33,6 +33,8 @@
 
 - **开场白双 bug 修复（第36轮）**：`RoleChatApp.tsx`——①bug1"无法下滑只能收起"根源是旧 fit-check effect 在内容不足一屏时 1.5s 后强制 setOpenerCollapsed(true)；现改为该 effect 只打日志不再收起（不足一屏保持展开，超高内容由 handleListScroll 触底自动收），OpenerCard 已位于 listRef 滚动容器内首位随消息流整体下滑。②bug2"哥哥会话看不到默认开场白"根源是 chatCleared["zhou-chenyan"] 持久化残留（用户曾点清空记录）永久压制 openerShown；新增 heal effect：进会话时若 chatCleared[id]=true 但 effectiveProfile.opener 存在即清标记恢复展开，日志 [profile] heal stale chatCleared。③vpChar 直达参数修正：初始化函数里 setActiveId 无效（usePersisted 渲染期比对 prevKey 会忽略），改为 view==="chat" 的 effect 内校正 activeId=cid，日志 [profile] vpChar corrected。诊断日志：[profile] render/state/fit-check/view=chat。
 
+- **热梗世界书（第37轮，用户 docx《网上冲浪·热梗世界书》by年年 300条接入）**：`src/lib/meme-worldbook.ts` 纯函数层——MemeEntry{title/keys/usage/demo}、parseMemeBook（标题/触发词/触发内容/对方/角色 标记式解析，续行归入当前字段）、matchMemes（用户消息含≥2字触发词即命中，上限4条）、buildMemeHint（命中片段：气氛合适才接、严禁硬塞与解释出处）、buildMemeDigest（300条"梗名+40字用法"常驻摘要）、MemePrefs{enabled,alwaysInject}+buildMemeSection（关闭=空串；默认仅触发词命中注入省 token；alwaysInject=全量摘要，digestCache 引用缓存）。`src/lib/meme-book-data.ts` 由 docx word/document.xml python 提取段落→node 内联同款解析器生成 PRESET_MEME_BOOK（300条，27条带示例对）。RoleChatApp 接线：usePersisted vp-phone:memebook:prefs:v1；memeFor(entries) 取本轮最后一条用户消息现算片段，buildSys 第三参 memeText 注入私聊（世界设定段后）与剧情链路；fireOne 主动消息用 memeFor(last?[last]:[])（无用户输入且非全量=不注入）；日志 [meme] inject hits len / enabled / alwaysInject。WorldBookApp 顶部新增"网上冲浪·热梗世界书 300条"入口卡→MemeBookPanel（启用/全量常驻两 Switch + 梗名/触发词搜索 + 手风琴浏览）。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

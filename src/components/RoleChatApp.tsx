@@ -59,6 +59,7 @@ import {
 } from "@/lib/chat-store";
 import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
 import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
+import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 
 interface Props {
@@ -391,7 +392,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         buildSys(ch) +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
         (ch.name || "TA") +
-        "）主动想找对方说话。请像日常手机聊天一样，主动发来 1-2 条你想说的话：只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
+        "）主动想找对方说话。" +
+        PROACTIVE_PROTOCOL.replace("{{char}}", ch.name || "TA") +
+        "\n\n" +
+        pickTopicSeeds() +
+        "\n请像日常手机聊天一样，主动发来 1-2 条你想说的话：只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
       const history: { role: string; content: string }[] = [
         { role: "system", content: sys },
         ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),

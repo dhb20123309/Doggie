@@ -6,7 +6,7 @@
 ## 架构
 - `src/lib/types.ts`：共享契约（AiConfig 含 temperature / TestResult / ScreenId：home|settings|chat|rolechat|worldbook|sticker|diary|phonepeek|bond|preference|theater|profile / normalizeBaseUrl）。
 - `src/lib/ai-api.ts`：OpenAI 兼容对接层。getCandidates 候选地址兜底（不带 /vN 时自动补 /v1 再试一次，404 才换候选）；fetchModelList 拉模型列表；testConnection/chatCompletion 均走候选；错误按状态码翻译成人话。
-- `src/lib/chat-types.ts`：Character（含 boundWorldBookIds）/ ChatEntry / SendPrefs / splitBubbles；sanitizeReply 按行过滤"我是语言模型/AI助手"等 OOC 出戏话术（整条被滤空则静默重生成一次）。
+- `src/lib/proactive-protocol.ts`：主动消息活人感协议（改编自用户提供的 by小K Avail 文档）——PROACTIVE_PROTOCOL 拼入 fireOne 的 system（具体起点+连接点+落脚点三段式、话题型70%/报备型30%、禁"在干嘛/醒了没/想你了"等句式）；TOPIC_LIBRARY 六大类话题种子 + pickTopicSeeds() 每次随机取两类作引子、明令禁止照抄。PROACTIVE_LINES 兜底池同步改为带细节句式。
 - `src/lib/worldbook.ts`：世界书（global/local 过滤 + 拼 system prompt）与表情包（buildStickerHint 名单约束 + parseReplyToMessages 解析 [表情:名字]，未知名字退回文字、结尾未闭合标记丢弃）。
 - `src/lib/config-store.ts`：API 配置存 localStorage（vp-phone:aiconfig:v1）；代码中禁止出现真实密钥。
 - `src/lib/chat-store.ts`：usePersisted 通用 hook（key 变化时必须重读 localStorage——曾因此串会话；渲染期比对 prevKey + setValue，不用 useEffect）；角色/聊天记录/发送习惯/世界书/表情库存 vp-phone:* 各 key。预置角色头像=用户上传定妆照 CDN（PHOTO_CHENYAN 白帽/FENGYAN 条纹衬衫），migratePresetAvatars 在 useCharacters 读取时把老数据的 emoji/旧头像按 id 覆盖回定妆照（用户手动换过的长地址不动）。

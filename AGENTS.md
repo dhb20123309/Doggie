@@ -9,7 +9,7 @@
 - `src/lib/chat-types.ts`：Character（含 boundWorldBookIds）/ ChatEntry / SendPrefs / splitBubbles。
 - `src/lib/worldbook.ts`：世界书（global/local 过滤 + 拼 system prompt）与表情包（buildStickerHint 名单约束 + parseReplyToMessages 解析 [表情:名字]，未知名字退回文字、结尾未闭合标记丢弃）。
 - `src/lib/config-store.ts`：API 配置存 localStorage（vp-phone:aiconfig:v1）；代码中禁止出现真实密钥。
-- `src/lib/chat-store.ts`：usePersisted 通用 hook；角色/聊天记录/发送习惯/世界书/表情库存 vp-phone:* 各 key。
+- `src/lib/chat-store.ts`：usePersisted 通用 hook（key 变化时必须重读 localStorage——曾因此串会话；渲染期比对 prevKey + setValue，不用 useEffect）；角色/聊天记录/发送习惯/世界书/表情库存 vp-phone:* 各 key。
 - `src/components/RoleChatApp.tsx`：聊天主页，内部视图 chat/edit/prefs/worldbooks/stickers；发送前现算 system = 人设+分条指令+生效世界书+表情名单。
 - `src/styles.css`：jelly-btn/jelly-icon/jelly-blob 果冻反馈类——按下 ≤0.08s 快压、松开 cubic-bezier 过冲慢弹回，只动 transform，不与美化层冲突；交互组件统一挂这些类。毛玻璃原子类 glass/glass-strong/glass-input/glass-nav/app-icon-glass；锁屏专用 lock-scrim（整屏压暗层）/key-soft（半透明白底数字键，无 backdrop-filter）/lock-content（仅 opacity 入场）。
 - `src/lib/lock-store.ts`：密码 vp-phone:lockpass:v1（默认 0517）+ 锁屏/桌面壁纸 vp-phone:*-wallpaper:v1（默认 CDN 粉彩壁纸 URL），usePasscode/useLockWallpaper/useHomeWallpaper。
@@ -20,7 +20,7 @@
 - `src/lib/import-parse.ts`：角色卡 md 解析（标题提取角色名 + [System Note] 起正文为人设）、世界书 md 按 ## 分节拆 local 条目、cardToCharacter 生成完整角色。
 - `src/lib/tts.ts`：外部语音通道 VoiceConfig（vp-phone:voiceconfig:v1，地址/Key 留空回落聊天接口）；synthesizeSpeech 走 /audio/speech 候选兜底；角色 voiceId 单独绑音色。
 - `src/lib/media.ts`：音乐真机播放（vp-phone:music-urls:v1 音频直链列表）+ 独立生图通道 ImageConfig（vp-phone:imageconfig:v1，mode=openai 自定义网关/pollinations 免费免 Key；留空回落聊天接口 /images/generations，全失败回落预置 CDN 日常照，auth_key 必须完整保留）；pollinations 结果必须转 data URL 持久化（blob URL 刷新裂图）。
-- `src/components/RoleChatApp.tsx`：微信式会话列表（ConversationList）→ 单会话 chat；view 含 import 一键导入；发送习惯默认 sendReplacesGenerate=true（点发送即自动回复、无需手动确认，旧数据经 vp-phone:send-prefs:migrated-v1 标记一次性迁移）；主动消息闲置 1 分钟即可能触发（每 20s 检查、75% 概率、一轮可连发 1-2 条间隔数秒），模型实时生成（失败回落 PROACTIVE_LINES），entry.proactive 标记；未打开会话头像红字未读角标、进入即清；列表顶栏"TA 们正在酝酿消息…"徽标；前情提要小灰框；表情库可点发（stickerUrl）；朗读按钮（voiceReady 才显示）。
+- `src/components/RoleChatApp.tsx`：微信式会话列表（ConversationList）→ 单会话 chat；view 含 import 一键导入；发送习惯默认 sendReplacesGenerate=true（点发送即自动回复、无需手动确认，旧数据经 vp-phone:send-prefs:migrated-v1 标记一次性迁移）；主动消息闲置 1 分钟即可能触发（每 20s 检查、75% 概率、一轮可连发 1-2 条间隔数秒），模型实时生成（失败回落 PROACTIVE_LINES），entry.proactive 标记；照片由主动消息小概率附带自动发（30% 概率、同角色 15 分钟冷却，配文先由模型现写、失败回落场景模板池，无手动分享按钮）；未打开会话头像红字未读角标、进入即清；列表顶栏"TA 们正在酝酿消息…"徽标；前情提要小灰框；表情库可点发（stickerUrl）；朗读按钮（voiceReady 才显示）。
 - `src/components/PhoneShell.tsx`：locked 状态入口，LockScreen → 桌面路由分发；SettingsApp 收 wallpapers setter 与 onLock；URL 参数 vpDesk/vpApp 仅供截图验收直达页面。
 - 聊天背景可上传替换：lock-store.useChatBackground（key vp-phone:chat-bg:v1，默认 CDN 奶油图）→ PhoneShell → SettingsApp 第三个 WallpaperPicker + RoleChatApp background prop。
 - 暖淡黄设计系统：styles.css token hue 75-92；气泡用 .bubble-cream/.bubble-me（大圆角奶油毛玻璃、无粗边框）；时间戳 .msg-time（读 ChatEntry.at 纯展示）；Avatar status 属性叠加在线/输入中/离线圆点。

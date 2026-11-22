@@ -50,6 +50,7 @@ import {
   unreadCount,
   useReadMarks,
   presetPhoto,
+  readLastEntries,
   useSendPrefs,
   useWorldBooks,
   useStickers,
@@ -82,6 +83,32 @@ const PROACTIVE_CHECK_MS = 20_000;
 const PROACTIVE_IDLE_MS = 60_000;
 /** 每轮定时器最多连发几条，让角色更像连着碎碎念 */
 const PROACTIVE_MAX_PER_TICK = 2;
+/** 自动分享照片：距上次照片至少间隔这么久，且触发主动消息时小概率附带一张 */
+const PHOTO_COOLDOWN_MS = 15 * 60_000;
+const PHOTO_CHANCE = 0.3;
+
+/** 照片配文模板：按场景写死贴合语境的短句，随机挑一条，避免每次"刚拍的，给你看看" */
+const PHOTO_CAPTIONS: Record<string, string[]> = {
+  "after school on the basketball court": ["刚打完球，看什么看", "球场夕阳，凑合看", "赢了，就差你在场边"],
+  "in the passenger seat of a car on a sunny afternoon road trip": ["出来兜风了，副驾给你留着", "这光线绝了，拍一张"],
+  "at a piano in the school music room": ["排练间隙，琴房没人", "刚弹了你爱听的那段"],
+  "holding a bubble tea on a tree-lined street at dusk": ["路过看到你爱喝的，顺手买了", "奶茶和晚霞，哪个先送到你那"],
+  "on the rooftop railing looking at the evening city lights": ["天台风景不错，可惜你不在", "今晚的灯挺好看，拍给你"],
+};
+const PHOTO_CAPTIONS_ANY = ["随手拍了一张", "这个角度还行吧", "想到你了，看看这张", "今日份的我"];
+
+function pickCaption(scene: string): string {
+  const key = Object.keys(PHOTO_CAPTIONS).find((k) => scene.startsWith(k));
+  const pool = key ? PHOTO_CAPTIONS[key] : PHOTO_CAPTIONS_ANY;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function lastPhotoAt(charId: string): number {
+  const log = readLastEntries(charId, 50);
+  let t = 0;
+  for (const e of log) if (e.photoUrl && e.at > t) t = e.at;
+  return t;
+}
 
 type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import";
 
@@ -292,6 +319,31 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         at: Date.now(),
         proactive: true,
       });
+      // 小概率附带一张日常照片：先现生成台词再发图，配文与图片场景一致、每次都不重样
+      if (ch.photoEnabled && Math.random() < PHOTO_CHANCE && Date.now() - lastPhotoAt(ch.id) > PHOTO_COOLDOWN_MS) {
+        const scene = PHOTO_SCENES[Math.floor(Math.random() * PHOTO_SCENES.length)];
+        let caption = "";
+        try {
+          caption = await chatCompletion(config, [
+            { role: "system", content: buildSys(ch) + "\n\n【场景】你刚拍了一张自己的日常照片想发给对方。照片内容：" + scene + "。请用一句话配这张图发出去：只写这句话本身，不超过 20 字，不要旁白和解释，每次说法都要不一样。" },
+            { role: "user", content: "（发照片）" },
+          ]);
+        } catch {
+          caption = pickCaption(scene);
+        }
+        if (cancelled) return;
+        caption = (caption || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || pickCaption(scene);
+        const url = await generateCharPhoto(config, photoPrompt(ch.name, ch.persona, scene), presetPhoto(ch.id));
+        if (cancelled || !url) return;
+        setLogForChar(ch.id, {
+          id: `ph${Date.now()}`,
+          role: "assistant",
+          content: caption,
+          photoUrl: url,
+          at: Date.now(),
+          proactive: true,
+        });
+      }
     };
 
     const timer = window.setInterval(async () => {
@@ -331,28 +383,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       if (charId === activeId && view === "chat") setLog((l) => [...l, entry]);
     } catch {
       /* ignore */
-    }
-  };
-
-  /** 角色主动分享写实日常照片：优先外部生图通道，失败回落预置素材照 */
-  const sharePhoto = async (ch: Character) => {
-    if (!ch.photoEnabled || pending) return;
-    setPending(true);
-    const scene = PHOTO_SCENES[Math.floor(Math.random() * PHOTO_SCENES.length)];
-    try {
-      const url = await generateCharPhoto(config, photoPrompt(ch.name, ch.persona, scene), presetPhoto(ch.id));
-      if (url) {
-        setLogForChar(ch.id, {
-          id: `ph${Date.now()}`,
-          role: "assistant",
-          content: "刚拍的，给你看看",
-          photoUrl: url,
-          at: Date.now(),
-        });
-        if (ch.id === activeId && view === "chat") scrollBottom();
-      }
-    } finally {
-      setPending(false);
     }
   };
 
@@ -516,17 +546,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("stickers")} aria-label="表情库">
             <SmilePlus className="size-4" />
           </Button>
-          {active.photoEnabled && (
-            <button
-              type="button"
-              onClick={() => void sharePhoto(active)}
-              disabled={pending}
-              aria-label="分享日常照片"
-              className="jelly-icon flex size-8 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40"
-            >
-              <WandSparkles className="size-4" />
-            </button>
-          )}
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("prefs")} aria-label="输入与发送设置">
             <SlidersHorizontal className="size-4" />
           </Button>

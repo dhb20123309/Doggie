@@ -1,5 +1,5 @@
 // 角色与聊天记录的本地持久化（localStorage），刷新后保留；首次使用预置周氏双子
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type Character, type ChatEntry, type ReadMarks, type SendPrefs, DEFAULT_SEND_PREFS } from "./chat-types";
 import type { WorldBook, Sticker } from "./worldbook";
 
@@ -175,6 +175,12 @@ type Setter<T> = (next: T | ((prev: T) => T)) => void;
 
 export function usePersisted<T>(key: string, fallback: T): [T, Setter<T>] {
   const [value, setValue] = useState<T>(() => read(key, fallback));
+  // key 变化（如切换会话）时必须重新读取对应存储，否则会残留上一个角色的数据（串会话 bug 根因）
+  const prevKey = useRef(key);
+  if (prevKey.current !== key) {
+    prevKey.current = key;
+    setValue(read(key, fallback));
+  }
   const update: Setter<T> = (next) => {
     setValue((prev) => {
       const resolved = next instanceof Function ? next(prev) : next;
@@ -252,6 +258,12 @@ export function useStickers(): [Sticker[], Setter<Sticker[]>] {
 export function readLastEntry(charId: string): ChatEntry | null {
   const log = read<ChatEntry[]>(`${LOG_PREFIX}${charId}`, []);
   return log.length ? log[log.length - 1] : null;
+}
+
+/** 读取某角色最近 n 条记录（判断是否发过照片等历史状态用） */
+export function readLastEntries(charId: string, n: number): ChatEntry[] {
+  const log = read<ChatEntry[]>(`${LOG_PREFIX}${charId}`, []);
+  return log.slice(-n);
 }
 
 /** 某会话未读数：只统计角色主动发来、且晚于上次查看时间的消息 */

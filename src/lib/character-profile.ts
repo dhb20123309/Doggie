@@ -18,6 +18,10 @@ export interface CharacterProfile {
   /** 立绘/头像大图 data URL（上传后持久化，不用 blob URL） */
   coverUrl?: string;
   sections: ProfileSection[];
+  /** 卡面大标题（如"周晨砚 × 你"，取自 ## 周晨砚 × 你 分节标题） */
+  titleLine?: string;
+  /** 系列标签（渲染为居中胶囊横排，对齐酒馆角色卡排版） */
+  tags?: string[];
   /** 会话顶部短版开场白 */
   opener: string;
   /** 开局引子全文（一键加载到互动剧情） */
@@ -31,8 +35,8 @@ const SECTION_KINDS: Record<string, ProfileSection["kind"]> = {
   基础信息: "basic",
   家人信息: "basic",
   标签: "basic",
-  外貌特征: "basic",
-  性格内核: "basic",
+  外貌特征: "text",
+  性格内核: "text",
   世界观: "text",
   创作者警告: "warning",
   社交账号: "text",
@@ -47,12 +51,29 @@ function kindOf(title: string): ProfileSection["kind"] {
   return "text";
 }
 
+/** 稳定分节 key（按标题关键词映射，渲染层据此合并"基本资料+家人信息"并置区） */
+function keyOf(title: string): string {
+  if (title.includes("×")) return "hero";
+  if (title.includes("基础信息")) return "basic";
+  if (title.includes("家人信息")) return "family";
+  if (title.includes("外貌")) return "appearance";
+  if (title.includes("性格")) return "personality";
+  if (title.includes("世界观")) return "worldview";
+  if (title.includes("警告")) return "warning";
+  if (title.includes("社交") || title.includes("朋友圈")) return "social";
+  if (title.includes("开局引子")) return "intro";
+  if (title.includes("开局剧情")) return "fragment";
+  if (title.includes("精简开场白")) return "opener";
+  return `s${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /** 解析完整档案文本：按 ## 分节，自动识别固定区块；容错无 # 前缀的裸标题行 */
 export function parseProfileMd(text: string, charId: string, fallbackName: string): CharacterProfile {
   const lines = text.split(/\r?\n/);
   const sections: ProfileSection[] = [];
   let cur: ProfileSection | null = null;
   let name = fallbackName;
+  let titleLine = "";
   for (const raw of lines) {
     const line = raw.trimEnd();
     const m = line.match(/^#{1,3}\s*(.+?)\s*$/);
@@ -65,12 +86,18 @@ export function parseProfileMd(text: string, charId: string, fallbackName: strin
         if (nm) name = nm[1];
       }
       if (cur) sections.push(cur);
-      cur = { key: `s${sections.length}`, title, paras: [], kind: kindOf(title) };
+      cur = { key: keyOf(title), title, paras: [], kind: kindOf(title) };
       continue;
     }
     if (!cur) continue;
     if (!line.trim()) continue;
-    cur.paras.push(line.trim().replace(/^-\s*/, ""));
+    const t = line.trim().replace(/^-\s*/, "");
+    // "## 周晨砚 × 你" 标题下紧跟的第一行是卡面大标题副句，单独提取不并入正文段落
+    if (cur.title.includes("×") && !titleLine && cur.paras.length === 0 && !t.includes("：")) {
+      titleLine = t;
+      continue;
+    }
+    cur.paras.push(t);
   }
   if (cur) sections.push(cur);
 
@@ -78,12 +105,18 @@ export function parseProfileMd(text: string, charId: string, fallbackName: strin
   const opener = findParas("精简开场白").join("\n").replace(/^>\s?/gm, "");
   const introSec = sections.find((s) => s.kind === "story");
   const intro = introSec ? introSec.paras.join("\n\n") : "";
-  return { charId, name, sections, opener, intro, updatedAt: Date.now() };
+  // 系列标签：从"基础信息"里"系列标签：a｜b｜c"行提取，渲染为居中胶囊横排（酒馆排版）
+  const tagLine = findParas("基础信息").find((p) => p.startsWith("系列标签"));
+  const tags = tagLine ? tagLine.replace(/^系列标签[:：]\s*/, "").split(/[｜|]/).map((t) => t.trim()).filter(Boolean) : undefined;
+  return { charId, name, sections, titleLine: titleLine || undefined, tags, opener, intro, updatedAt: Date.now() };
 }
 
 /* ---------- 两份预置档案（用户提供的 md 原文内置，独立 charId 数据隔离） ---------- */
 
-const CHENYAN_MD = `## 基础信息
+const CHENYAN_MD = `## 周晨砚 × 你
+中美混血双子 · 直球争宠 · 偏执向
+
+## 基础信息
 姓名：周晨砚｜性别：男｜年龄：18 岁｜身高：186cm
 生日：10 月 12 日（与弟弟同卵双胞胎，同一天生日）｜星座：天秤座｜MBTI：ESTP｜血型：AB 型
 身份：私立高三学生，年级稳居第一；校管弦乐团首席、篮球社主力
@@ -147,7 +180,10 @@ const CHENYAN_MD = `## 基础信息
 ## 精简开场白
 周晨砚，18 岁，周家双胞胎里的哥哥。阳光拽哥，嘴贱爱吐槽，成绩和才艺都拔尖，向来觉得自己不会为谁动心。点开看看他的完整档案吧。`;
 
-const FENGYAN_MD = `## 基础信息
+const FENGYAN_MD = `## 周风砚 × 你
+温润皮囊下的阴湿占有 · 白切黑争宠
+
+## 基础信息
 姓名：周风砚｜性别：男｜年龄：18 岁｜身高：185cm
 生日：10 月 12 日（与哥哥同卵双胞胎，同一天生日）｜星座：天秤座｜MBTI：INFJ｜血型：AB 型
 身份：私立高三学生，年级稳居第二；校管弦乐团副首席、美术社社员

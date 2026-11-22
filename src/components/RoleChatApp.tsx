@@ -194,12 +194,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       let changed = false;
       const next = { ...prev };
       for (const id of ["zhou-chenyan", "zhou-fengyan"]) {
-        if (!next[id]) {
-          const p = presetProfileFor(id);
-          if (p) { next[id] = p; changed = true; }
+        const fresh = presetProfileFor(id);
+        // 缺失或旧版预置（无 hero 分节/标签）时用新解析结果覆盖一次；用户自行导入的档案不动
+        if (fresh && (!next[id] || !next[id].sections.some((s) => s.key === "hero"))) {
+          next[id] = fresh;
+          changed = true;
         }
       }
-      if (changed) console.log("[profile] seed preset 周晨砚/周风砚 档案落盘");
+      if (changed) console.log("[profile] seed preset 周晨砚/周风砚 档案落盘（酒馆排版新版）");
       return changed ? next : prev;
     });
   }, [setProfiles]);

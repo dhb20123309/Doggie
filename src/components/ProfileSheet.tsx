@@ -1,37 +1,102 @@
-// 工具箱-角色开场白/人物档案：侧边抽屉 + 聊天流内展开 + 独立静态页（三种形态同文件紧耦合）
-// 排版对齐酒馆角色卡截图：立绘大图+名称、板块标题加粗无分割线、板块间留白、基础信息紧凑混排、警告浅红底
+// 工具箱-角色开场白/人物档案：侧边抽屉 + 聊天流内展开 + 独立静态页（形态同文件紧耦合）
+// UI 复刻用户提供的酒馆角色卡截图：居中"名字 × 你"大标题、标签胶囊横排、
+// 立绘与文字左右并置、子标题竖线锚点、板块间只用留白无分割线、警告浅红底高亮
 import { useRef, useState } from "react";
 import { X, Wrench, FileText, MessageSquareQuote, Upload, ImagePlus, Clapperboard, ChevronDown } from "lucide-react";
-import type { CharacterProfile } from "@/lib/character-profile";
+import type { CharacterProfile, ProfileSection } from "@/lib/character-profile";
+import { presetPhoto } from "@/lib/chat-store";
 
-/* ---------- 区块渲染（两种展示形态共用） ---------- */
+/** 预置角色未上传立绘时，用定妆照作档案封面（用户自导角色无回落） */
+function presetCover(charId: string): string {
+  if (!charId.startsWith("zhou-")) return "";
+  return presetPhoto(charId);
+}
+
+/* ---------- 区块渲染（两种展示形态共用，排版对齐酒馆截图） ---------- */
+
+/** 子标题：左侧短竖线锚点（截图中"身份 / 性格"样式），不加分割线 */
+function SubTitle({ children }: { children: string }) {
+  return (
+    <p className="mb-1 mt-3 flex items-center gap-1.5 text-[12px] font-bold text-foreground/85">
+      <span aria-hidden className="h-3 w-[2px] shrink-0 rounded-full bg-primary/60" />
+      {children}
+    </p>
+  );
+}
+
+/** 键值行："姓名：周晨砚｜性别：男…" → 标签弱化、值正常，紧凑自然混排非整齐列表 */
+function KVLine({ line }: { line: string }) {
+  const m = line.match(/^(.{1,6}?)[:：](.+)$/);
+  if (!m) return <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/80">{line}</p>;
+  return (
+    <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/80">
+      <span className="text-muted-foreground">{m[1]}：</span>
+      {m[2]}
+    </p>
+  );
+}
+
+function BasicBody({ paras }: { paras: string[] }) {
+  return (
+    <div>
+      {paras.map((p, i) => (
+        <KVLine key={i} line={p} />
+      ))}
+    </div>
+  );
+}
+
+/** 性格内核类：首行含"表面/内在"时按子标题分组混排 */
+function PersonalityBody({ paras }: { paras: string[] }) {
+  const hasFacets = paras.some((p) => /^(表面|内在|争宠表现)[:：]/.test(p));
+  if (!hasFacets) return <BasicBody paras={paras} />;
+  return (
+    <div>
+      {paras.map((p, i) => {
+        const m = p.match(/^(表面|内在|争宠表现)[:：]\s*(.+)$/);
+        if (m) {
+          return (
+            <div key={i}>
+              <SubTitle>{m[1]}</SubTitle>
+              <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/80">{m[2]}</p>
+            </div>
+          );
+        }
+        return <KVLine key={i} line={p} />;
+      })}
+    </div>
+  );
+}
 
 function SectionBlock({ sec, profile, onLoadIntro }: {
-  sec: CharacterProfile["sections"][number];
+  sec: ProfileSection;
   profile: CharacterProfile;
   onLoadIntro?: () => void;
 }) {
+  // 卡面大标题分节（key=hero）由 HeroHeader 统一渲染，此处跳过避免重复
+  if (sec.key === "hero") return null;
+
   if (sec.kind === "cover") {
     return (
-      <div className="mb-5">
-        <p className="mb-2 text-[13px] font-bold text-foreground">{sec.title}</p>
+      <div className="mb-6">
         {profile.coverUrl ? (
-          <img src={profile.coverUrl} alt="立绘" className="mb-2 w-full rounded-2xl object-cover" />
+          <img src={profile.coverUrl} alt="立绘" className="w-full rounded-2xl object-cover" />
         ) : (
-          <div className="mb-2 flex h-40 w-full items-center justify-center rounded-2xl bg-black/[0.04] text-[11px] text-muted-foreground">
+          <div className="flex h-40 w-full items-center justify-center rounded-2xl bg-black/[0.04] text-[11px] text-muted-foreground">
             未上传立绘 · 点击下方"上传图片"入口添加（1:1 或 3:4）
           </div>
         )}
-        <p className="text-[15px] font-bold text-foreground">{profile.name}</p>
+        <p className="mt-2 text-[15px] font-bold text-foreground">{profile.name}</p>
         {sec.paras.map((p, i) => (
           <p key={i} className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{p}</p>
         ))}
       </div>
     );
   }
+
   if (sec.kind === "warning") {
     return (
-      <div className="mb-5">
+      <div className="mb-6">
         <p className="mb-2 text-[13px] font-bold text-foreground">{sec.title}</p>
         <div className="rounded-xl bg-red-50 px-3.5 py-3">
           {sec.paras.map((p, i) => (
@@ -41,16 +106,13 @@ function SectionBlock({ sec, profile, onLoadIntro }: {
       </div>
     );
   }
+
   const isStory = sec.kind === "story";
+  const isPersonality = sec.key === "personality";
   return (
-    <div className="mb-5">
+    <div className="mb-6">
       <p className="mb-2 text-[13px] font-bold text-foreground">{sec.title}</p>
-      {/* 基础信息：紧凑自然混排文本；大段文本：流式段落自动换行 */}
-      {sec.paras.map((p, i) => (
-        <p key={i} className={`whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground/80 ${i > 0 ? "mt-1.5" : ""}`}>
-          {p}
-        </p>
-      ))}
+      {isPersonality ? <PersonalityBody paras={sec.paras} /> : <BasicBody paras={sec.paras} />}
       {isStory && onLoadIntro && (
         <button
           type="button"
@@ -61,6 +123,95 @@ function SectionBlock({ sec, profile, onLoadIntro }: {
           一键加载到互动剧情模式
         </button>
       )}
+    </div>
+  );
+}
+
+/** 卡面头部：居中大标题（名字 × 你）+ 副句 —— 对齐截图第一屏；标签胶囊在 DuoCover 中渲染 */
+function HeroHeader({ profile }: { profile: CharacterProfile }) {
+  const hero = profile.sections.find((s) => s.key === "hero");
+  // 旧版存储档案无 hero 分节时，用角色名兜底拼"× 你"大标题
+  if (!hero) {
+  return (
+    <header className="pb-4 pt-1 text-center">
+      <h2 className="text-[17px] font-bold leading-snug tracking-wide text-neutral-800">{profile.name} × 你</h2>
+    </header>
+  );
+}
+  // 兼容旧解析数据：titleLine 缺失且首段是短副句（不含键值冒号、≤30字）时提为副句
+  const first = hero.paras[0] ?? "";
+  const legacySub = !profile.titleLine && first.length <= 30 && !first.includes("：") ? first : undefined;
+  const sub = profile.titleLine ?? legacySub;
+  const paras = legacySub ? hero.paras.slice(1) : hero.paras;
+  return (
+    <header className="pb-4 pt-1 text-center">
+      <h2 className="text-[17px] font-bold leading-snug tracking-wide text-neutral-800">{hero.title}</h2>
+      {sub && <p className="mt-1.5 text-[11px] leading-relaxed text-neutral-500">{sub}</p>}
+      {paras.map((p, i) => (
+        <p key={i} className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-neutral-500">{p}</p>
+      ))}
+    </header>
+  );
+}
+
+/** 基础信息 + 家人信息：立绘大图与文字左右并置（截图里"图片在左、身份/性格在右"版式） */
+function DuoCover({ profile }: { profile: CharacterProfile }) {
+  const basic = profile.sections.find((s) => s.key === "basic");
+  const family = profile.sections.find((s) => s.key === "family");
+  if (!basic && !family) return null;
+  // 旧版存储档案无 hero 分节时，从"系列标签"行兜底取胶囊标签
+  const legacyTags = !profile.tags ? basic?.paras.find((p) => p.startsWith("系列标签")) : undefined;
+  const tags = profile.tags ?? legacyTags?.replace(/^系列标签[:：]\s*/, "").split(/[｜|]/).map((t) => t.trim()).filter(Boolean);
+  const coverChar = profile.charId.includes("fengyan") ? "风" : "晨";
+  // 立绘占位底色按角色区分：晨砚偏暖杏、风砚偏灰绿（对齐定妆照色调）
+  const warm = !profile.charId.includes("fengyan");
+  return (
+    <div className="mb-6 rounded-2xl border border-primary/15 bg-white p-3 shadow-sm">
+      {tags && tags.length > 0 && (
+        <div className="mb-4 flex flex-wrap justify-center gap-1.5">
+          {tags.map((t) => (
+            <span key={t} className="rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[10.5px] font-medium text-primary">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex items-start gap-3">
+        <div className="w-[38%] shrink-0">
+          {profile.coverUrl ? (
+            <img src={profile.coverUrl} alt="立绘" className="aspect-[3/4] w-full rounded-2xl object-cover shadow-sm" />
+          ) : presetCover(profile.charId) ? (
+            <img src={presetCover(profile.charId)} alt="定妆照" className="aspect-[3/4] w-full rounded-2xl object-cover shadow-sm" />
+          ) : (
+            <div
+              className="relative flex aspect-[3/4] w-full items-end justify-center overflow-hidden rounded-2xl shadow-sm"
+              style={{
+                background: warm
+                  ? "linear-gradient(160deg, oklch(0.9 0.06 75), oklch(0.72 0.09 55))"
+                  : "linear-gradient(160deg, oklch(0.89 0.04 130), oklch(0.7 0.06 145))",
+              }}
+            >
+              <span className="pointer-events-none absolute -right-3 -top-6 select-none text-[110px] font-black leading-none text-white/55">{coverChar}</span>
+              <span className="relative mb-3 rounded-full bg-white/75 px-3 py-1 text-[10px] tracking-widest text-neutral-600">立绘占位</span>
+            </div>
+          )}
+          <p className="mt-1.5 text-center text-[13px] font-bold text-foreground">{profile.name}</p>
+        </div>
+        <div className="min-w-0 flex-1">
+          {basic && (
+            <>
+              <SubTitle>基本资料</SubTitle>
+              <BasicBody paras={basic.paras.filter((p) => !p.startsWith("系列标签"))} />
+            </>
+          )}
+          {family && (
+            <>
+              <SubTitle>家人信息</SubTitle>
+              <BasicBody paras={family.paras} />
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -90,9 +241,16 @@ export function ProfileBody({ profile, onLoadIntro, onUploadCover }: {
     };
     reader.readAsDataURL(file);
   };
+  // 已并入头部/并置区的分节不再单独渲染；其余板块保持加粗标题+留白节奏
+  const rest = profile.sections.filter(
+    (s) => s.kind !== "cover" && s.key !== "basic" && s.key !== "family" && s.key !== "hero"
+  );
+  console.log(`[profile] render body char=${profile.charId} hero=${profile.sections.some((s) => s.key === "hero")} tags=${profile.tags?.length ?? 0} sections=${profile.sections.length}`);
   return (
     <div className="px-4 pb-4 pt-3">
-      {profile.sections.map((sec) => (
+      <HeroHeader profile={profile} />
+      <DuoCover profile={profile} />
+      {rest.map((sec) => (
         <SectionBlock key={sec.key} sec={sec} profile={profile} onLoadIntro={onLoadIntro} />
       ))}
       {onUploadCover && (
@@ -216,14 +374,14 @@ export function ProfileStandalonePage({ profile, onClose, onLoadIntro }: {
   );
 }
 
-/* ---------- ④ 会话顶部开场白卡（进会话默认已展开，下滑可收起） ---------- */
+/* ---------- ④ 会话顶部开场白（进会话默认已展开，下滑可收起） ---------- */
 
 export function OpenerCard({ profile, onCollapse }: {
   profile: CharacterProfile;
   onCollapse: () => void;
 }) {
   return (
-    <div className="fade-up mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-black/[0.05] backdrop-blur-sm">
+    <div className="mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-white shadow-sm">
       <ProfileBody profile={profile} />
       <div className="sticky bottom-0 flex justify-center rounded-b-2xl px-3 pb-2 pt-1">
         <button
@@ -262,7 +420,7 @@ export function InlineProfileCard({ profile, onCollapse, onLoadIntro }: {
   onLoadIntro?: () => void;
 }) {
   return (
-    <div className="fade-up mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-black/[0.05] backdrop-blur-sm">
+    <div className="mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-black/[0.05] backdrop-blur-sm">
       <ProfileBody profile={profile} onLoadIntro={onLoadIntro} />
       <div className="sticky bottom-0 flex justify-center rounded-b-2xl bg-gradient-to-t from-[var(--bubble-cream,#fbf6ea)] via-[var(--bubble-cream,#fbf6ea)] to-transparent px-3 pb-3 pt-2">
         <button

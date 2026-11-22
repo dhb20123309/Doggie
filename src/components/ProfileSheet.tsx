@@ -82,14 +82,14 @@ interface MomentPost {
 const MOMENTS: Record<string, MomentPost[]> = {
   "zhou-chenyan": [
     {
-      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-chenyan-1.png?auth_key=27ca6eb539310e2a49c9b986641db3863f1bcc6f68794204b2da969d985b9d93",
-      ratio: "4/3",
+      img: presetPhoto("zhou-chenyan"),
+      ratio: "3/4",
       text: "今天夕阳不错，可惜某人不在场边。",
       time: "昨天 18:47",
       likes: "周风砚、篮球队长、乐团首席 等 23 人",
     },
     {
-      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-chenyan-2.png?auth_key=59b5ac95f51cec2ecffdf1c4fb5566e7f8eac976f76a5865356fe7eca81a6751",
+      img: presetPhoto("zhou-chenyan"),
       ratio: "3/4",
       text: "赢了。两杯奶茶，一杯是我的，另一杯你猜。",
       time: "3 天前",
@@ -98,14 +98,14 @@ const MOMENTS: Record<string, MomentPost[]> = {
   ],
   "zhou-fengyan": [
     {
-      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-fengyan-1.png?auth_key=dd0bbe5595f7057b2275fff9790ec811261658db838d2fb8f3092ca767b10be8",
-      ratio: "4/3",
+      img: presetPhoto("zhou-fengyan"),
+      ratio: "3/4",
       text: "画到一半，嘴角的弧度有点不受控制。☕️",
       time: "前天 15:20",
       likes: "美术社全员、周晨砚 等 12 人",
     },
     {
-      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-fengyan-2.png?auth_key=39cf72f46edd537cfce8f925954c27adc1f5a9521d9491d2acf0876584810761",
+      img: presetPhoto("zhou-fengyan"),
       ratio: "3/4",
       text: "下雨天，伞是同款这件事，应该没人发现吧。",
       time: "5 天前",

@@ -18,20 +18,20 @@
     "id": "3",
     "priority": "medium",
     "skills": [],
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "生成周晨砚/周风砚朋友圈预览图并挂进档案卡",
     "id": "4",
     "priority": "medium",
     "skills": [],
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "build+dev 双门禁与截图验收，更新 AGENTS.md",
     "id": "5",
     "priority": "high",
     "skills": [],
-    "status": "pending"
+    "status": "completed"
   }
 ]

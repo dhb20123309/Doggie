@@ -15,6 +15,7 @@ import {
   usePhonePeek,
   useProfile,
   makePeek,
+  isPeekFresh,
   seedDiaries,
   SCRIPTS,
   type DiaryEntry,
@@ -148,9 +149,10 @@ export function PhonePeekApp({ onBack }: AppProps) {
   const [whoIdx, setWhoIdx] = useState(0);
   const charId = characters[Math.min(whoIdx, characters.length - 1)]?.id ?? "zhou-chenyan";
   const ch = characters.find((c) => c.id === charId) ?? characters[0];
-  const data = peek?.charId === charId ? peek : makePeek(charId);
+  // 旧版缓存缺行踪/应用字段时视为失效，重新生成（防止 max(...) 空数组崩溃）
+  const data = isPeekFresh(peek, charId) ? peek! : makePeek(charId);
   useEffect(() => {
-    if (!peek || peek.charId !== charId) setPeek(data);
+    if (!isPeekFresh(peek, charId)) setPeek(makePeek(charId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [charId]);
   const avatarIsImg = ch?.avatar?.startsWith("data:") || ch?.avatar?.startsWith("http");

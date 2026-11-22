@@ -4,6 +4,7 @@
 import { useRef, useState } from "react";
 import { X, Wrench, FileText, MessageSquareQuote, Upload, ImagePlus, Clapperboard, ChevronDown } from "lucide-react";
 import type { CharacterProfile, ProfileSection } from "@/lib/character-profile";
+import { presetProfileFor } from "@/lib/character-profile";
 import { presetPhoto } from "@/lib/chat-store";
 
 /** 预置角色未上传立绘时，用定妆照作档案封面（用户自导角色无回落） */
@@ -68,6 +69,76 @@ function PersonalityBody({ paras }: { paras: string[] }) {
   );
 }
 
+/* ---------- 朋友圈预览（社交账号分节专属：仿微信朋友圈九宫格动态卡） ---------- */
+
+interface MomentPost {
+  img: string;
+  ratio: "4/3" | "3/4";
+  text: string;
+  time: string;
+  likes: string;
+}
+
+const MOMENTS: Record<string, MomentPost[]> = {
+  "zhou-chenyan": [
+    {
+      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-chenyan-1.png?auth_key=27ca6eb539310e2a49c9b986641db3863f1bcc6f68794204b2da969d985b9d93",
+      ratio: "4/3",
+      text: "今天夕阳不错，可惜某人不在场边。",
+      time: "昨天 18:47",
+      likes: "周风砚、篮球队长、乐团首席 等 23 人",
+    },
+    {
+      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-chenyan-2.png?auth_key=59b5ac95f51cec2ecffdf1c4fb5566e7f8eac976f76a5865356fe7eca81a6751",
+      ratio: "3/4",
+      text: "赢了。两杯奶茶，一杯是我的，另一杯你猜。",
+      time: "3 天前",
+      likes: "周风砚、死党A 等 18 人",
+    },
+  ],
+  "zhou-fengyan": [
+    {
+      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-fengyan-1.png?auth_key=dd0bbe5595f7057b2275fff9790ec811261658db838d2fb8f3092ca767b10be8",
+      ratio: "4/3",
+      text: "画到一半，嘴角的弧度有点不受控制。☕️",
+      time: "前天 15:20",
+      likes: "美术社全员、周晨砚 等 12 人",
+    },
+    {
+      img: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/moments-fengyan-2.png?auth_key=39cf72f46edd537cfce8f925954c27adc1f5a9521d9491d2acf0876584810761",
+      ratio: "3/4",
+      text: "下雨天，伞是同款这件事，应该没人发现吧。",
+      time: "5 天前",
+      likes: "哥哥、社团好友 等 9 人",
+    },
+  ],
+};
+
+function MomentsPreview({ charId, intro }: { charId: string; intro?: string }) {
+  const posts = MOMENTS[charId];
+  if (!posts) return null;
+  return (
+    <div className="mt-2 space-y-3">
+      {intro && <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/80">{intro}</p>}
+      {posts.map((p, i) => (
+        <div key={i} className="rounded-xl bg-black/[0.03] p-3">
+          <img
+            src={p.img}
+            alt="朋友圈配图"
+            className="w-full max-w-[210px] rounded-lg object-cover shadow-sm"
+            style={{ aspectRatio: p.ratio }}
+          />
+          <p className="mt-2 text-[12px] leading-relaxed text-[#576373]">{p.text}</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">{p.time}</p>
+          <div className="mt-1.5 rounded-md bg-white/70 px-2 py-1 text-[10.5px] leading-relaxed text-[#576373]">
+            ❤️ {p.likes}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SectionBlock({ sec, profile, onLoadIntro }: {
   sec: ProfileSection;
   profile: CharacterProfile;
@@ -109,6 +180,27 @@ function SectionBlock({ sec, profile, onLoadIntro }: {
 
   const isStory = sec.kind === "story";
   const isPersonality = sec.key === "personality";
+  // 社交账号分节：预置角色渲染朋友圈动态预览（图 + 文案 + 点赞）；
+  // 旧版存储档案缺该分节时现场合并预置解析结果里的 social 分节，保证开场白卡也能看到
+  if (sec.key === "social" && MOMENTS[profile.charId]) {
+    return (
+      <div className="mb-6">
+        <p className="mb-2 text-[13px] font-bold text-foreground">{sec.title}</p>
+        <MomentsPreview charId={profile.charId} intro={sec.paras.join("\n")} />
+      </div>
+    );
+  }
+  if (sec.key === "intro" && MOMENTS[profile.charId]) {
+    const socialSec = presetProfileFor(profile.charId)?.sections.find((s) => s.key === "social");
+    if (socialSec) {
+      return (
+        <div className="mb-6">
+          <p className="mb-2 text-[13px] font-bold text-foreground">{socialSec.title}</p>
+          <MomentsPreview charId={profile.charId} intro={socialSec.paras.join("\n")} />
+        </div>
+      );
+    }
+  }
   return (
     <div className="mb-6">
       <p className="mb-2 text-[13px] font-bold text-foreground">{sec.title}</p>

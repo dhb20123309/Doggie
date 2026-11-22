@@ -169,6 +169,11 @@ export function makePeek(charId: string): PhonePeek {
   return { charId, battery: 15 + Math.floor(Math.random() * 70), searches, drafts, movements, appUsage: apps, at: Date.now() };
 }
 
+/** 旧版缓存（无行踪/应用记录字段）或角色不匹配时视为失效，需重新生成 */
+export function isPeekFresh(p: PhonePeek | null, charId: string): boolean {
+  return !!p && p.charId === charId && Array.isArray(p.movements) && Array.isArray(p.appUsage);
+}
+
 /* ---------- 个人资料（称呼昵称） ---------- */
 export interface Profile {
   nickname: string;

@@ -51,6 +51,16 @@ export const DEFAULT_SEND_PREFS: SendPrefs = {
   autoReplyAfterSend: false,
 };
 
+/** 模型出戏兜底：网关/模型偶尔返回"我是语言模型/AI助手"等 OOC 声明，直接丢弃不展示给用户 */
+const OOC_PATTERNS =
+  /语言模型|人工智能|AI\s*(助手|模型|大模型)|作为\s*(一个)?\s*(AI|人工智能|语言|虚拟|聊天)|无法(提供|回答|帮助|扮演)|没(办法|能)提供这方面|我(只)?是(一个)?(文本|文字|虚拟)(模型|助手)|抱歉[，,].*不能|超出.*(范围|能力).*无法/i;
+
+export function sanitizeReply(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const kept = lines.filter((l) => l.trim() && !OOC_PATTERNS.test(l));
+  return kept.join("\n").trim();
+}
+
 /** 按真实换行拆分回复为气泡，去掉空行；整段一行时即一个气泡 */
 export function splitBubbles(text: string): string[] {
   const bubbles = text

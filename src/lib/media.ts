@@ -158,6 +158,30 @@ export function photoPrompt(charName: string, persona: string, scene: string): s
   return `Candid realistic smartphone snapshot photo of ${charName}, character traits: ${traits}. Scene: ${scene}. Natural imperfect phone-camera framing, realistic lighting, no text, no watermark.`;
 }
 
+/** 场景关键词 → 英文拍摄场景：让生成的照片贴合聊天话题，而不是随机发莫名其妙的图 */
+const SCENE_MATCHERS: [RegExp, string][] = [
+  [/球|赛|运动|锻炼|健身|操场/, "after school on the basketball court, slightly sweaty and smiling at the camera"],
+  [/琴|钢琴|排练|音乐|歌|演奏|曲子/, "at a piano in the school music room, glancing up mid-phrase"],
+  [/奶茶|咖啡|吃|喝|饭|餐|零食|外卖|饿/, "holding a bubble tea on a tree-lined street at dusk"],
+  [/车|兜风|路|旅行|高速|自驾/, "in the passenger seat of a car on a sunny afternoon road trip"],
+  [/夜|晚|月亮|星星|灯|天台|风景/, "on the rooftop railing looking at the evening city lights"],
+  [/雨|伞|湿|阴天/, "under an umbrella on a rainy street, puddles reflecting neon lights"],
+  [/图书馆|书|作业|题|考试|学习|自习/, "at a desk in the library, textbooks open, looking up from studying"],
+  [/画|速写|美术|颜料/, "in the art room holding a sketch pad, pencil behind the ear"],
+  [/猫|狗|宠物/, "crouching on a sunny lawn playing with a small pet"],
+];
+
+/**
+ * 根据最近聊天内容挑一个贴合话题的拍照场景；
+ * 没有明显话题时返回空串——此时宁可不发图，也不发莫名其妙的图。
+ */
+export function matchPhotoScene(text: string): string {
+  for (const [re, scene] of SCENE_MATCHERS) {
+    if (re.test(text)) return scene;
+  }
+  return "";
+}
+
 /** 主动分享照片时的日常场景池 */
 export const PHOTO_SCENES = [
   "after school on the basketball court, slightly sweaty and smiling at the camera",

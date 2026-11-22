@@ -32,6 +32,7 @@ import {
   type ReadMarks,
   type SendPrefs,
   splitBubbles,
+  sanitizeReply,
 } from "@/lib/chat-types";
 import {
   type WorldBook,
@@ -57,7 +58,7 @@ import {
   PROACTIVE_LINES,
 } from "@/lib/chat-store";
 import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
-import { generateCharPhoto, photoPrompt, PHOTO_SCENES } from "@/lib/media";
+import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 
 interface Props {
@@ -205,11 +206,32 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         }
       }
       if (result.ok) {
-        console.log(`[reply] ok char=${active.id} len=${result.reply.length}`);
-        setLog((prev) => [
-          ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
-          { id: `a${Date.now()}`, role: "assistant", content: result.reply, at: Date.now() },
-        ]);
+        const clean = sanitizeReply(result.reply);
+        if (!clean) {
+          // 整条回复都是"我是语言模型…"式 OOC 出戏话：丢弃不展示，静默重生成一次
+          console.warn(`[reply] OOC filtered char=${active.id}，静默重生成一次`);
+          const again = await chatCompletion(config, [
+            ...toHistory(active, entries),
+            { role: "user", content: "（请完全回到角色身份继续对话，不要提及你是模型或程序）" },
+          ]).then((r) => sanitizeReply(r), () => "");
+          if (again) {
+            console.log(`[reply] regen ok char=${active.id}`);
+            setLog((prev) => [
+              ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
+              { id: `a${Date.now()}`, role: "assistant", content: again, at: Date.now() },
+            ]);
+          } else {
+            console.error(`[reply] regen fail char=${active.id}`);
+            setLog((prev) => prev.map((e) => (e.id === userMsgId ? { ...e, failed: true } : e)));
+          }
+        } else {
+          if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${active.id}`);
+          console.log(`[reply] ok char=${active.id} len=${clean.length}`);
+          setLog((prev) => [
+            ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
+            { id: `a${Date.now()}`, role: "assistant", content: clean, at: Date.now() },
+          ]);
+        }
       } else {
         console.error(`[reply] final fail char=${active.id}:`, result.err instanceof Error ? result.err.message : result.err);
         setLog((prev) => prev.map((e) => (e.id === userMsgId ? { ...e, failed: true } : e)));
@@ -334,7 +356,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       ];
       let line = "";
       try {
-        line = await chatCompletion(config, history);
+        line = sanitizeReply(await chatCompletion(config, history));
+        if (!line) console.warn(`[proactive] OOC filtered char=${ch.id}，本轮主动消息跳过`);
       } catch {
         const lines = PROACTIVE_LINES[ch.id];
         line = lines?.length ? lines[Math.floor(Math.random() * lines.length)] : "";
@@ -354,9 +377,15 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         at: Date.now(),
         proactive: true,
       });
-      // 小概率附带一张日常照片：先现生成台词再发图，配文与图片场景一致、每次都不重样
+      // 附带照片必须贴合聊天话题：从最近对话内容匹配场景，匹配不到就宁可不发（不再随机发莫名其妙的图）
       if (ch.photoEnabled && Math.random() < PHOTO_CHANCE && Date.now() - lastPhotoAt(ch.id) > PHOTO_COOLDOWN_MS) {
-        const scene = PHOTO_SCENES[Math.floor(Math.random() * PHOTO_SCENES.length)];
+        const recentText = (last ? readLastEntries(ch.id, 6).map((e) => e.content).join(" ") : ch.name ?? "") + " " + (line || "");
+        const scene = matchPhotoScene(recentText);
+        if (!scene) {
+          console.log(`[photo] skip char=${ch.id}：最近对话无明显可拍话题，不发图`);
+          return;
+        }
+        console.log(`[photo] attach char=${ch.id} scene="${scene.slice(0, 40)}"`);
         let caption = "";
         try {
           caption = await chatCompletion(config, [

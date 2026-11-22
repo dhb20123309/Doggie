@@ -216,8 +216,30 @@ export function ProfileStandalonePage({ profile, onClose, onLoadIntro }: {
   );
 }
 
-/* ---------- ④ 会话顶部开场白条（默认折叠，点击在聊天流内一次性全展开） ---------- */
+/* ---------- ④ 会话顶部开场白卡（进会话默认已展开，下滑可收起） ---------- */
 
+export function OpenerCard({ profile, onCollapse }: {
+  profile: CharacterProfile;
+  onCollapse: () => void;
+}) {
+  return (
+    <div className="fade-up mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-black/[0.05] backdrop-blur-sm">
+      <ProfileBody profile={profile} />
+      <div className="sticky bottom-0 flex justify-center rounded-b-2xl px-3 pb-2 pt-1">
+        <button
+          type="button"
+          onClick={onCollapse}
+          className="jelly-btn flex items-center gap-1.5 rounded-full glass px-4 py-1.5 text-[11px] font-semibold text-secondary-foreground"
+        >
+          <ChevronDown className="size-3 rotate-180" />
+          收起开场白
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 折叠后的开场白条：点击重新展开 */
 export function OpenerStrip({ opener, expanded, onToggle }: {
   opener: string;
   expanded: boolean;

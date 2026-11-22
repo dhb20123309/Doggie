@@ -1,5 +1,5 @@
 // 「短信」应用：微信式会话列表单选角色 + 分角色聊天 + 表情发送 + 语音朗读 + 前情提要 + 主动消息
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import {
   ChevronLeft,
   SendHorizontal,
@@ -66,7 +66,7 @@ import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
-import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
+import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, OpenerCard, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 
 interface Props {
@@ -178,6 +178,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   /** drawer=侧边抽屉（首次进会话点白条弹出）；page=独立静态页（清空记录后从工具箱进入） */
   const [profileMode, setProfileMode] = useState<"none" | "drawer" | "page">("none");
   const [openerExpanded, setOpenerExpanded] = useState(false);
+  /** 开场白卡：进会话默认已展开，下滑滚动或点"收起开场白"后收回为白条 */
+  const [openerCollapsed, setOpenerCollapsed] = useState(false);
   const [profileImportOpen, setProfileImportOpen] = useState(false);
   /** 清空过记录的 charId：开场白条消失且不再自动弹出（localStorage 记忆，重新发消息后恢复） */
   const [chatCleared, setChatCleared] = usePersisted<Record<string, boolean>>("vp-phone:chat-cleared:v1", {});
@@ -208,8 +210,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     setToolboxOpen(false);
     setProfileMode("none");
     setOpenerExpanded(false);
+    setOpenerCollapsed(false);
     setProfileImportOpen(false);
   }
+
+  /** 消息流滚动：开场白展开期间向下滚动即收起为白条（仅本次进会话生效一次） */
+  const handleListScroll = (e: UIEvent<HTMLDivElement>) => {
+    if (!openerCollapsed && e.currentTarget.scrollTop > 48) {
+      setOpenerCollapsed(true);
+      console.log(`[profile] opener auto-collapsed char=${active?.id} on scroll`);
+    }
+  };
 
   /** 开局引子一键加载到互动剧情模式：作为首条剧情内容写入会话（记忆互通、完整保留），并开启该角色 storyMode */
   const loadIntroToStory = () => {
@@ -882,21 +893,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         </div>
       )}
 
-      {/* 开场白条：会话有记录时默认折叠展示；清空记录后消失不再自动弹出（对齐"清除聊天记录之后白条消失"要求） */}
-      {profile?.opener && log.length > 0 && !chatCleared[active.id] && !openerExpanded && (
+      {/* 开场白：进入会话默认已展开（完整档案卡，下滑可收起）；清空记录后消失不再自动弹出 */}
+      {profile?.opener && !chatCleared[active.id] && !openerExpanded && !openerCollapsed && (
         <div className="px-3 pt-2">
-          <OpenerStrip
-            opener={profile.opener}
-            expanded={false}
-            onToggle={() => {
-              console.log(`[profile] opener tapped char=${active.id} → 抽屉展开`);
-              setProfileMode("drawer");
-            }}
-          />
+          <OpenerCard profile={profile} onCollapse={() => setOpenerCollapsed(true)} />
         </div>
       )}
 
-      <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+      <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3" onScroll={handleListScroll}>
         {/* 工具箱→角色开场白：在聊天流内一次性完整展开档案（禁止局部折叠/分步加载），底部固定一键收起 */}
         {openerExpanded && profile && (
           <InlineProfileCard
@@ -906,6 +910,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               setOpenerExpanded(false);
             }}
             onLoadIntro={loadIntroToStory}
+          />
+        )}
+        {/* 折叠后的开场白条：位于消息流顶部，点击打开侧边抽屉 */}
+        {profile?.opener && !chatCleared[active.id] && !openerExpanded && openerCollapsed && (
+          <OpenerStrip
+            opener={profile.opener}
+            expanded={false}
+            onToggle={() => {
+              console.log(`[profile] opener tapped char=${active.id} → 抽屉展开`);
+              setProfileMode("drawer");
+            }}
           />
         )}
         {log.length === 0 && !pending && (

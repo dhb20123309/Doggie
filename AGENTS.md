@@ -39,6 +39,8 @@
 
 - **剧情框渲染修正（第39轮）**：`RoleChatApp.tsx` 消息渲染层——灰框分支改为 `entry.story || prevStory`（prevStory 仅在 storyMode 开启时计算）：退出剧情模式后新发的普通消息走正常左右气泡，但带 story 标记的历史剧情内容**必须仍居中展示**（淡化为 bg-transparent 浅灰文字），绝不能退回左右气泡——否则玩家"二你"叙述会被显示成角色发的消息。曾一度把整个灰框分支用 inStory 短路导致历史剧情变气泡，属修复过头。日志 [story] render mode=on/off entry=… → 居中剧情展示。
 
+- **MiniMax 语音通道 + 收起按钮上移（第41轮）**：`tts.ts` VoiceConfig 新增 provider("openai"默认|"minimax")/minimaxKey/minimaxRegion(cn=api.minimax.chat|global=api.minimaxi.com)/minimaxModel(speech-02)/minimaxVoice(male-qn-qingse)，loadVoiceConfig 浅合并自动兼容旧存档；voiceReady 对 minimax 只看 Key；synthesizeSpeech 按 provider 分流到 synthesizeMiniMax（POST /v1/t2a_v2，响应 base_resp.status_code===0 + data.audio hex→Uint8Array→Blob mp3 objectURL，状态码 1001/1002/1004/1008/1026 翻译中文错误）；testVoiceChannel 供设置页真实试听验证。SettingsApp VoiceSection 加"通用网关/MiniMax"切换，MiniMax 表单=Key+区域+模型+voice_id+MINIMAX_VOICES 快捷男声四项+"测试并保存"按钮（成功才 saveVoiceConfig 并绿色显示"已成功"2.5s，失败红字原因不保存）。RoleChatApp speak/canSpeak 零改动自动生效。ProfileSheet OpenerCard/InlineProfileCard 收起按钮统一移到卡片顶部（InlineProfileCard 原 sticky bottom-0 渐变遮罩条删除）。日志 [tts] minimax test ok/fail、[tts] synth ok provider=…。注意：浏览器直连 MiniMax 受 CORS 限制，preview stub 环境 fetch 失败会如实报"连不上 MiniMax 服务器"。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

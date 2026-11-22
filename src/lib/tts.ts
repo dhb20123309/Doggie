@@ -1,18 +1,31 @@
-// 外部语音 API 接入通道：OpenAI 兼容 /audio/speech；音色库可各角色单独绑定
+// 外部语音 API 接入通道：provider=openai 走 OpenAI 兼容 /audio/speech；provider=minimax 走官方 t2a_v2
 import { normalizeBaseUrl } from "./types";
 
+export type VoiceProvider = "openai" | "minimax";
+
 export interface VoiceConfig {
-  /** 语音服务接口地址（留空则复用聊天接口的 baseUrl） */
+  /** 语音通道：通用 OpenAI 兼容网关 / MiniMax 官方 */
+  provider: VoiceProvider;
+  /** 语音服务接口地址（留空则复用聊天接口的 baseUrl）——仅 openai 通道使用 */
   baseUrl: string;
-  /** 语音服务 Key（留空则复用聊天接口的 apiKey） */
+  /** 语音服务 Key（留空则复用聊天接口的 apiKey）——仅 openai 通道使用 */
   apiKey: string;
   /** TTS 模型名，例如 tts-1 / openai-audio 兼容网关的模型 */
   model: string;
   /** 可用音色列表（可从服务商文档手工维护） */
   voices: { id: string; label: string }[];
+  /** MiniMax API Key（GroupID 后的 Bearer Token） */
+  minimaxKey: string;
+  /** MiniMax 接口区域：cn=api.minimax.chat，global=api.minimaxi.com */
+  minimaxRegion: "cn" | "global";
+  /** MiniMax TTS 模型名，如 speech-02 / speech-2.5-hd-preview */
+  minimaxModel: string;
+  /** MiniMax 默认音色 voice_id，如 male-qn-qingse */
+  minimaxVoice: string;
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
+  provider: "openai",
   baseUrl: "",
   apiKey: "",
   model: "tts-1",
@@ -24,7 +37,19 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     { id: "nova", label: "nova · 女声" },
     { id: "shimmer", label: "shimmer · 轻柔" },
   ],
+  minimaxKey: "",
+  minimaxRegion: "cn",
+  minimaxModel: "speech-02",
+  minimaxVoice: "male-qn-qingse",
 };
+
+/** MiniMax 常用男声快捷项（voice_id 可手填其它值） */
+export const MINIMAX_VOICES: { id: string; label: string }[] = [
+  { id: "male-qn-qingse", label: "青涩青年" },
+  { id: "male-qn-jingying", label: "精英青年" },
+  { id: "male-qn-badao", label: "霸道青年" },
+  { id: "male-zh-acoustic", label: "磁性男声" },
+];
 
 const VC_KEY = "vp-phone:voiceconfig:v1";
 
@@ -46,19 +71,83 @@ export function saveVoiceConfig(cfg: VoiceConfig): void {
   }
 }
 
-/** 是否具备合成条件：有可用地址+Key（显式配置或回落到聊天接口） */
+/** 是否具备合成条件：minimax 通道只看 Key；openai 通道沿用显式配置或回落聊天接口 */
 export function voiceReady(
   vc: VoiceConfig,
   fallback: { baseUrl: string; apiKey: string }
 ): boolean {
+  if (vc.provider === "minimax") return Boolean(vc.minimaxKey.trim());
   const base = normalizeBaseUrl(vc.baseUrl || fallback.baseUrl);
   const key = (vc.apiKey || fallback.apiKey).trim();
   return Boolean(base && key && vc.model.trim());
 }
 
+/** MiniMax 状态码翻译成人话 */
+function minimaxError(status: number, statusMsg?: string): string {
+  const map: Record<number, string> = {
+    1001: "输入内容不当，换个说法再试",
+    1002: "MiniMax 限流了，稍等几秒再点一次",
+    1004: "API Key 无效或已过期，检查粘贴是否完整",
+    1008: "MiniMax 账户余额不足，去官网充值后再测",
+    1026: "音色 id 不存在，检查 voice_id 拼写",
+  };
+  return map[status] ?? `MiniMax 返回错误 ${status}${statusMsg ? `：${statusMsg}` : ""}`;
+}
+
+/** hex 字符串 → mp3 Blob URL */
+function hexToAudioUrl(hex: string): string {
+  const clean = hex.trim();
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+}
+
 /**
- * 调用外部 TTS 合成一段语音，返回可播放的对象 URL。
- * 候选地址兜底逻辑与聊天接口一致：不带版本号时自动补 /v1 再试。
+ * 调用 MiniMax 官方 t2a_v2 合成一段语音，返回可播放的对象 URL。
+ * 失败抛出中文可读错误（含状态码翻译）。
+ */
+async function synthesizeMiniMax(
+  vc: VoiceConfig,
+  text: string,
+  voiceId?: string
+): Promise<string> {
+  const key = vc.minimaxKey.trim();
+  if (!key) throw new Error("未填写 MiniMax API Key");
+  const host = vc.minimaxRegion === "global" ? "https://api.minimaxi.com" : "https://api.minimax.chat";
+  let res: Response;
+  try {
+    res = await fetch(`${host}/v1/t2a_v2`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: vc.minimaxModel.trim() || "speech-02",
+        text: text.slice(0, 600),
+        voice_id: voiceId?.trim() || vc.minimaxVoice.trim() || "male-qn-qingse",
+        audio: { format: "mp3", sample_rate: 32000 },
+        stream: false,
+      }),
+    });
+  } catch {
+    throw new Error("连不上 MiniMax 服务器，检查网络或切换区域重试");
+  }
+  const json = (await res.json().catch(() => null)) as {
+    data?: { audio?: string };
+    base_resp?: { status_code?: number; status_msg?: string };
+  } | null;
+  if (!json) throw new Error(`MiniMax 接口返回异常（HTTP ${res.status}）`);
+  const code = json.base_resp?.status_code ?? 0;
+  if (code !== 0) throw new Error(minimaxError(code, json.base_resp?.status_msg));
+  const hex = json.data?.audio;
+  if (!hex) throw new Error("接口通了但没返回音频，检查模型/音色名是否正确");
+  console.log(`[tts] synth ok provider=minimax chars=${text.length}`);
+  return hexToAudioUrl(hex);
+}
+
+/**
+ * 调用外部 TTS 合成一段语音，返回可播放的对象 URL。按 provider 分流。
+ * openai 通道候选地址兜底与聊天接口一致：不带版本号时自动补 /v1 再试。
  */
 export async function synthesizeSpeech(
   vc: VoiceConfig,
@@ -66,6 +155,9 @@ export async function synthesizeSpeech(
   text: string,
   voiceId?: string
 ): Promise<string> {
+  if (vc.provider === "minimax") {
+    return synthesizeMiniMax(vc, text, voiceId);
+  }
   const base = normalizeBaseUrl(vc.baseUrl || fallback.baseUrl);
   const key = (vc.apiKey || fallback.apiKey).trim();
   if (!base || !key) throw new Error("未配置语音接口：请在设置里填写语音服务的地址和 Key");
@@ -88,10 +180,21 @@ export async function synthesizeSpeech(
         throw new Error(`语音接口返回 ${res.status}${txt ? `：${txt.slice(0, 120)}` : ""}`);
       }
       const blob = await res.blob();
+      console.log(`[tts] synth ok provider=openai chars=${text.length}`);
       return URL.createObjectURL(blob);
     } catch (e) {
       lastErr = e;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("语音合成失败");
+}
+
+/** 设置页"测试并保存"用：合成一小段试听文本验证通道可用 */
+export async function testVoiceChannel(
+  vc: VoiceConfig,
+  fallback: { baseUrl: string; apiKey: string }
+): Promise<void> {
+  const url = await synthesizeSpeech(vc, fallback, "你好，这是语音测试。", vc.provider === "minimax" ? vc.minimaxVoice : undefined);
+  // 测试成功即释放，避免内存泄漏
+  URL.revokeObjectURL(url);
 }

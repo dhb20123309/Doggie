@@ -9,7 +9,7 @@ import type { AiConfig, TestResult } from "@/lib/types";
 import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
-import { loadVoiceConfig, saveVoiceConfig, type VoiceConfig } from "@/lib/tts";
+import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
 import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, type ImageConfig } from "@/lib/media";
 
 interface Props {
@@ -240,7 +240,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, wallpapers }: Prop
         <PasscodeSection onLock={onLock} />
         <WallpaperSection wallpapers={wallpapers} />
         <ImageSection />
-        <VoiceSection />
+        <VoiceSection config={config} />
         <MusicSourceSection />
 
         <div className="pt-1">
@@ -423,11 +423,14 @@ function ImageSection() {
   );
 }
 
-/** 外部语音 API 接入：地址/Key 留空则复用聊天接口；音色清单手工维护供角色绑定 */
-function VoiceSection() {
+/** 外部语音 API 接入：通用网关（OpenAI 兼容）或 MiniMax 官方通道；音色清单供角色绑定 */
+function VoiceSection({ config }: { config: AiConfig }) {
   const [form, setForm] = useState<VoiceConfig>(() => loadVoiceConfig());
   const [savedMsg, setSavedMsg] = useState(false);
   const [newVoice, setNewVoice] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testOk, setTestOk] = useState(false);
+  const [testErr, setTestErr] = useState("");
 
   const save = () => {
     saveVoiceConfig(form);
@@ -435,38 +438,119 @@ function VoiceSection() {
     setTimeout(() => setSavedMsg(false), 1500);
   };
 
+  /** MiniMax 通道：先真实合成一段试听，成功才保存并显示"已成功" */
+  const testAndSave = async () => {
+    if (!form.minimaxKey.trim() || testing) return;
+    setTesting(true);
+    setTestErr("");
+    try {
+      await testVoiceChannel(form, { baseUrl: config.baseUrl, apiKey: config.apiKey });
+      saveVoiceConfig(form);
+      setTestOk(true);
+      console.log(`[tts] minimax test ok region=${form.minimaxRegion} model=${form.minimaxModel}`);
+      setTimeout(() => setTestOk(false), 2500);
+    } catch (e) {
+      setTestErr(e instanceof Error ? e.message : "测试失败");
+      console.warn("[tts] minimax test fail:", e);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const isMiniMax = form.provider === "minimax";
+
   return (
     <div className="glass space-y-2.5 rounded-2xl p-3.5">
       <p className="text-[13px] font-semibold">外部语音（TTS）</p>
-      <Input placeholder="语音接口地址（留空=复用聊天接口）" value={form.baseUrl} onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
-      <Input type="password" placeholder="语音 Key（留空=复用聊天 Key）" autoComplete="off" value={form.apiKey} onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
-      <Input placeholder="TTS 模型名，如 tts-1" value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
-      <div className="flex flex-wrap items-center gap-1.5">
-        {form.voices.map((v) => (
-          <span key={v.id} className="flex items-center gap-1 rounded-full bg-white/50 px-2 py-0.5 text-[10.5px]">
-            {v.label}
-            <button type="button" aria-label={`移除 ${v.id}`} onClick={() => setForm((f) => ({ ...f, voices: f.voices.filter((x) => x.id !== v.id) }))} className="text-muted-foreground hover:text-destructive">
-              <X className="size-3" />
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={() => setForm((f) => ({ ...f, provider: "openai" }))}
+          className={`jelly-btn rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${!isMiniMax ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+        >
+          通用网关
+        </button>
+        <button
+          type="button"
+          onClick={() => setForm((f) => ({ ...f, provider: "minimax" }))}
+          className={`jelly-btn rounded-full px-3 py-1 text-[11px] font-semibold transition-colors ${isMiniMax ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+        >
+          MiniMax
+        </button>
+      </div>
+      {isMiniMax ? (
+        <>
+          <Input type="password" placeholder="MiniMax API Key" autoComplete="off" value={form.minimaxKey} onChange={(e) => { setForm((f) => ({ ...f, minimaxKey: e.target.value })); setTestOk(false); setTestErr(""); }} className="h-9 rounded-lg glass-input text-[12px]" />
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, minimaxRegion: "cn" }))}
+              className={`jelly-btn rounded-full px-3 py-1 text-[10.5px] ${form.minimaxRegion === "cn" ? "bg-primary/15 font-semibold text-primary" : "text-muted-foreground"}`}
+            >
+              国内 api.minimax.chat
             </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <Input placeholder="新增音色 id / id·说明" value={newVoice} onChange={(e) => setNewVoice(e.target.value)} className="h-8 flex-1 rounded-lg glass-input text-[11px]" />
-        <Button size="sm" variant="outline" className="jelly-btn h-8 rounded-lg px-2.5 text-[11px]" onClick={() => {
-          const id = newVoice.trim().split(/[·\s]/)[0];
-          if (!id) return;
-          setForm((f) => ({ ...f, voices: [...f.voices, { id, label: newVoice.trim() }] }));
-          setNewVoice("");
-        }}>
-          添加
-        </Button>
-      </div>
-      <div className="flex gap-2">
-        <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={save}>
-          {savedMsg ? "已保存" : "保存语音配置"}
-        </Button>
-      </div>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, minimaxRegion: "global" }))}
+              className={`jelly-btn rounded-full px-3 py-1 text-[10.5px] ${form.minimaxRegion === "global" ? "bg-primary/15 font-semibold text-primary" : "text-muted-foreground"}`}
+            >
+              国际 api.minimaxi.com
+            </button>
+          </div>
+          <Input placeholder="模型名，如 speech-02 / speech-2.5-hd-preview" value={form.minimaxModel} onChange={(e) => setForm((f) => ({ ...f, minimaxModel: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <Input placeholder="默认音色 voice_id，如 male-qn-qingse" value={form.minimaxVoice} onChange={(e) => setForm((f) => ({ ...f, minimaxVoice: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <div className="flex flex-wrap gap-1.5">
+            {MINIMAX_VOICES.map((v) => (
+              <button key={v.id} type="button" onClick={() => setForm((f) => ({ ...f, minimaxVoice: v.id }))} className={`jelly-btn rounded-full px-2.5 py-0.5 text-[10.5px] ${form.minimaxVoice === v.id ? "bg-primary/15 font-semibold text-primary" : "bg-white/50 text-secondary-foreground"}`}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" disabled={!form.minimaxKey.trim() || testing} onClick={testAndSave}>
+              {testing ? <span className="flex items-center gap-1"><LoaderCircle className="size-3 animate-spin" />正在接入…</span> : testOk ? <span className="flex items-center gap-1 text-success"><CheckCircle2 className="size-3.5" />已成功</span> : "测试并保存"}
+            </Button>
+          </div>
+          {testErr && (
+            <p className="flex items-start gap-1 rounded-lg bg-destructive/10 px-2.5 py-2 text-[11px] leading-relaxed text-destructive">
+              <XCircle className="mt-0.5 size-3 shrink-0" />{testErr}
+            </p>
+          )}
+          <p className="text-[11px] leading-relaxed text-muted-foreground">在 MiniMax 控制台复制 API Key 粘贴即可；测错区域会报 Key 无效，切换另一个区域重测。</p>
+        </>
+      ) : (
+        <>
+          <Input placeholder="语音接口地址（留空=复用聊天接口）" value={form.baseUrl} onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <Input type="password" placeholder="语音 Key（留空=复用聊天 Key）" autoComplete="off" value={form.apiKey} onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <Input placeholder="TTS 模型名，如 tts-1" value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <div className="flex flex-wrap items-center gap-1.5">
+            {form.voices.map((v) => (
+              <span key={v.id} className="flex items-center gap-1 rounded-full bg-white/50 px-2 py-0.5 text-[10.5px]">
+                {v.label}
+                <button type="button" aria-label={`移除 ${v.id}`} onClick={() => setForm((f) => ({ ...f, voices: f.voices.filter((x) => x.id !== v.id) }))} className="text-muted-foreground hover:text-destructive">
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input placeholder="新增音色 id / id·说明" value={newVoice} onChange={(e) => setNewVoice(e.target.value)} className="h-8 flex-1 rounded-lg glass-input text-[11px]" />
+            <Button size="sm" variant="outline" className="jelly-btn h-8 rounded-lg px-2.5 text-[11px]" onClick={() => {
+              const id = newVoice.trim().split(/[·\s]/)[0];
+              if (!id) return;
+              setForm((f) => ({ ...f, voices: [...f.voices, { id, label: newVoice.trim() }] }));
+              setNewVoice("");
+            }}>
+              添加
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={save}>
+              {savedMsg ? "已保存" : "保存语音配置"}
+            </Button>
+          </div>
+        </>
+      )}
       <p className="text-[11px] leading-relaxed text-muted-foreground">配好后，在角色设定里给每个角色单独绑音色，聊天消息旁会出现朗读按钮。</p>
     </div>
   );

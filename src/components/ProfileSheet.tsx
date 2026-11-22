@@ -474,8 +474,7 @@ export function OpenerCard({ profile, onCollapse }: {
 }) {
   return (
     <div className="mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-white shadow-sm">
-      <ProfileBody profile={profile} />
-      <div className="flex justify-center px-3 pb-2 pt-1">
+      <div className="flex justify-center px-3 pb-1 pt-2">
         <button
           type="button"
           onClick={onCollapse}
@@ -485,6 +484,7 @@ export function OpenerCard({ profile, onCollapse }: {
           收起开场白
         </button>
       </div>
+      <ProfileBody profile={profile} />
     </div>
   );
 }
@@ -504,7 +504,7 @@ export function OpenerStrip({ opener, expanded, onToggle }: {
   );
 }
 
-/* ---------- ⑤ 聊天流内展开的完整档案（禁止局部折叠/分步加载，底部固定一键收起） ---------- */
+/* ---------- ⑤ 聊天流内展开的完整档案（禁止局部折叠/分步加载，顶部一键收起） ---------- */
 
 export function InlineProfileCard({ profile, onCollapse, onLoadIntro }: {
   profile: CharacterProfile;
@@ -513,8 +513,7 @@ export function InlineProfileCard({ profile, onCollapse, onLoadIntro }: {
 }) {
   return (
     <div className="mx-auto mb-2 w-full max-w-[96%] rounded-2xl bg-black/[0.05] backdrop-blur-sm">
-      <ProfileBody profile={profile} onLoadIntro={onLoadIntro} />
-      <div className="sticky bottom-0 flex justify-center rounded-b-2xl bg-gradient-to-t from-[var(--bubble-cream,#fbf6ea)] via-[var(--bubble-cream,#fbf6ea)] to-transparent px-3 pb-3 pt-2">
+      <div className="flex justify-center px-3 pb-1 pt-2">
         <button
           type="button"
           onClick={onCollapse}
@@ -524,6 +523,7 @@ export function InlineProfileCard({ profile, onCollapse, onLoadIntro }: {
           一键收起
         </button>
       </div>
+      <ProfileBody profile={profile} onLoadIntro={onLoadIntro} />
     </div>
   );
 }

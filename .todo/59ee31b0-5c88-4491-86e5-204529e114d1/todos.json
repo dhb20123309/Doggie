@@ -1,32 +1,32 @@
 [
   {
-    "id": "1",
-    "status": "in_progress",
     "content": "设计系统 styles.css（手机主题 token）",
+    "id": "1",
+    "status": "completed",
     "skills": []
   },
   {
-    "id": "2",
-    "status": "pending",
     "content": "共享契约与 API 层（类型、存储、连接测试）",
+    "id": "2",
+    "status": "completed",
     "skills": []
   },
   {
-    "id": "3",
-    "status": "pending",
     "content": "设置页（接口地址/APIKey/模型名 + 连接测试）",
+    "id": "3",
+    "status": "completed",
     "skills": []
   },
   {
-    "id": "4",
-    "status": "pending",
     "content": "虚拟手机屏幕与主首页装配",
+    "id": "4",
+    "status": "completed",
     "skills": []
   },
   {
-    "id": "5",
-    "status": "pending",
     "content": "构建验证并运行预览",
+    "id": "5",
+    "status": "completed",
     "skills": []
   }
 ]

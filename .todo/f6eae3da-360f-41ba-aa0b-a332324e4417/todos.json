@@ -1,54 +1,54 @@
 [
   {
-    "content": "styles.css 暖淡黄 token + 奶油 glass + 气泡/时间戳类",
+    "content": "契约层：chat-types 多角色/voiceId/proactive + chat-store 新 key",
     "id": "1",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "生成默认聊天背景图",
+    "content": "新建 lib/import-parse.ts（角色卡/世界书 md 解析）",
     "id": "2",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "lock-store.ts 新增 useChatBackground",
+    "content": "新建 lib/tts.ts + lib/media.ts（外部语音/音乐接入）",
     "id": "3",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "SettingsApp 壁纸区加聊天背景选择器",
+    "content": "RoleChatApp 重写：微信式列表+多角色日志+表情发送+前情提要+主动消息+照片",
     "id": "4",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "PhoneShell 传递 chatBg",
-    "id": "5",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "RoleChatApp 气泡/头像圆点/输入中/时间戳/背景",
-    "id": "6",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "HomeScreen 组件文字与图标暖色适配",
-    "id": "7",
-    "status": "completed",
-    "skills": []
-  },
-  {
-    "content": "ChatApp 旧版气泡同步",
+    "content": "生成两张写实日常照并上传素材库拿 CDN URL",
     "id": "8",
     "status": "completed",
     "skills": []
   },
   {
-    "content": "构建+dev+截图验收",
+    "content": "SettingsApp 扩展：语音配置+音乐源区",
+    "id": "5",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "ShellApps MusicApp/MemoryApp 接真实音源与多角色统计",
+    "id": "6",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "PhoneShell/types 装配适配",
+    "id": "7",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "构建+dev+截图验收+预置数据验证",
     "id": "9",
     "status": "completed",
     "skills": []

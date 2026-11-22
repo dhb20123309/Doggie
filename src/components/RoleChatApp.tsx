@@ -1,5 +1,5 @@
-// 「TA 的聊天」应用：角色设定 + 连续对话 + 输入发送习惯 + 世界书/表情包联动
-import { useEffect, useRef, useState } from "react";
+// 「短信」应用：微信式会话列表单选角色 + 分角色聊天 + 表情发送 + 语音朗读 + 前情提要 + 主动消息
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   SendHorizontal,
@@ -13,6 +13,10 @@ import {
   BookText,
   SmilePlus,
   Check,
+  Plus,
+  FileInput,
+  Volume2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +40,20 @@ import {
   buildStickerHint,
   parseReplyToMessages,
 } from "@/lib/worldbook";
-import { useCharacter, useChatLog, useSendPrefs, useWorldBooks, useStickers, clearChatLog } from "@/lib/chat-store";
+import {
+  useCharacters,
+  useActiveCharId,
+  useChatLog,
+  clearChatLog,
+  readLastEntry,
+  useSendPrefs,
+  useWorldBooks,
+  useStickers,
+  PROACTIVE_LINES,
+} from "@/lib/chat-store";
+import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
+import { generateCharPhoto, photoPrompt, PHOTO_SCENES } from "@/lib/media";
+import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 
 interface Props {
   config: AiConfig;
@@ -54,21 +71,26 @@ const fmtTime = (at: number) => {
   return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 };
 
-const EMOJIS = ["🌙", "🦊", "🐱", "🤖", "🌸", "⚡", "🫧", "🍵", "🎧", "🪐"];
-/** 自动回复倒计时：停止输入后等待时长 */
+const EMOJIS = ["🌙", "🦊", "🐱", "🤖", "🌸", "⚡", "🫧", "🍵", "🎧", "🪐", "🔥", "🎻"];
 const AUTO_DELAY_MS = 2000;
+/** 主动消息检查间隔 / 距上次用户发言超过该时长才可能"不请自来" */
+const PROACTIVE_CHECK_MS = 60_000;
+const PROACTIVE_IDLE_MS = 5 * 60_000;
 
-type View = "chat" | "edit" | "prefs" | "worldbooks" | "stickers";
+type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import";
 
 export function RoleChatApp({ config, background, onBack }: Props) {
-  const [character, setCharacter] = useCharacter();
-  const [log, setLog] = useChatLog();
+  const [characters, setCharacters] = useCharacters();
+  const [activeId, setActiveId] = useActiveCharId(characters.map((c) => c.id));
+  const active = characters.find((c) => c.id === activeId) ?? characters[0];
+  const [log, setLog] = useChatLog(active?.id ?? "none");
   const [prefs, setPrefs] = useSendPrefs();
-  const [books] = useWorldBooks();
-  const [stickers] = useStickers();
-  const [view, setView] = useState<View>("chat");
+  const [books, setBooks] = useWorldBooks();
+  const [stickers, setStickers] = useStickers();
+  const [view, setView] = useState<View>("list");
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const ready = isConfigured(config);
 
@@ -77,19 +99,22 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const autoTimer = useRef<number | null>(null);
 
   /** 每次请求现算：人设 + 生效世界书 + 表情名单 → system prompt */
-  const buildHistory = (entries: ChatEntry[]) => {
-    const active = getActiveWorldBooks("solo", books, character.boundWorldBookIds ?? []);
-    const usable = stickers.filter((s) => s.isGlobal);
-    const sys =
-      `你现在扮演以下角色，请始终以该身份第一人称回复，不要跳出角色。\n名字：${
-        character.name || "无名角色"
-      }\n人设：${character.persona || "无额外设定"}\n` +
-      "重要：像日常聊天一样回复——每条消息单独占一行，按内容自然分条；只输出角色要发来的消息本身，不要任何解释或格式标记。" +
-      buildWorldSection(active) +
-      "\n\n" +
-      buildStickerHint(usable);
-    return [{ role: "system", content: sys }, ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content }))];
-  };
+  const buildSys = useCallback(
+    (ch: Character) => {
+      const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
+      const usable = stickers.filter((s) => s.isGlobal);
+      return (
+        `你现在扮演以下角色，请始终以该身份回复，不要跳出角色。\n名字：${
+          ch.name || "无名角色"
+        }\n\n${ch.persona || "无额外设定"}\n` +
+        "输出格式硬性要求：像日常手机聊天——每条消息单独占一行，按内容自然分条；正文尽量只写角色说出口的话，不带旁白和动作描写；不要任何解释或格式标记。" +
+        buildWorldSection(activeBooks) +
+        "\n\n" +
+        buildStickerHint(usable)
+      );
+    },
+    [books, stickers]
+  );
 
   const scrollBottom = () => {
     requestAnimationFrame(() =>
@@ -97,11 +122,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     );
   };
 
+  const toHistory = (ch: Character, entries: ChatEntry[]) => [
+    { role: "system", content: buildSys(ch) },
+    ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
+  ];
+
   const requestReply = async (entries: ChatEntry[], userMsgId: string) => {
+    if (!active) return;
     setPending(true);
     scrollBottom();
     try {
-      const reply = await chatCompletion(config, buildHistory(entries));
+      const reply = await chatCompletion(config, toHistory(active, entries));
       setLog((prev) => [
         ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
         { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now() },
@@ -124,8 +155,22 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     return true;
   };
 
-  const generate = () => {
+  /** 从表情库手动发一张表情包（用户侧） */
+  const sendSticker = (s: Sticker) => {
     if (pending || !ready) return;
+    const userMsg: ChatEntry = {
+      id: `u${Date.now()}`,
+      role: "user",
+      content: `[表情:${s.name}]`,
+      stickerUrl: s.url,
+      at: Date.now(),
+    };
+    setLog((prev) => [...prev, userMsg]);
+    scrollBottom();
+  };
+
+  const generate = () => {
+    if (pending || !ready || !active) return;
     const s = stateRef.current;
     let entries = s.log;
     let targetId: string | null = null;
@@ -156,7 +201,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
-    // 关闭「回车发送文字」时，回车只留草稿不发出（模式02：先连发再点触发）
     if (stateRef.current.prefs.enterSendsText) flushDraft();
   };
 
@@ -169,8 +213,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     void requestReply(kept, userMsgId);
   };
 
-  // 模式03：发完后倒计时自动生成——无草稿、非生成中、最后一条是用户消息；
-  // 继续输入或发新消息会重置计时（重新等待）
+  // 模式03：发完后倒计时自动生成
   useEffect(() => {
     if (autoTimer.current) {
       clearTimeout(autoTimer.current);
@@ -187,17 +230,170 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, log, pending, ready, prefs.autoReplyAfterSend, view]);
 
+  // 角色主动发消息：离开聊天页（或在列表）时，闲置足够久后随机一条贴合人设的消息进对应会话
+  useEffect(() => {
+    if (!ready || view === "import") return;
+    const timer = window.setInterval(() => {
+      const candidates = characters.filter((c) => c.proactiveEnabled && PROACTIVE_LINES[c.id]?.length);
+      if (!candidates.length) return;
+      const ch = candidates[Math.floor(Math.random() * candidates.length)];
+      const last = readLastEntry(ch.id);
+      const idle = !last || Date.now() - last.at > PROACTIVE_IDLE_MS;
+      if (!idle) return;
+      if (Math.random() > 0.4) return; // 不是每次都发
+      const lines = PROACTIVE_LINES[ch.id];
+      const line = lines[Math.floor(Math.random() * lines.length)];
+      setLogForChar(ch.id, {
+        id: `p${Date.now()}`,
+        role: "assistant",
+        content: line,
+        at: Date.now(),
+      });
+    }, PROACTIVE_CHECK_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, view, characters]);
+
+  /** 往指定角色的会话里追加一条消息（不依赖当前打开的会话） */
+  const setLogForChar = (charId: string, entry: ChatEntry) => {
+    try {
+      const key = `vp-phone:rolechat-log:${charId}`;
+      const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
+      localStorage.setItem(key, JSON.stringify([...prev, entry]));
+      // 若正打开该会话则同步刷新界面
+      if (charId === activeId && view === "chat") setLog((l) => [...l, entry]);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  /** 角色主动分享写实日常照片：优先外部生图通道，失败回落预置素材照 */
+  const sharePhoto = async (ch: Character) => {
+    if (!ch.photoEnabled || pending) return;
+    setPending(true);
+    const scene = PHOTO_SCENES[Math.floor(Math.random() * PHOTO_SCENES.length)];
+    try {
+      const url = await generateCharPhoto(
+        config,
+        photoPrompt(ch.name, ch.persona, scene),
+        ch.id.startsWith("zhou-chenyan")
+          ? "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/周晨砚日常照.png?auth_key=ccf80abaee8c28da0595c8329789faaecdcec67f9be65e6c09cb5b8570193e6c"
+          : ch.id.startsWith("zhou-fengyan")
+            ? "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/周风砚日常照.png?auth_key=a7ce01f2e319dda0c696496dd490495c54aa3f39be671fb5659d432fdb01efa6"
+            : ""
+      );
+      if (url) {
+        setLogForChar(ch.id, {
+          id: `ph${Date.now()}`,
+          role: "assistant",
+          content: "刚拍的，给你看看",
+          photoUrl: url,
+          at: Date.now(),
+        });
+        if (ch.id === activeId) setLog((l) => [...l, { id: `ph${Date.now()}`, role: "assistant", content: "刚拍的，给你看看", photoUrl: url, at: Date.now() }]);
+      }
+    } finally {
+      setPending(false);
+    }
+  };
+
+  /** 朗读某条回复：外部 TTS + 角色绑定音色 */
+  const speak = async (entryId: string, text: string) => {
+    const vc = loadVoiceConfig();
+    if (!voiceReady(vc, config)) return;
+    setVoiceBusy(entryId);
+    try {
+      const url = await synthesizeSpeech(vc, config, text.replace(/\[表情:[^\]]*\]/g, ""), active?.voiceId);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+    } catch (e) {
+      console.warn("语音合成失败:", e instanceof Error ? e.message : e);
+    } finally {
+      setVoiceBusy(null);
+    }
+  };
+
+  // ===== 子视图 =====
+  if (view === "import") {
+    return (
+      <ImportView
+        onBack={() => setView("list")}
+        onImportCard={(md) => {
+          const parsed = parseCharacterCard(md);
+          const ch = cardToCharacter(parsed, books.filter((b) => b.scope === "local").map((b) => b.id));
+          setCharacters((prev) => [...prev, ch]);
+          setActiveId(ch.id);
+          setView("chat");
+        }}
+        onImportWorld={(md, fileName) => {
+          const items = parseWorldBookMd(md, fileName.replace(/\.md$/i, "")).map((w) => ({
+            ...w,
+            id: `wb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          }));
+          setBooks((prev) => [...prev, ...items]);
+          setView("list");
+        }}
+      />
+    );
+  }
+
+  if (view === "list") {
+    return (
+      <ConversationList
+        characters={characters}
+        activeId={activeId}
+        onSelect={(id) => {
+          setActiveId(id);
+          setView("chat");
+        }}
+        onNew={() => {
+          const ch: Character = {
+            id: `c-new-${Date.now().toString(36)}`,
+            name: "",
+            avatar: "🎭",
+            persona: "",
+            boundWorldBookIds: [],
+            proactiveEnabled: true,
+          };
+          setCharacters((prev) => [...prev, ch]);
+          setActiveId(ch.id);
+          setView("edit");
+        }}
+        onImport={() => setView("import")}
+        onDelete={(id) => {
+          setCharacters((prev) => prev.filter((c) => c.id !== id));
+          clearChatLog(id);
+        }}
+        onBack={onBack}
+      />
+    );
+  }
+
+  if (!active) {
+    return (
+      <div className="flex h-full flex-col bg-background">
+        <NavBar title="短信" onBack={() => setView("list")} />
+        <p className="pt-16 text-center text-xs text-muted-foreground">还没有角色，点右上角导入或新建</p>
+      </div>
+    );
+  }
+
   if (view === "edit") {
     return (
       <CharacterEditor
-        character={character}
+        character={active}
+        books={books}
         bookCount={books.filter((b) => b.scope === "local").length}
         onSave={(c) => {
-          setCharacter(c);
-          setView("chat");
+          setCharacters((prev) => prev.map((x) => (x.id === c.id ? c : x)));
+          setView(log.length || c.name ? "chat" : "list");
         }}
-        onCancel={() => setView("chat")}
+        onCancel={() => setView(log.length ? "chat" : "list")}
         onOpenWorldBooks={() => setView("worldbooks")}
+        onToggleProactive={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, proactiveEnabled: v } : x)))}
+        onTogglePhoto={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, photoEnabled: v } : x)))}
+        onPickVoice={(vid) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, voiceId: vid } : x)))}
       />
     );
   }
@@ -208,9 +404,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     return (
       <WorldBookPicker
         books={books}
-        boundIds={character.boundWorldBookIds ?? []}
+        boundIds={active.boundWorldBookIds ?? []}
         onDone={(ids) => {
-          setCharacter((c) => ({ ...c, boundWorldBookIds: ids }));
+          setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, boundWorldBookIds: ids } : x)));
           setView("edit");
         }}
         onBack={() => setView("edit")}
@@ -218,13 +414,23 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     );
   }
   if (view === "stickers") {
-    return <StickerPanel stickers={stickers} onBack={() => setView("chat")} />;
+    return <StickerPanel stickers={stickers} onSend={sendSticker} onBack={() => setView("chat")} />;
   }
 
+  // ===== 主聊天视图 =====
   const hasDraft = Boolean(input.trim());
   const lastEntry = log[log.length - 1];
   const awaitingReply = Boolean(lastEntry && lastEntry.role === "user");
   const showGenerate = !prefs.sendReplacesGenerate;
+  const vc = loadVoiceConfig();
+  const canSpeak = voiceReady(vc, config);
+  // 前情提要：仅在角色主动找过你（最后一条是带 proactive 标记场景的 assistant 消息且你没回过）时显示一句话
+  const firstAssistant = log.find((e) => e.role === "assistant");
+  const noUserYet = !log.some((e) => e.role === "user");
+  const recapLine =
+    firstAssistant && noUserYet
+      ? `${active.name} 最近主动找你：「${firstAssistant.content.split("\n")[0].slice(0, 30)}…」`
+      : null;
 
   return (
     <div
@@ -232,13 +438,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       style={background ? { backgroundImage: `url(${background})` } : undefined}
     >
       <div className="glass-nav flex items-center justify-between px-2 py-2">
-        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
+        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("list")} aria-label="会话列表">
           <ChevronLeft className="size-5" />
         </Button>
         <div className="flex items-center gap-2">
-          <Avatar character={character} size={28} status={pending ? "typing" : ready ? "online" : "offline"} />
+          <Avatar character={active} size={28} status={pending ? "typing" : ready ? "online" : "offline"} />
           <div className="text-center leading-tight">
-            <span className="block text-sm font-semibold">{character.name || "未命名角色"}</span>
+            <span className="block text-sm font-semibold">{active.name || "未命名角色"}</span>
             <span className={`block text-[10px] ${pending ? "text-primary" : ready ? "text-success" : "text-warning"}`}>
               {pending ? "正在回复…" : ready ? "在线" : "未配置接口"}
             </span>
@@ -248,6 +454,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("stickers")} aria-label="表情库">
             <SmilePlus className="size-4" />
           </Button>
+          {active.photoEnabled && (
+            <button
+              type="button"
+              onClick={() => void sharePhoto(active)}
+              disabled={pending}
+              aria-label="分享日常照片"
+              className="jelly-icon flex size-8 items-center justify-center text-muted-foreground hover:text-primary disabled:opacity-40"
+            >
+              <WandSparkles className="size-4" />
+            </button>
+          )}
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("prefs")} aria-label="输入与发送设置">
             <SlidersHorizontal className="size-4" />
           </Button>
@@ -259,7 +476,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             size="icon"
             className="jelly-icon size-8"
             onClick={() => {
-              clearChatLog();
+              clearChatLog(active.id);
               setLog([]);
             }}
             aria-label="清空聊天记录"
@@ -269,17 +486,28 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         </div>
       </div>
 
+      {/* 前情提要：一句话小灰框，不展开完整设定 */}
+      {recapLine && (
+        <div className="fade-up mx-3 mt-2 rounded-xl bg-black/[0.06] px-3 py-1.5 text-[10.5px] leading-relaxed text-muted-foreground backdrop-blur-sm">
+          {recapLine}
+        </div>
+      )}
+
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {log.length === 0 && !pending && (
           <p className="pt-10 text-center text-xs text-muted-foreground">
-            和 {character.name || "TA"} 说点什么吧
+            和 {active.name || "TA"} 说点什么吧
             {!ready && <><br />（先在「设置」里接好 API）</>}
           </p>
         )}
         {log.map((entry) =>
           entry.role === "user" ? (
             <div key={entry.id} className="flex flex-col items-end gap-1">
-              <Bubble side="right">{entry.content}</Bubble>
+              {entry.stickerUrl ? (
+                <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
+              ) : (
+                <Bubble side="right">{entry.content}</Bubble>
+              )}
               <span className="msg-time pr-1">{fmtTime(entry.at)}</span>
               {entry.failed && !pending && (
                 <Button
@@ -294,12 +522,21 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               )}
             </div>
           ) : (
-            <AssistantRow key={entry.id} entry={entry} character={character} stickerLib={stickers} online={ready} />
+            <AssistantRow
+              key={entry.id}
+              entry={entry}
+              character={active}
+              stickerLib={stickers}
+              online={ready}
+              canSpeak={canSpeak}
+              speaking={voiceBusy === entry.id}
+              onSpeak={() => void speak(entry.id, entry.content)}
+            />
           )
         )}
         {pending && (
           <div className="flex items-end gap-2">
-            <Avatar character={character} size={26} status="typing" />
+            <Avatar character={active} size={26} status="typing" />
             <div className="bubble-cream flex items-center gap-1.5 rounded-3xl px-3.5 py-2.5">
               {[0, 1, 2].map((i) => (
                 <span key={i} className="typing-dot size-1.5 rounded-full bg-primary/60" style={{ animationDelay: `${i * 0.15}s` }} />
@@ -329,7 +566,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               !ready
                 ? "请先在设置中接入接口"
                 : prefs.sendReplacesGenerate
-                  ? `发给 ${character.name || "TA"}，点击即生成回复…`
+                  ? `发给 ${active.name || "TA"}，点击即生成回复…`
                   : `输入内容，${prefs.enterSendsText ? "回车" : "右侧按钮"}只发文字…`
             }
             value={input}
@@ -353,8 +590,212 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   );
 }
 
-/** 助手消息：按换行拆气泡，[表情:名字] 换成图片气泡 */
-function AssistantRow({ entry, character, stickerLib, online }: { entry: ChatEntry; character: Character; stickerLib: Sticker[]; online: boolean }) {
+/* ================= 会话列表（微信式） ================= */
+
+function ConversationList({
+  characters,
+  activeId,
+  onSelect,
+  onNew,
+  onImport,
+  onDelete,
+  onBack,
+}: {
+  characters: Character[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+  onImport: () => void;
+  onDelete: (id: string) => void;
+  onBack: () => void;
+}) {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forceTick((v) => v + 1), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const rows = characters
+    .map((c) => {
+      const last = readLastEntry(c.id);
+      return { c, last };
+    })
+    .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <div className="glass-nav flex items-center justify-between px-2 py-2">
+        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
+          <ChevronLeft className="size-5" />
+        </Button>
+        <span className="text-sm font-semibold">短信</span>
+        <div className="flex">
+          <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onImport} aria-label="导入角色卡">
+            <FileInput className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onNew} aria-label="新建角色">
+            <Plus className="size-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 py-2">
+        {rows.length === 0 && (
+          <p className="pt-16 text-center text-xs text-muted-foreground">还没有会话，点右上角 + 新建或导入角色卡</p>
+        )}
+        {rows.map(({ c, last }, i) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onSelect(c.id)}
+            data-reveal-delay={String(i * 40)}
+            className={`reveal reveal-up jelly-btn group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-primary/5 ${
+              c.id === activeId ? "bg-primary/8" : ""
+            }`}
+          >
+            <Avatar character={c} size={44} status={c.proactiveEnabled ? "online" : "offline"} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-[13.5px] font-semibold">{c.name || "未命名角色"}</span>
+                {last && <span className="shrink-0 text-[10px] text-muted-foreground">{fmtTime(last.at)}</span>}
+              </span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                {last ? last.content.replace(/\[表情:[^\]]*\]/g, "[表情]").split("\n")[0] : "开始和 TA 聊天吧"}
+              </span>
+            </span>
+            <span
+              role="button"
+              tabIndex={-1}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(c.id);
+              }}
+              className="hidden size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
+              aria-label={`删除 ${c.name}`}
+            >
+              <X className="size-3.5" />
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ================= 一键导入 ================= */
+
+function ImportView({
+  onBack,
+  onImportCard,
+  onImportWorld,
+}: {
+  onBack: () => void;
+  onImportCard: (md: string) => void;
+  onImportWorld: (md: string, fileName: string) => void;
+}) {
+  const [mode, setMode] = useState<"card" | "world">("card");
+  const [text, setText] = useState("");
+  const [fileName, setFileName] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const pickFile = (file?: File) => {
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => setText(String(reader.result));
+    reader.readAsText(file);
+  };
+
+  const submit = () => {
+    if (!text.trim()) return;
+    if (mode === "card") onImportCard(text);
+    else onImportWorld(text, fileName || "导入世界书");
+  };
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <NavBar title="一键导入" onBack={onBack} />
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div className="flex gap-2">
+          {(
+            [
+              { k: "card", label: "角色卡 → 新角色" },
+              { k: "world", label: "世界书 → 设定条目" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.k}
+              type="button"
+              onClick={() => setMode(t.k)}
+              className={`jelly-btn flex-1 rounded-xl py-2 text-xs font-semibold transition-colors ${
+                mode === t.k ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="jelly-btn flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-white/40 py-4 text-xs font-medium text-primary"
+        >
+          <FileInput className="size-4" />
+          {fileName || (mode === "card" ? "选择 .md 角色卡文件" : "选择 .md 世界书文件")}
+        </button>
+        <input ref={fileRef} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
+        <Textarea
+          rows={10}
+          placeholder="也可以直接把 Markdown 全文粘贴到这里…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="resize-none rounded-xl bg-muted/40 text-[12px] leading-relaxed"
+        />
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {mode === "card"
+            ? "解析标题作为角色名、正文作为人设，自动创建角色并绑定现有局部世界书；随后可在角色设定里微调。"
+            : "按二级标题拆成多条局部世界书条目，创建后到各角色的「绑定世界书」里勾选生效。"}
+        </p>
+        <Button className="jelly-blob w-full rounded-2xl py-4 text-sm font-semibold" onClick={submit} disabled={!text.trim()}>
+          {mode === "card" ? "导入为角色" : "导入为世界书"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ================= 通用导航条 ================= */
+
+function NavBar({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <div className="glass-nav flex items-center justify-between px-2 py-2">
+      <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
+        <ChevronLeft className="size-5" />
+      </Button>
+      <span className="text-sm font-semibold">{title}</span>
+      <span className="size-8" />
+    </div>
+  );
+}
+
+/* ================= 助手消息行 ================= */
+
+function AssistantRow({
+  entry,
+  character,
+  stickerLib,
+  online,
+  canSpeak,
+  speaking,
+  onSpeak,
+}: {
+  entry: ChatEntry;
+  character: Character;
+  stickerLib: Sticker[];
+  online: boolean;
+  canSpeak: boolean;
+  speaking: boolean;
+  onSpeak: () => void;
+}) {
   const lines = splitBubbles(entry.content);
   const parts = lines.flatMap((line) => parseReplyToMessages(line, stickerLib));
   return (
@@ -362,6 +803,13 @@ function AssistantRow({ entry, character, stickerLib, online }: { entry: ChatEnt
       <div className="flex items-start gap-2">
         <Avatar character={character} size={26} status={online ? "online" : "offline"} />
         <div className="flex max-w-[82%] flex-col items-start gap-1.5">
+          {entry.photoUrl && (
+            <img
+              src={entry.photoUrl}
+              alt={`${character.name}的日常`}
+              className="w-40 rounded-2xl object-cover shadow-md shadow-[var(--bubble-shadow)]"
+            />
+          )}
           {parts.map((p, i) => (
             <div key={i} data-reveal-delay={String(i * 60)} className="reveal reveal-up">
               {p.type === "sticker" ? (
@@ -372,6 +820,18 @@ function AssistantRow({ entry, character, stickerLib, online }: { entry: ChatEnt
             </div>
           ))}
         </div>
+        {canSpeak && (
+          <button
+            type="button"
+            onClick={onSpeak}
+            aria-label="朗读这条消息"
+            className={`jelly-icon mt-1 flex size-6 shrink-0 items-center justify-center rounded-full transition-colors ${
+              speaking ? "bg-primary/15 text-primary pulse-dot" : "text-muted-foreground hover:text-primary"
+            }`}
+          >
+            <Volume2 className="size-3.5" />
+          </button>
+        )}
       </div>
       <span className="msg-time pl-10">{fmtTime(entry.at)}</span>
     </div>
@@ -416,40 +876,39 @@ function Avatar({ character, size, status }: { character: Character; size: numbe
   );
 }
 
-/** 表情库速览面板（完整管理在桌面「表情包」应用） */
-function StickerPanel({ stickers, onBack }: { stickers: Sticker[]; onBack: () => void }) {
+/* ================= 表情库速览（可点发） ================= */
+
+function StickerPanel({ stickers, onSend, onBack }: { stickers: Sticker[]; onSend: (s: Sticker) => void; onBack: () => void }) {
+  const usable = stickers.filter((s) => s.isGlobal);
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="glass-nav flex items-center justify-between px-2 py-2">
-        <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
-          <ChevronLeft className="size-5" />
-        </Button>
-        <span className="text-sm font-semibold">当前可用表情</span>
-        <span className="size-8" />
-      </div>
+      <NavBar title="当前可用表情" onBack={onBack} />
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {stickers.filter((s) => s.isGlobal).length === 0 ? (
+        {usable.length === 0 ? (
           <p className="pt-10 text-center text-xs leading-relaxed text-muted-foreground">
             还没有全局表情。
             <br />
             去桌面「表情包」应用上传，AI 聊天时就会按名字调用它们。
           </p>
         ) : (
-          <div className="grid grid-cols-3 gap-2.5">
-            {stickers
-              .filter((s) => s.isGlobal)
-              .map((s) => (
-                <div key={s.id} className="rounded-xl border border-border bg-card p-1.5">
+          <>
+            <p className="mb-2 px-1 text-[11px] text-muted-foreground">点一下直接作为你的消息发出</p>
+            <div className="grid grid-cols-3 gap-2.5">
+              {usable.map((s) => (
+                <button key={s.id} type="button" onClick={() => onSend(s)} className="jelly-icon rounded-xl border border-border bg-card p-1.5 text-left">
                   <img src={s.url} alt={s.name} className="aspect-square w-full rounded-lg object-cover" />
                   <p className="mt-1 truncate text-center text-[11px]">{s.name}</p>
-                </div>
+                </button>
               ))}
-          </div>
+            </div>
+          </>
         )}
       </div>
     </div>
   );
 }
+
+/* ================= 输入与发送习惯 ================= */
 
 function PrefsEditor({ prefs, onSave, onCancel }: { prefs: SendPrefs; onSave: (p: SendPrefs) => void; onCancel: () => void }) {
   const [form, setForm] = useState<SendPrefs>(prefs);
@@ -488,21 +947,32 @@ function PrefsEditor({ prefs, onSave, onCancel }: { prefs: SendPrefs; onSave: (p
   );
 }
 
+/* ================= 角色设定（含音色/主动/照片开关） ================= */
+
 function CharacterEditor({
   character,
+  books,
   bookCount,
   onSave,
   onCancel,
   onOpenWorldBooks,
+  onToggleProactive,
+  onTogglePhoto,
+  onPickVoice,
 }: {
   character: Character;
+  books: WorldBook[];
   bookCount: number;
   onSave: (c: Character) => void;
   onCancel: () => void;
   onOpenWorldBooks: () => void;
+  onToggleProactive: (v: boolean) => void;
+  onTogglePhoto: (v: boolean) => void;
+  onPickVoice: (id: string) => void;
 }) {
   const [form, setForm] = useState<Character>(character);
   const fileRef = useRef<HTMLInputElement>(null);
+  const voices = loadVoiceConfig().voices;
 
   const pickFile = (file?: File) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -521,7 +991,15 @@ function CharacterEditor({
         <Button
           size="sm"
           className="jelly-btn h-8 rounded-full px-3 text-xs"
-          onClick={() => onSave({ name: form.name.trim(), avatar: form.avatar, persona: form.persona.trim(), boundWorldBookIds: form.boundWorldBookIds })}
+          onClick={() =>
+            onSave({
+              ...form,
+              name: form.name.trim(),
+              avatar: form.avatar,
+              persona: form.persona.trim(),
+              boundWorldBookIds: form.boundWorldBookIds,
+            })
+          }
         >
           保存
         </Button>
@@ -560,7 +1038,7 @@ function CharacterEditor({
 
         <div className="space-y-1.5">
           <Label htmlFor="charPersona">人设（作为系统提示发给模型）</Label>
-          <Textarea id="charPersona" rows={7} placeholder="描述 TA 的身份、性格、说话方式……" value={form.persona} onChange={(e) => setForm((f) => ({ ...f, persona: e.target.value }))} className="resize-none rounded-lg bg-muted/40 text-[12.5px] leading-relaxed" />
+          <Textarea id="charPersona" rows={8} placeholder="描述 TA 的身份、性格、说话方式……" value={form.persona} onChange={(e) => setForm((f) => ({ ...f, persona: e.target.value }))} className="resize-none rounded-lg bg-muted/40 text-[12px] leading-relaxed" />
         </div>
 
         <button type="button" onClick={onOpenWorldBooks} className="jelly-btn flex w-full items-center gap-2 rounded-xl border border-border bg-card p-3 text-left">
@@ -571,6 +1049,67 @@ function CharacterEditor({
           </span>
           <ChevronLeft className="size-4 -rotate-90 text-muted-foreground" />
         </button>
+
+        {/* 互动开关 */}
+        <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="cursor-pointer text-[13px] font-semibold" htmlFor="proactiveSw">允许主动找我聊天</Label>
+            <Switch
+              id="proactiveSw"
+              checked={form.proactiveEnabled ?? true}
+              onCheckedChange={(v) => {
+                setForm((f) => ({ ...f, proactiveEnabled: v }));
+                onToggleProactive(v);
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <Label className="cursor-pointer text-[13px] font-semibold" htmlFor="photoSw">会分享写实日常照片</Label>
+            <Switch
+              id="photoSw"
+              checked={form.photoEnabled ?? false}
+              onCheckedChange={(v) => {
+                setForm((f) => ({ ...f, photoEnabled: v }));
+                onTogglePhoto(v);
+              }}
+            />
+          </div>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">主动消息只在长时间没聊时偶尔发生，正文贴合人设不带旁白；照片优先走外部生图接口，不可用时用预置素材。</p>
+        </div>
+
+        {/* 音色绑定 */}
+        <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <p className="text-[13px] font-semibold">专属音色（外部语音）</p>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setForm((f) => ({ ...f, voiceId: undefined }));
+                onPickVoice("");
+              }}
+              className={`jelly-btn rounded-full px-2.5 py-1 text-[11px] ${!form.voiceId ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+            >
+              不绑定
+            </button>
+            {voices.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => {
+                  setForm((f) => ({ ...f, voiceId: v.id }));
+                  onPickVoice(v.id);
+                }}
+                className={`jelly-btn rounded-full px-2.5 py-1 text-[11px] ${form.voiceId === v.id ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            音色清单在「设置 → 外部语音」维护；绑定后点消息旁的喇叭就用这个音色朗读。
+            {books.length > 0 && ""}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -604,7 +1143,7 @@ function WorldBookPicker({
       </div>
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
         <p className="px-1 text-[11px] text-muted-foreground">全局条目对所有角色自动生效；这里勾选本角色专属的局部设定。</p>
-        {locals.length === 0 && <p className="pt-8 text-center text-xs text-muted-foreground">还没有局部条目，去桌面「世界书」应用新建</p>}
+        {locals.length === 0 && <p className="pt-8 text-center text-xs text-muted-foreground">还没有局部条目，去桌面「世界书」应用新建或用「一键导入」</p>}
         {locals.map((wb) => {
           const on = sel.includes(wb.id);
           return (

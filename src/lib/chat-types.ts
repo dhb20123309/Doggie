@@ -1,23 +1,20 @@
-// 共享契约扩展：单角色聊天（角色设定 + 聊天记录）
+// 共享契约扩展：多角色聊天（角色设定 + 分角色聊天记录 + 语音/照片绑定）
 
 export interface Character {
+  id: string;
   name: string;
   /** 头像：emoji 或上传图的数据 URL */
   avatar: string;
   persona: string;
   /** 绑定的局部世界书 id */
   boundWorldBookIds?: string[];
+  /** 绑定的外部语音音色 id（VoiceConfig.voices 里的 id） */
+  voiceId?: string;
+  /** 是否允许该角色主动生成"写实日常照片"分享 */
+  photoEnabled?: boolean;
+  /** 主动消息开关：关闭后该角色不会不请自来 */
+  proactiveEnabled?: boolean;
 }
-
-export const DEFAULT_CHARACTER: Character = {
-  name: "小灵",
-  avatar: "🌙",
-  persona:
-    "你叫小灵，是住在这台虚拟手机里的陪伴型 AI 好友。性格温柔、有点俏皮，喜欢用生活化的比喻。\n" +
-    "回复方式要像日常微信聊天：把内容按语义自然分成几条短消息，每条单独占一行，行与行之间不要空行；" +
-    "不要用列表符号、序号、标题或任何 Markdown 格式；不写旁白、动作描写和解释性文字，只输出角色要说出口的话。" +
-    "通常发一到三行，每行不超过二十几个字；对方明确要求详细展开时才可以多分几条。",
-};
 
 /** 聊天页内的消息：assistant 一条回复可拆成多个气泡 */
 export interface ChatEntry {
@@ -27,6 +24,10 @@ export interface ChatEntry {
   /** 发送/生成失败标记，用于展示重试按钮 */
   failed?: boolean;
   at: number;
+  /** 角色主动生成的日常照片 URL */
+  photoUrl?: string;
+  /** 用户手动发送的表情包图片 URL */
+  stickerUrl?: string;
 }
 
 /** 输入与发送习惯（对应 SullyOS「聊天设置 → 输入与发送」） */

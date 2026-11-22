@@ -1,13 +1,16 @@
 // 手机内「设置」应用：接口地址 / API Key / 模型名 / 连接测试 + 锁屏密码与壁纸自定义
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import type { AiConfig, TestResult } from "@/lib/types";
 import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
+import { loadVoiceConfig, saveVoiceConfig, type VoiceConfig } from "@/lib/tts";
+import { loadMusicTracks, saveMusicTracks } from "@/lib/media";
 
 interface Props {
   config: AiConfig;
@@ -236,6 +239,8 @@ export function SettingsApp({ config, onSave, onBack, onLock, wallpapers }: Prop
 
         <PasscodeSection onLock={onLock} />
         <WallpaperSection wallpapers={wallpapers} />
+        <VoiceSection />
+        <MusicSourceSection />
 
         <div className="pt-1">
           <Button
@@ -349,6 +354,80 @@ function WallpaperPicker({
         </span>
       </button>
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+    </div>
+  );
+}
+
+/** 外部语音 API 接入：地址/Key 留空则复用聊天接口；音色清单手工维护供角色绑定 */
+function VoiceSection() {
+  const [form, setForm] = useState<VoiceConfig>(() => loadVoiceConfig());
+  const [savedMsg, setSavedMsg] = useState(false);
+  const [newVoice, setNewVoice] = useState("");
+
+  const save = () => {
+    saveVoiceConfig(form);
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 1500);
+  };
+
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <p className="text-[13px] font-semibold">外部语音（TTS）</p>
+      <Input placeholder="语音接口地址（留空=复用聊天接口）" value={form.baseUrl} onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+      <Input type="password" placeholder="语音 Key（留空=复用聊天 Key）" autoComplete="off" value={form.apiKey} onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+      <Input placeholder="TTS 模型名，如 tts-1" value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        {form.voices.map((v) => (
+          <span key={v.id} className="flex items-center gap-1 rounded-full bg-white/50 px-2 py-0.5 text-[10.5px]">
+            {v.label}
+            <button type="button" aria-label={`移除 ${v.id}`} onClick={() => setForm((f) => ({ ...f, voices: f.voices.filter((x) => x.id !== v.id) }))} className="text-muted-foreground hover:text-destructive">
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Input placeholder="新增音色 id / id·说明" value={newVoice} onChange={(e) => setNewVoice(e.target.value)} className="h-8 flex-1 rounded-lg glass-input text-[11px]" />
+        <Button size="sm" variant="outline" className="jelly-btn h-8 rounded-lg px-2.5 text-[11px]" onClick={() => {
+          const id = newVoice.trim().split(/[·\s]/)[0];
+          if (!id) return;
+          setForm((f) => ({ ...f, voices: [...f.voices, { id, label: newVoice.trim() }] }));
+          setNewVoice("");
+        }}>
+          添加
+        </Button>
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={save}>
+          {savedMsg ? "已保存" : "保存语音配置"}
+        </Button>
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">配好后，在角色设定里给每个角色单独绑音色，聊天消息旁会出现朗读按钮。</p>
+    </div>
+  );
+}
+
+/** 外部音乐真机播放：每行一个音频 URL */
+function MusicSourceSection() {
+  const [text, setText] = useState(() => loadMusicTracks().map((t) => t.url).filter(Boolean).join("\n"));
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  const save = () => {
+    saveMusicTracks(
+      text.split(/\r?\n/).map((u) => u.trim()).filter(Boolean)
+    );
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 1500);
+  };
+
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <p className="text-[13px] font-semibold">音乐 App 音源</p>
+      <Textarea rows={4} placeholder={"每行一个可公网访问的音频直链\nhttps://example.com/song.mp3"} value={text} onChange={(e) => setText(e.target.value)} className="resize-none rounded-lg glass-input text-[11.5px] leading-relaxed" />
+      <Button size="sm" className="jelly-btn h-8 w-full rounded-xl text-xs" onClick={save}>
+        {savedMsg ? "已保存，重开音乐 App 生效" : "保存音源"}
+      </Button>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">填写后音乐 App 用真机播放这些曲目；留空则为无音源的演示界面。</p>
     </div>
   );
 }

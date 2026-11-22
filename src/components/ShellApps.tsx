@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ImagePlus, Trash2, Camera as CameraIcon, Music, Pause, Play, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePhotos, addPhoto, removePhoto } from "@/lib/photo-store";
-import { useCharacter, useChatLog, useWorldBooks, useStickers } from "@/lib/chat-store";
+import { useCharacters, useWorldBooks, useStickers } from "@/lib/chat-store";
+import { loadMusicTracks } from "@/lib/media";
 
 function ShellNav({ title, onBack, right }: { title: string; onBack: () => void; right?: React.ReactNode }) {
   return (
@@ -122,16 +123,23 @@ export function CameraApp({ onBack }: { onBack: () => void }) {
 
 /** 记忆中枢：本机各类数据的统计总览 */
 export function MemoryApp({ onBack }: { onBack: () => void }) {
-  const [character] = useCharacter();
-  const [log] = useChatLog();
+  const [characters] = useCharacters();
   const [books] = useWorldBooks();
   const [stickers] = useStickers();
   const [photos] = usePhotos();
 
-  const userMsgs = log.filter((e) => e.role === "user").length;
+  let totalMsgs = 0;
+  for (const c of characters) {
+    try {
+      const raw = localStorage.getItem(`vp-phone:rolechat-log:${c.id}`);
+      totalMsgs += raw ? (JSON.parse(raw) as unknown[]).length : 0;
+    } catch {
+      /* ignore */
+    }
+  }
   const stats = [
-    { label: "聊天记录", value: `${log.length} 条`, desc: `你发过 ${userMsgs} 条消息` },
-    { label: "当前角色", value: character.name || "未命名", desc: character.persona ? "已设置人设" : "尚未设置人设" },
+    { label: "角色", value: `${characters.length} 位`, desc: characters.map((c) => c.name || "未命名").join("、") || "还没有角色" },
+    { label: "聊天记录", value: `${totalMsgs} 条`, desc: "所有会话合计" },
     { label: "世界书设定", value: `${books.length} 条`, desc: `全局 ${books.filter((b) => b.scope === "global").length} / 局部 ${books.filter((b) => b.scope === "local").length}` },
     { label: "表情包", value: `${stickers.length} 张`, desc: `全局可用 ${stickers.filter((s) => s.isGlobal).length} 张` },
     { label: "相册", value: `${photos.length} 张`, desc: "含相机拍摄与导入" },
@@ -156,24 +164,58 @@ export function MemoryApp({ onBack }: { onBack: () => void }) {
   );
 }
 
-/** 音乐：本地演示曲库（无真实音源），小组件同款毛玻璃 */
-const TRACKS = [
-  { name: "晨间轻音乐", artist: "Pocket FM", len: "02:41" },
-  { name: "午后雨声白噪音", artist: "Ambient Lab", len: "05:00" },
-  { name: "深夜霓虹合成器", artist: "Retro Wave", len: "03:28" },
-  { name: "图书馆的翻书声", artist: "Study Beats", len: "04:12" },
-];
+/** 音乐：配置外部音源后真机播放，否则为演示界面 */
+interface MusicItem {
+  title: string;
+  sub: string;
+  url?: string;
+}
 
 export function MusicApp({ onBack }: { onBack: () => void }) {
+  const items: MusicItem[] = (() => {
+    const tracks = loadMusicTracks();
+    if (tracks.some((t) => t.url)) return tracks.map((t) => ({ title: t.title, sub: "外部音源", url: t.url }));
+    return [
+      { title: "晨间轻音乐", sub: "Pocket FM · 02:41" },
+      { title: "午后雨声白噪音", sub: "Ambient Lab · 05:00" },
+      { title: "深夜霓虹合成器", sub: "Retro Wave · 03:28" },
+      { title: "图书馆的翻书声", sub: "Study Beats · 04:12" },
+    ];
+  })();
+  const real = items.some((t) => t.url);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const track = TRACKS[idx];
+  const [progress, setProgress] = useState(0);
+  const track = items[idx];
+  const total = items.length;
 
+  // 真实音源：切换曲目 / 播放状态时驱动 <audio>
   useEffect(() => {
-    if (!playing) return;
-    const t = setInterval(() => setIdx((i) => (i + 1) % TRACKS.length), 12_000);
+    if (!real) return;
+    const url = items[idx]?.url;
+    if (!url) return;
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.ontimeupdate = () => {
+      if (audio.duration) setProgress(audio.currentTime / audio.duration);
+    };
+    audio.onended = () => setIdx((i) => (i + 1) % total);
+    audio.onerror = () => setPlaying(false);
+    if (playing) void audio.play().catch(() => setPlaying(false));
+    return () => {
+      audio.pause();
+      audioRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [real, idx, playing]);
+
+  // 演示模式：假进度自动切歌
+  useEffect(() => {
+    if (real || !playing) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % total), 12_000);
     return () => clearInterval(t);
-  }, [playing]);
+  }, [real, playing, total]);
 
   return (
     <div className="relative flex h-full flex-col bg-background pt-12">
@@ -183,19 +225,19 @@ export function MusicApp({ onBack }: { onBack: () => void }) {
         <div className={`mt-4 flex size-40 items-center justify-center rounded-[26px] bg-gradient-to-br from-rose-400/90 via-purple-400/90 to-sky-400/90 shadow-xl shadow-purple-300/40 ${playing ? "animate-[pulse_2.4s_ease-in-out_infinite]" : ""}`}>
           <Music className="size-12 text-white/90" strokeWidth={1.5} />
         </div>
-        <p className="mt-4 text-base font-semibold">{track.name}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{track.artist} · {track.len}</p>
+        <p className="mt-4 text-base font-semibold">{track.title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{real ? "外部音源 · 真机播放" : track.sub}</p>
 
-        {/* 进度（演示） */}
+        {/* 进度 */}
         <div className="mt-5 w-full">
           <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: playing ? `${((idx + 1) / TRACKS.length) * 100}%` : "8%" }} />
+            <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: playing ? `${Math.max(8, (real ? progress : (idx + 1) / total) * 100)}%` : "8%" }} />
           </div>
         </div>
 
         {/* 控制 */}
         <div className="mt-5 flex items-center gap-6">
-          <button type="button" aria-label="上一首" className="jelly-icon text-muted-foreground hover:text-foreground" onClick={() => setIdx((i) => (i - 1 + TRACKS.length) % TRACKS.length)}>
+          <button type="button" aria-label="上一首" className="jelly-icon text-muted-foreground hover:text-foreground" onClick={() => { setProgress(0); setIdx((i) => (i - 1 + total) % total); }}>
             <Repeat className="size-5 -scale-x-100" />
           </button>
           <button
@@ -206,26 +248,26 @@ export function MusicApp({ onBack }: { onBack: () => void }) {
           >
             {playing ? <Pause className="size-6" /> : <Play className="size-6 translate-x-0.5" />}
           </button>
-          <button type="button" aria-label="下一首" className="jelly-icon text-muted-foreground hover:text-foreground" onClick={() => setIdx((i) => (i + 1) % TRACKS.length)}>
+          <button type="button" aria-label="下一首" className="jelly-icon text-muted-foreground hover:text-foreground" onClick={() => { setProgress(0); setIdx((i) => (i + 1) % total); }}>
             <Repeat className="size-5" />
           </button>
         </div>
 
         {/* 列表 */}
         <div className="mt-5 w-full space-y-1.5 overflow-y-auto">
-          {TRACKS.map((t, i) => (
+          {items.map((t, i) => (
             <button
-              key={t.name}
+              key={i}
               type="button"
               onClick={() => { setIdx(i); setPlaying(true); }}
               className={`glass flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[12px] transition-colors ${i === idx ? "border-primary/50 text-primary" : "hover:bg-accent/40"}`}
             >
-              <span className="truncate font-medium">{t.name}</span>
-              <span className="ml-2 shrink-0 tabular-nums text-muted-foreground">{t.len}</span>
+              <span className="truncate font-medium">{t.title}</span>
+              <span className="ml-2 shrink-0 tabular-nums text-muted-foreground">{real ? "" : t.sub.split("· ").pop()}</span>
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">本地演示曲库，不含真实音源</p>
+        {!real && <p className="mt-2 text-[10px] text-muted-foreground">本地演示曲库；在「设置 → 音乐 App 音源」填入音频直链即可真机播放</p>}
       </div>
     </div>
   );

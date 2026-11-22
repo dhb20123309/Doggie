@@ -180,17 +180,42 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 
   const requestReply = async (entries: ChatEntry[], userMsgId: string) => {
     if (!active) return;
+    console.log(`[reply] start char=${active.id} msg=${userMsgId} → pending(正在输入中)`);
     setPending(true);
     scrollBottom();
+    // 拟真节奏：至少显示 1.2s"正在输入中"，避免秒回穿帮；期间请求已在进行
+    const minTyping = new Promise((r) => setTimeout(r, 1_200));
+    const call = chatCompletion(config, toHistory(active, entries)).then(
+      (reply) => ({ ok: true as const, reply }),
+      (err) => ({ ok: false as const, err })
+    );
     try {
-      const reply = await chatCompletion(config, toHistory(active, entries));
-      setLog((prev) => [
-        ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
-        { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now() },
-      ]);
-    } catch {
-      setLog((prev) => prev.map((e) => (e.id === userMsgId ? { ...e, failed: true } : e)));
+      const first = await Promise.race([call, minTyping.then(() => null)]);
+      let result = first ?? (await call);
+      if (!result.ok) {
+        // 网关偶发 429/5xx/网络抖动不再静默丢回复：自动退避重试一次，仍失败才标记可手动重试
+        const retryable = !(result.err instanceof Error && /401|403|400/.test(result.err.message));
+        if (retryable) {
+          console.warn(`[reply] fail char=${active.id}，3 秒后自动重试一次:`, result.err instanceof Error ? result.err.message : result.err);
+          await new Promise((r) => setTimeout(r, 3_000));
+          result = await chatCompletion(config, toHistory(active, entries)).then(
+            (reply) => ({ ok: true as const, reply }),
+            (err) => ({ ok: false as const, err })
+          );
+        }
+      }
+      if (result.ok) {
+        console.log(`[reply] ok char=${active.id} len=${result.reply.length}`);
+        setLog((prev) => [
+          ...prev.map((e) => (e.id === userMsgId ? { ...e, failed: false } : e)),
+          { id: `a${Date.now()}`, role: "assistant", content: result.reply, at: Date.now() },
+        ]);
+      } else {
+        console.error(`[reply] final fail char=${active.id}:`, result.err instanceof Error ? result.err.message : result.err);
+        setLog((prev) => prev.map((e) => (e.id === userMsgId ? { ...e, failed: true } : e)));
+      }
     } finally {
+      await minTyping;
       setPending(false);
       scrollBottom();
     }
@@ -203,6 +228,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     setLog((prev) => [...prev, userMsg]);
     setInput("");
     scrollBottom();
+    // 立即进入"正在输入中"并请求回复，不依赖倒计时 effect（effect 有竞态漏触发风险，曾导致发消息后无回复）
+    void requestReply([...stateRef.current.log, userMsg], userMsg.id);
     return true;
   };
 
@@ -274,7 +301,15 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     if (input.trim()) return;
     const last = log[log.length - 1];
     if (!last || last.role !== "user") return;
-    autoTimer.current = window.setTimeout(() => generate(), AUTO_DELAY_MS);
+    // 兜底：若最后一条用户消息已发出超过 AUTO_DELAY_MS 仍未进入回复流程（如 effect 竞态漏触发），立即补发；
+    // 注意不能检查 failed 标记——requestReply 失败时 pending 仍为 true，会挡住本兜底导致彻底无回复
+    const wait = Math.max(600, AUTO_DELAY_MS - (Date.now() - last.at));
+    console.log(`[reply] fallback timer ${wait}ms for msg=${last.id}`);
+    autoTimer.current = window.setTimeout(() => {
+      const cur = stateRef.current.log;
+      const l = cur[cur.length - 1];
+      if (l && l.role === "user" && !cur.some((e) => e.role === "assistant" && e.at > l.at)) generate();
+    }, wait);
     return () => {
       if (autoTimer.current) clearTimeout(autoTimer.current);
     };

@@ -28,6 +28,33 @@ export function presetPhoto(charId: string): string {
   return "";
 }
 
+/** 预置头像 CDN key 前缀：用于识别旧数据里可被新图覆盖的默认头像 */
+const PRESET_AVATAR_PREFIX = "https://conversation.cdn.meoo.host/conversations/382803113008164864/image/";
+
+/**
+ * 头像迁移：把预置角色的头像统一刷成用户上传的定妆照。
+ * 老用户 localStorage 里存的是 emoji（🔥/🍵）或旧 CDN 地址，仅改代码里的常量不会生效，
+ * 必须在读取角色列表时按 id 覆盖（用户手动换过的非预置头像不动）。
+ */
+export function migratePresetAvatars(list: Character[]): Character[] {
+  let changed = false;
+  const next = list.map((c) => {
+    const want = c.id.startsWith("zhou-chenyan") ? PHOTO_CHENYAN : c.id.startsWith("zhou-fengyan") ? PHOTO_FENGYAN : "";
+    if (!want) return c;
+    const isDefaultish = !c.avatar || c.avatar.length < 8 || c.avatar.startsWith(PRESET_AVATAR_PREFIX);
+    if (isDefaultish && c.avatar !== want) {
+      changed = true;
+      return { ...c, avatar: want };
+    }
+    return c;
+  });
+  if (changed) {
+    console.log("[avatar-migrate] 预置角色头像已刷新为用户定妆照");
+    write(CHARS_KEY, next);
+  }
+  return next;
+}
+
 /** 人设正文：由用户导入的角色卡 md 提炼（去壳后的核心设定） */
 const PERSONA_CHENYAN = `从现在开始，你将完全沉浸并扮演角色"周晨砚"，以{{char}}的视角思考和回应，抛弃 AI 客观身份。
 
@@ -111,7 +138,7 @@ export const PRESET_CHARACTERS: Character[] = [
   {
     id: ZHOU_CHENYAN_ID,
     name: "周晨砚",
-    avatar: "🔥",
+    avatar: PHOTO_CHENYAN,
     persona: PERSONA_CHENYAN + RP_RULES,
     boundWorldBookIds: [ZHOU_WORLD_BOOK_ID],
     photoEnabled: true,
@@ -120,7 +147,7 @@ export const PRESET_CHARACTERS: Character[] = [
   {
     id: ZHOU_FENGYAN_ID,
     name: "周风砚",
-    avatar: "🍵",
+    avatar: PHOTO_FENGYAN,
     persona: PERSONA_FENGYAN + RP_RULES,
     boundWorldBookIds: [ZHOU_WORLD_BOOK_ID],
     photoEnabled: true,
@@ -205,14 +232,14 @@ export function usePersisted<T>(key: string, fallback: T): [T, Setter<T>] {
   return [value, update];
 }
 
-/** 角色列表：首次无数据时预置周氏双子 */
+/** 角色列表：首次无数据时预置周氏双子；老数据自动迁移头像为用户定妆照 */
 export function useCharacters(): [Character[], Setter<Character[]>] {
   const [list, setList] = usePersisted<Character[]>(CHARS_KEY, []);
   if (list.length === 0) {
     write(CHARS_KEY, PRESET_CHARACTERS);
     return [PRESET_CHARACTERS, setList];
   }
-  return [list, setList];
+  return [migratePresetAvatars(list), setList];
 }
 
 /** 当前选中的角色 id */

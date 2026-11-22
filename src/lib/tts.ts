@@ -207,6 +207,41 @@ export async function synthesizeSpeech(
   throw lastErr instanceof Error ? lastErr : new Error("语音合成失败");
 }
 
+/** 拉取 MiniMax 音色列表（含克隆音色）：voice_type=all；克隆音色需已成功合成过一次才会出现在结果里 */
+export async function fetchMiniMaxVoices(
+  vc: VoiceConfig
+): Promise<{ id: string; label: string }[]> {
+  const key = vc.minimaxKey.trim();
+  if (!key) throw new Error("请先填写 MiniMax API Key");
+  const host = vc.minimaxRegion === "global" ? "https://api.minimax.io" : "https://api.minimaxi.com";
+  let res: Response;
+  try {
+    res = await fetch(`${host}/v1/get_voice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ voice_type: "all" }),
+    });
+  } catch {
+    throw new Error("连不上 MiniMax 服务器，检查网络或切换区域重试");
+  }
+  const json = (await res.json().catch(() => null)) as {
+    base_resp?: { status_code?: number; status_msg?: string };
+    /** 兼容不同版本字段：voice_list / voices，元素含 voice_id、voice_type、preview_text 等 */
+    voice_list?: { voice_id?: string; voice_type?: string; name?: string }[];
+    voices?: { voice_id?: string; voice_type?: string; name?: string }[];
+  } | null;
+  if (!json) throw new Error(`音色列表接口返回异常（HTTP ${res.status}）`);
+  const code = json.base_resp?.status_code ?? 0;
+  if (code !== 0) throw new Error(minimaxError(code, json.base_resp?.status_msg));
+  const list = json.voice_list ?? json.voices ?? [];
+  return list
+    .filter((v) => v.voice_id)
+    .map((v) => ({
+      id: v.voice_id!,
+      label: `${v.name || v.voice_id}${v.voice_type === "voice_cloning" ? " · 克隆" : v.voice_type === "voice_generation" ? " · 文生" : ""}`,
+    }));
+}
+
 /** 设置页"测试并保存"用：合成一小段试听文本验证通道可用 */
 export async function testVoiceChannel(
   vc: VoiceConfig,

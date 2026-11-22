@@ -42,6 +42,8 @@
 - **MiniMax 语音通道 + 收起按钮上移（第41轮）**：`tts.ts` VoiceConfig 新增 provider("openai"默认|"minimax")/minimaxKey/minimaxRegion(cn|global)/minimaxModel(speech-02-hd)/minimaxVoice(male-qn-qingse)，loadVoiceConfig 浅合并自动兼容旧存档；voiceReady 对 minimax 只看 Key；synthesizeSpeech 按 provider 分流到 synthesizeMiniMax；testVoiceChannel 供设置页真实试听验证。SettingsApp VoiceSection 加"通用网关/MiniMax"切换，MiniMax 表单=Key+区域+模型+voice_id+MINIMAX_VOICES 快捷男声四项+"测试并保存"按钮（成功才 saveVoiceConfig 并绿色显示"已成功"2.5s，失败红字原因不保存）。RoleChatApp speak/canSpeak 零改动自动生效。ProfileSheet OpenerCard/InlineProfileCard 收起按钮统一移到卡片顶部（InlineProfileCard 原 sticky bottom-0 渐变遮罩条删除）。日志 [tts] minimax test ok/fail、[tts] synth ok provider=minimax host/model/voice。
 - **MiniMax 2013 参数错误修复（第42轮，实测校正协议）**：❌ 初版按顶层 `voice_id`+`audio:{}` 发 t2a_v2 → 国内 Key 通过鉴权但报 2013 invalid params, empty field。正确协议（官方 docs + 实测）：必填嵌套结构 `voice_setting:{voice_id,speed,vol,pitch}` + `audio_setting:{format,sample_rate,bitrate,channel}`；**域名与 Key 大区对应**——platform.minimax.cn（国内控制台，sk-开头）Key 必须打 api.minimaxi.com，国际平台 Key 打 api.minimax.io；speech-02 裸名不在 t2a_v2 enum 列表，用 speech-02-hd/speech-2.8-hd；1004=鉴权失败（区域/Key），2049/2054=Key区不对/音色不存在。
 
+- **MiniMax 克隆音色接入（第43轮）**：t2a_v2 对系统/克隆/文生音色一视同仁，voice_id 填克隆 ID 即可用。`tts.ts` 新增 fetchMiniMaxVoices（POST /v1/get_voice {voice_type:"all"}，兼容 voice_list/voices 字段，克隆音色标注"· 克隆"）；**坑：克隆音色需先用它成功合成过一次才会出现在 get_voice 结果里**（官方文档明示），VoiceSection 加「我的音色」按钮拉取账户全部音色供一键点选，空列表时给出该提示。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

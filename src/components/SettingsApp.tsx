@@ -9,7 +9,7 @@ import type { AiConfig, TestResult } from "@/lib/types";
 import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
-import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
+import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, fetchMiniMaxVoices, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
 import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, type ImageConfig } from "@/lib/media";
 
 interface Props {
@@ -431,6 +431,8 @@ function VoiceSection({ config }: { config: AiConfig }) {
   const [testing, setTesting] = useState(false);
   const [testOk, setTestOk] = useState(false);
   const [testErr, setTestErr] = useState("");
+  const [myVoices, setMyVoices] = useState<{ id: string; label: string }[]>([]);
+  const [voicesLoading, setVoicesLoading] = useState(false);
 
   const save = () => {
     saveVoiceConfig(form);
@@ -458,6 +460,24 @@ function VoiceSection({ config }: { config: AiConfig }) {
   };
 
   const isMiniMax = form.provider === "minimax";
+
+  /** 拉取账户下全部音色（系统+克隆+文生），供一键选用 */
+  const loadMyVoices = async () => {
+    if (voicesLoading) return;
+    setVoicesLoading(true);
+    setTestErr("");
+    try {
+      const list = await fetchMiniMaxVoices(form);
+      setMyVoices(list);
+      console.log(`[tts] get_voice ok count=${list.length}`);
+      if (!list.length) setTestErr("没查到任何音色——克隆音色需要先用它成功合成过一次才会出现在列表里");
+    } catch (e) {
+      setTestErr(e instanceof Error ? e.message : "获取音色列表失败");
+      console.warn("[tts] get_voice fail:", e);
+    } finally {
+      setVoicesLoading(false);
+    }
+  };
 
   return (
     <div className="glass space-y-2.5 rounded-2xl p-3.5">
@@ -505,7 +525,21 @@ function VoiceSection({ config }: { config: AiConfig }) {
                 {v.label}
               </button>
             ))}
+            <button type="button" disabled={voicesLoading || !form.minimaxKey.trim()} onClick={loadMyVoices} className="jelly-btn flex items-center gap-1 rounded-full border border-primary/30 px-2.5 py-0.5 text-[10.5px] font-semibold text-primary disabled:opacity-40">
+              {voicesLoading ? <LoaderCircle className="size-3 animate-spin" /> : <ListChecks className="size-3" />}
+              我的音色{myVoices.length ? `（${myVoices.length}）` : ""}
+            </button>
           </div>
+          {myVoices.length > 0 && (
+            <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg bg-white/40 p-2">
+              {myVoices.map((v) => (
+                <button key={v.id} type="button" onClick={() => setForm((f) => ({ ...f, minimaxVoice: v.id }))} className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-[10.5px] transition-colors hover:bg-primary/10 ${form.minimaxVoice === v.id ? "font-semibold text-primary" : "text-secondary-foreground"}`}>
+                  <span className="truncate">{v.label}</span>
+                  <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{v.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex gap-2">
             <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" disabled={!form.minimaxKey.trim() || testing} onClick={testAndSave}>
               {testing ? <span className="flex items-center gap-1"><LoaderCircle className="size-3 animate-spin" />正在接入…</span> : testOk ? <span className="flex items-center gap-1 text-success"><CheckCircle2 className="size-3.5" />已成功</span> : "测试并保存"}

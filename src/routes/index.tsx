@@ -11,7 +11,7 @@ function IndexPage() {
   const [config, saveConfig] = useAiConfig();
 
   return (
-    <div className="stage-bg flex min-h-full items-center justify-center p-3 sm:p-6">
+    <div className="stage-bg flex h-full items-center justify-center sm:p-6">
       <PhoneShell config={config} onSaveConfig={saveConfig} />
     </div>
   );

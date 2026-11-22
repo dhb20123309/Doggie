@@ -38,13 +38,13 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   };
 
   return (
-    <div className="phone-frame relative rounded-[48px] p-[10px]">
+    <div className="phone-frame relative h-full w-full overflow-hidden rounded-none p-0 sm:h-auto sm:w-auto sm:overflow-visible sm:rounded-[48px] sm:p-[10px]">
       {/* 侧边按键 */}
-      <span className="absolute -left-[3px] top-[90px] h-8 w-[3px] rounded-l bg-frame-edge" />
-      <span className="absolute -left-[3px] top-[130px] h-12 w-[3px] rounded-l bg-frame-edge" />
-      <span className="absolute -right-[3px] top-[110px] h-16 w-[3px] rounded-r bg-frame-edge" />
+      <span className="absolute -left-[3px] top-[90px] hidden h-8 w-[3px] rounded-l bg-frame-edge sm:block" />
+      <span className="absolute -left-[3px] top-[130px] hidden h-12 w-[3px] rounded-l bg-frame-edge sm:block" />
+      <span className="absolute -right-[3px] top-[110px] hidden h-16 w-[3px] rounded-r bg-frame-edge sm:block" />
 
-      <div className="screen-glare relative h-[620px] w-[300px] overflow-hidden rounded-[38px] bg-background sm:h-[660px] sm:w-[320px]">
+      <div className="screen-glare relative h-full w-full overflow-hidden rounded-none bg-background sm:h-[min(720px,calc(100dvh-56px))] sm:w-[min(360px,calc(100dvw-48px))] sm:rounded-[38px]">
         {/* 灵动岛 */}
         <div className="absolute left-1/2 top-2 z-50 flex h-[26px] w-[92px] -translate-x-1/2 items-center justify-end rounded-full bg-notch pr-3">
           <span className="size-2.5 rounded-full bg-[oklch(0.25_0.03_260)] ring-1 ring-white/10" />

@@ -44,6 +44,8 @@
 
 - **MiniMax 克隆音色接入（第43轮）**：t2a_v2 对系统/克隆/文生音色一视同仁，voice_id 填克隆 ID 即可用。`tts.ts` 新增 fetchMiniMaxVoices（POST /v1/get_voice {voice_type:"all"}，兼容 voice_list/voices 字段，克隆音色标注"· 克隆"）；**坑：克隆音色需先用它成功合成过一次才会出现在 get_voice 结果里**（官方文档明示），VoiceSection 加「我的音色」按钮拉取账户全部音色供一键点选，空列表时给出该提示。
 
+- **手机全屏自适应（第44轮）**：PhoneShell 机身响应式双形态——<640px（H5/真手机）时 phone-frame 铺满视口（h-full w-full、去圆角边框侧键，stage p-0）；≥sm 桌面时保持模拟机身（屏幕 `h-[min(720px,calc(100dvh-56px))]`×`w-[min(360px,calc(100dvw-48px))]` 随窗口伸缩，上限比旧 660px 更大）。index.tsx stage 改 h-full+sm:p-6。内部各 App 均 h-full 自适应无需改动。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

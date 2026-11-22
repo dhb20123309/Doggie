@@ -35,6 +35,7 @@ import {
   sanitizeReply,
   CHAT_LIVENESS,
   isRepetitiveReply,
+  STORY_PROTOCOL,
 } from "@/lib/chat-types";
 import {
   type WorldBook,
@@ -171,11 +172,21 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   stateRef.current = { log, input, pending, ready, prefs };
   const autoTimer = useRef<number | null>(null);
 
-  /** 每次请求现算：人设 + 生效世界书 + 表情名单 → system prompt */
+  /** 每次请求现算：人设 + 生效世界书 + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL */
   const buildSys = useCallback(
-    (ch: Character) => {
+    (ch: Character, story: boolean) => {
       const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
       const usable = stickers.filter((s) => s.isGlobal);
+      if (story) {
+        // 互动剧情：第三人称小说链路——保留完整历史记忆，不注入私聊气泡式铁律与表情名单
+        return (
+          `你正在以小说叙事者视角演绎一段互动剧情，男主角为「${ch.name || "无名角色"}」。\n男主设定：${
+            ch.persona || "无额外设定"
+          }\n` +
+          STORY_PROTOCOL(ch.name || "他") +
+          buildWorldSection(activeBooks)
+        );
+      }
       return (
         `你现在扮演以下角色，请始终以该身份回复，不要跳出角色。\n名字：${
           ch.name || "无名角色"
@@ -197,22 +208,38 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   const toHistory = (ch: Character, entries: ChatEntry[]) => [
-    { role: "system", content: buildSys(ch) },
+    { role: "system", content: buildSys(ch, Boolean(ch.storyMode)) },
     ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
   ];
 
-  const requestReply = async (entries: ChatEntry[], userMsgId: string) => {
+  const requestReply = async (entries: ChatEntry[], userMsgId: string, storyMode = false) => {
     if (!active) return;
     // 快照请求上下文：回复在后台继续，退出聊天页/切换会话也不会打断（结果直写该角色存储）
     const ch = active;
     const cfgSnapshot = config;
-    const sysPrompt = buildSys(ch);
-    const toHist = (es: ChatEntry[]) => [
-      { role: "system", content: sysPrompt },
-      ...es.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
-    ];
+    const sysPrompt = buildSys(ch, storyMode);
+    const toHist = (es: ChatEntry[]) => {
+      const msgs = es.filter((e) => !e.failed).slice(-20);
+      if (!storyMode) return [{ role: "system", content: sysPrompt }, ...msgs.map((e) => ({ role: e.role, content: e.content }))];
+      // 剧情链路：玩家消息带人称锚点包装（前文叙述转"你"），assistant 历史原样保留——记忆完整互通
+      const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt }];
+      let lastStoryNarration = "";
+      for (const e of msgs) {
+        if (e.role === "user") {
+          const anchor = lastStoryNarration
+            ? `${toSecondPerson(lastStoryNarration)}\n（以上为既定剧情，请承接推进，勿重复上文句子）\n\n`
+            : "（互动剧情开场。请以第三人称叙述男主、第二人称\"你\"叙述玩家）\n";
+          out.push({ role: "user", content: anchor + e.content });
+          lastStoryNarration = "";
+        } else {
+          out.push({ role: e.role, content: e.content });
+          if (e.story) lastStoryNarration = e.content;
+        }
+      }
+      return out;
+    };
     console.log(
-      `[reply] start char=${ch.id} msg=${userMsgId} → pending(正在输入中) liveness=on sysLen=${sysPrompt.length}`
+      `[reply] start char=${ch.id} msg=${userMsgId} story=${storyMode ? "on" : "off"} → pending(正在输入中) sysLen=${sysPrompt.length}`
     );
     setPending(true);
     scrollBottom();
@@ -240,8 +267,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       if (result.ok) {
         // 复读兜底链：OOC 过滤 + 复读检测（与最近两条 assistant 逐行重合≥50%），命中即带禁复读指令重生成，最多两次
         const recentAssistants = entries.filter((e) => e.role === "assistant" && !e.failed).slice(-2);
-        const antiRepeatHint =
-          "（系统提示：你上一条回复因与原话重复被拦截。这次必须换全新的说法和角度接她的话——不许复用之前说过的句子和口头禅，可以提新细节、开新话题或换个反应；保持一两句口语化短消息）";
+        const antiRepeatHint = storyMode
+          ? "（系统提示：上一条剧情因与前文重复被拦截。这次必须换全新的叙述角度与措辞推进剧情——不许复用之前的句子和意象，情感按前因后果平缓递进；保持一到两段小说正文）"
+          : "（系统提示：你上一条回复因与原话重复被拦截。这次必须换全新的说法和角度接她的话——不许复用之前说过的句子和口头禅，可以提新细节、开新话题或换个反应；保持一两句口语化短消息）";
         const regenWith = async (extraUser: string): Promise<string> => {
           const firstTry = await chatCompletion(cfgSnapshot, [
             ...toHist(entries),
@@ -273,11 +301,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           const again = await regenWith(
             rep
               ? antiRepeatHint
-              : "（请完全回到角色身份继续对话，不要提及你是模型或程序；也不要重复你之前说过的句子）"
+              : storyMode
+                ? "（请回到互动剧情叙事：第三人称男主、第二人称玩家，承接前文平缓推进，不要提及你是模型或程序，也不要重复之前的句子）"
+                : "（请完全回到角色身份继续对话，不要提及你是模型或程序；也不要重复你之前说过的句子）"
           );
           if (again) {
             console.log(`[reply] regen ok char=${ch.id}`);
-            settleReply(ch.id, userMsgId, again);
+            settleReply(ch.id, userMsgId, again, storyMode);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
@@ -285,7 +315,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
           console.log(`[reply] ok char=${ch.id} len=${clean.length}`);
-          settleReply(ch.id, userMsgId, clean);
+          settleReply(ch.id, userMsgId, clean, storyMode);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
@@ -298,13 +328,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
   };
 
-  /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面 */
-  const settleReply = (charId: string, userMsgId: string, reply: string | null) => {
+  /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
+  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false) => {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
-      const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null } : e));
-      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now() }] : kept;
+      // 只标记本次新产出的回复为剧情内容：历史消息的 story 标记原样保留（记忆互通）
+      const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
     } catch {
@@ -312,10 +343,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
   };
 
+  /** 剧情框内渲染的用户消息：TA 的第三人称叙述转第二人称"你"（他看着你→他看着"你"），兜底直接引语 */
+  const toSecondPerson = (t: string) => t.replace(/他(看着|望着|听见|听到|感觉到)/g, "你$1").replace(/「([^」\n]{1,40})」/g, "“$1”");
+
   const flushDraft = (): boolean => {
     const text = input.trim();
     if (!text || pending || !ready) return false;
-    const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now() };
+    const story = Boolean(active?.storyMode);
+    const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now(), ...(story ? { story: true } : {}) };
     // 先同步更新界面（用户气泡必须立刻出现），再直写该角色存储保证后台回复基于完整上下文；
     // 顺序反了会被后续 setLog(stored) 用旧快照覆盖掉刚发的消息（曾导致自己发的消息要退出重进才可见）
     setLog((prev) => [...prev, userMsg]);
@@ -323,7 +358,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     setInput("");
     scrollBottom();
     // 立即进入"正在输入中"并请求回复；请求发出后即与页面解耦，切走/返回也不会打断
-    void requestReply([...stateRef.current.log, userMsg], userMsg.id);
+    void requestReply([...stateRef.current.log, userMsg], userMsg.id, story);
     return true;
   };
 
@@ -359,7 +394,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     let targetId: string | null = null;
     const draft = s.input.trim();
     if (draft) {
-      const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: draft, at: Date.now() };
+      const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: draft, at: Date.now(), ...(active.storyMode ? { story: true } : {}) };
       entries = [...entries, userMsg];
       targetId = userMsg.id;
       // 与 flushDraft 同理：先同步更新界面，再直写存储，避免旧快照覆盖刚发的消息
@@ -377,7 +412,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       }
     }
     if (!targetId) return;
-    void requestReply(entries, targetId);
+    void requestReply(entries, targetId, Boolean(active.storyMode));
   };
 
   const primaryAction = () => {
@@ -396,7 +431,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     if (idx < 0) return;
     const kept = log.slice(0, idx + 1).map((en) => (en.id === userMsgId ? { ...en, failed: false } : en));
     setLog(kept);
-    void requestReply(kept, userMsgId);
+    void requestReply(kept, userMsgId, Boolean(active?.storyMode));
   };
 
   // 模式03：发完后倒计时自动生成
@@ -431,8 +466,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
     const fireOne = async (ch: Character, last: ChatEntry | null) => {
+      // 剧情模式下角色不"不请自来"发私聊式碎句——主动 tick 跳过带 storyMode 的角色
+      if (ch.storyMode) return;
       const sys =
-        buildSys(ch) +
+        buildSys(ch, false) +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
         (ch.name || "TA") +
         "）主动想找对方说话。" +
@@ -489,7 +526,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         let caption = "";
         try {
           caption = await chatCompletion(config, [
-            { role: "system", content: buildSys(ch) + "\n\n【场景】你刚拍了一张自己的日常照片想发给对方。照片内容：" + scene + "。请用一句话配这张图发出去：只写这句话本身，不超过 20 字，不要旁白和解释，每次说法都要不一样。" },
+            { role: "system", content: buildSys(ch, false) + "\n\n【场景】你刚拍了一张自己的日常照片想发给对方。照片内容：" + scene + "。请用一句话配这张图发出去：只写这句话本身，不超过 20 字，不要旁白和解释，每次说法都要不一样。" },
             { role: "user", content: "（发照片）" },
           ]);
         } catch {
@@ -649,6 +686,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         onOpenWorldBooks={() => setView("worldbooks")}
         onToggleProactive={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, proactiveEnabled: v } : x)))}
         onTogglePhoto={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, photoEnabled: v } : x)))}
+        onToggleStory={(v) => {
+          console.log(`[story] toggle char=${active.id} → ${v ? "剧情模式" : "普通聊天"}`);
+          setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, storyMode: v } : x)));
+        }}
         onPickVoice={(vid) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, voiceId: vid } : x)))}
       />
     );
@@ -707,6 +748,21 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           </div>
         </div>
         <div className="flex">
+          <button
+            type="button"
+            onClick={() => {
+              const v = !active.storyMode;
+              console.log(`[story] toggle char=${active.id} → ${v ? "剧情模式" : "普通聊天"}`);
+              setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, storyMode: v } : x)));
+            }}
+            aria-label="切换互动剧情模式"
+            className={`jelly-btn mr-1 flex h-7 items-center gap-1 rounded-full px-2.5 text-[10px] font-semibold transition-colors ${
+              active.storyMode ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"
+            }`}
+          >
+            <BookText className="size-3" />
+            剧情
+          </button>
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("stickers")} aria-label="表情库">
             <SmilePlus className="size-4" />
           </Button>
@@ -745,8 +801,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             {!ready && <><br />（先在「设置」里接好 API）</>}
           </p>
         )}
-        {log.map((entry) =>
-          entry.role === "user" ? (
+        {log.map((entry, i) => {
+          // 剧情内容统一渲染为聊天区中间的浅灰剧情框（不用消息气泡）；用户消息转第二人称"你："叙述
+          const prevStory = i > 0 && log[i - 1].story;
+          if (entry.story || prevStory) {
+            return (
+              <div key={entry.id} className="fade-up mx-auto w-full max-w-[92%] whitespace-pre-wrap break-words rounded-xl bg-black/[0.05] px-3.5 py-2.5 text-[12px] leading-relaxed text-muted-foreground backdrop-blur-sm">
+                {entry.role === "user" ? `你：${entry.content}` : entry.content}
+              </div>
+            );
+          }
+          return entry.role === "user" ? (
             <div key={entry.id} className="flex flex-col items-end gap-1">
               {entry.stickerUrl ? (
                 <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
@@ -777,8 +842,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               speaking={voiceBusy === entry.id}
               onSpeak={() => void speak(entry.id, entry.content)}
             />
-          )
-        )}
+          );
+        })}
         {pending && (
           <div className="flex items-end gap-2">
             <Avatar character={active} size={26} status="typing" />
@@ -1221,6 +1286,7 @@ function CharacterEditor({
   onOpenWorldBooks,
   onToggleProactive,
   onTogglePhoto,
+  onToggleStory,
   onPickVoice,
 }: {
   character: Character;
@@ -1231,6 +1297,7 @@ function CharacterEditor({
   onOpenWorldBooks: () => void;
   onToggleProactive: (v: boolean) => void;
   onTogglePhoto: (v: boolean) => void;
+  onToggleStory: (v: boolean) => void;
   onPickVoice: (id: string) => void;
 }) {
   const [form, setForm] = useState<Character>(character);
@@ -1315,6 +1382,18 @@ function CharacterEditor({
 
         {/* 互动开关 */}
         <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="cursor-pointer text-[13px] font-semibold" htmlFor="storySw">互动剧情模式</Label>
+            <Switch
+              id="storySw"
+              checked={form.storyMode ?? false}
+              onCheckedChange={(v) => {
+                setForm((f) => ({ ...f, storyMode: v }));
+                onToggleStory(v);
+              }}
+            />
+          </div>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">开启后聊天变为小说式互动剧情：你是"你"，TA 用第三人称叙述；与私聊记忆互通。也可在聊天页顶部随时切换。</p>
           <div className="flex items-center justify-between gap-3">
             <Label className="cursor-pointer text-[13px] font-semibold" htmlFor="proactiveSw">允许主动找我聊天</Label>
             <Switch

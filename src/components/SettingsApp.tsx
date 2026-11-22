@@ -10,7 +10,7 @@ import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, type VoiceConfig } from "@/lib/tts";
-import { loadMusicTracks, saveMusicTracks } from "@/lib/media";
+import { loadMusicTracks, saveMusicTracks, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, type ImageConfig } from "@/lib/media";
 
 interface Props {
   config: AiConfig;
@@ -239,6 +239,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, wallpapers }: Prop
 
         <PasscodeSection onLock={onLock} />
         <WallpaperSection wallpapers={wallpapers} />
+        <ImageSection />
         <VoiceSection />
         <MusicSourceSection />
 
@@ -354,6 +355,70 @@ function WallpaperPicker({
         </span>
       </button>
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+    </div>
+  );
+}
+
+/** 独立生图通道：不影响聊天 API 地址。可选免费网关（Pollinations，免 Key）或自备 OpenAI 兼容图像网关 */
+function ImageSection() {
+  const [form, setForm] = useState<ImageConfig>(() => loadImageConfig());
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  const save = () => {
+    saveImageConfig(form);
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 1500);
+  };
+
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <p className="text-[13px] font-semibold">角色生图通道</p>
+      <div className="flex gap-2">
+        {(
+          [
+            { k: "openai", label: "OpenAI 兼容" },
+            { k: "pollinations", label: "免费网关（推荐）" },
+          ] as const
+        ).map((o) => (
+          <button
+            key={o.k}
+            type="button"
+            onClick={() => setForm((f) => ({ ...f, mode: o.k }))}
+            className={`jelly-btn h-8 flex-1 rounded-xl text-xs ${
+              form.mode === o.k ? "bg-primary text-primary-foreground" : "glass-input text-muted-foreground"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {form.mode === "openai" ? (
+        <>
+          <Input placeholder="图像接口地址（留空=复用聊天接口）" value={form.baseUrl} onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+          <Input type="password" placeholder="图像 Key（留空=复用聊天 Key）" autoComplete="off" value={form.apiKey} onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))} className="h-9 rounded-lg glass-input text-[12px]" />
+        </>
+      ) : (
+        <p className="rounded-lg bg-white/40 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          使用 Pollinations 免费生图网关，无需注册、无需 Key，直接点保存即可启用。
+        </p>
+      )}
+      <Input
+        placeholder={form.mode === "pollinations" ? "模型名（选填，如 flux / turbo）" : "图像模型名（选填，如 gemini-image-free）"}
+        value={form.model}
+        onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+        className="h-9 rounded-lg glass-input text-[12px]"
+      />
+      <div className="flex gap-2">
+        <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={save}>
+          {savedMsg ? "已保存" : "保存生图配置"}
+        </Button>
+        <Button size="sm" variant="outline" className="jelly-btn h-8 rounded-xl text-xs" onClick={() => setForm(DEFAULT_IMAGE_CONFIG)}>
+          恢复默认
+        </Button>
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        此通道只用于角色「分享日常照片」，与聊天接口互不影响；全部失败时自动回落角色定妆照。
+      </p>
     </div>
   );
 }

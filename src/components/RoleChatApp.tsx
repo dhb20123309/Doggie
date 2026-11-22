@@ -29,6 +29,7 @@ import { chatCompletion } from "@/lib/ai-api";
 import {
   type Character,
   type ChatEntry,
+  type ReadMarks,
   type SendPrefs,
   splitBubbles,
 } from "@/lib/chat-types";
@@ -46,6 +47,9 @@ import {
   useChatLog,
   clearChatLog,
   readLastEntry,
+  unreadCount,
+  useReadMarks,
+  presetPhoto,
   useSendPrefs,
   useWorldBooks,
   useStickers,
@@ -91,6 +95,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState<string | null>(null);
+  const [proactiveBusy, setProactiveBusy] = useState(false);
+  const [marks, setMarks] = useReadMarks();
   const listRef = useRef<HTMLDivElement>(null);
   const ready = isConfigured(config);
 
@@ -230,29 +236,56 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, log, pending, ready, prefs.autoReplyAfterSend, view]);
 
-  // 角色主动发消息：离开聊天页（或在列表）时，闲置足够久后随机一条贴合人设的消息进对应会话
+  // 角色主动发消息：离开聊天页（或在列表）时，闲置足够久后由模型实时生成一条贴合人设的消息进对应会话
   useEffect(() => {
     if (!ready || view === "import") return;
-    const timer = window.setInterval(() => {
-      const candidates = characters.filter((c) => c.proactiveEnabled && PROACTIVE_LINES[c.id]?.length);
+    const timer = window.setInterval(async () => {
+      const candidates = characters.filter((c) => c.proactiveEnabled);
       if (!candidates.length) return;
       const ch = candidates[Math.floor(Math.random() * candidates.length)];
       const last = readLastEntry(ch.id);
       const idle = !last || Date.now() - last.at > PROACTIVE_IDLE_MS;
       if (!idle) return;
       if (Math.random() > 0.4) return; // 不是每次都发
-      const lines = PROACTIVE_LINES[ch.id];
-      const line = lines[Math.floor(Math.random() * lines.length)];
-      setLogForChar(ch.id, {
-        id: `p${Date.now()}`,
-        role: "assistant",
-        content: line,
-        at: Date.now(),
-      });
+      setProactiveBusy(true);
+      try {
+        const sys =
+          buildSys(ch) +
+          "\n\n【场景】现在没有对方发来的消息，是你（" +
+          (ch.name || "TA") +
+          "）主动想找对方说话。请像日常手机聊天一样，主动发来 1-2 条你想说的话：只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";
+        const history: { role: string; content: string }[] = [
+          { role: "system", content: sys },
+          ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),
+        ];
+        let line = "";
+        try {
+          line = await chatCompletion(config, history);
+        } catch {
+          const lines = PROACTIVE_LINES[ch.id];
+          line = lines?.length ? lines[Math.floor(Math.random() * lines.length)] : "";
+        }
+        line = line
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 3)
+          .join("\n");
+        if (!line) return;
+        setLogForChar(ch.id, {
+          id: `p${Date.now()}`,
+          role: "assistant",
+          content: line,
+          at: Date.now(),
+          proactive: true,
+        });
+      } finally {
+        setProactiveBusy(false);
+      }
     }, PROACTIVE_CHECK_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, view, characters]);
+  }, [ready, view, characters, buildSys, config]);
 
   /** 往指定角色的会话里追加一条消息（不依赖当前打开的会话） */
   const setLogForChar = (charId: string, entry: ChatEntry) => {
@@ -273,15 +306,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     setPending(true);
     const scene = PHOTO_SCENES[Math.floor(Math.random() * PHOTO_SCENES.length)];
     try {
-      const url = await generateCharPhoto(
-        config,
-        photoPrompt(ch.name, ch.persona, scene),
-        ch.id.startsWith("zhou-chenyan")
-          ? "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/周晨砚日常照.png?auth_key=ccf80abaee8c28da0595c8329789faaecdcec67f9be65e6c09cb5b8570193e6c"
-          : ch.id.startsWith("zhou-fengyan")
-            ? "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/周风砚日常照.png?auth_key=a7ce01f2e319dda0c696496dd490495c54aa3f39be671fb5659d432fdb01efa6"
-            : ""
-      );
+      const url = await generateCharPhoto(config, photoPrompt(ch.name, ch.persona, scene), presetPhoto(ch.id));
       if (url) {
         setLogForChar(ch.id, {
           id: `ph${Date.now()}`,
@@ -290,7 +315,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           photoUrl: url,
           at: Date.now(),
         });
-        if (ch.id === activeId) setLog((l) => [...l, { id: `ph${Date.now()}`, role: "assistant", content: "刚拍的，给你看看", photoUrl: url, at: Date.now() }]);
+        if (ch.id === activeId && view === "chat") scrollBottom();
       }
     } finally {
       setPending(false);
@@ -343,8 +368,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       <ConversationList
         characters={characters}
         activeId={activeId}
+        marks={marks}
+        generating={proactiveBusy}
         onSelect={(id) => {
           setActiveId(id);
+          setMarks((m) => ({ ...m, [id]: Date.now() }));
           setView("chat");
         }}
         onNew={() => {
@@ -595,6 +623,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 function ConversationList({
   characters,
   activeId,
+  marks,
+  generating,
   onSelect,
   onNew,
   onImport,
@@ -603,6 +633,8 @@ function ConversationList({
 }: {
   characters: Character[];
   activeId: string;
+  marks: ReadMarks;
+  generating: boolean;
   onSelect: (id: string) => void;
   onNew: () => void;
   onImport: () => void;
@@ -629,7 +661,13 @@ function ConversationList({
           <ChevronLeft className="size-5" />
         </Button>
         <span className="text-sm font-semibold">短信</span>
-        <div className="flex">
+        <div className="flex items-center gap-1.5">
+          {generating && (
+            <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+              <LoaderCircle className="size-3 animate-spin" />
+              TA 们正在酝酿消息…
+            </span>
+          )}
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onImport} aria-label="导入角色卡">
             <FileInput className="size-4" />
           </Button>
@@ -652,7 +690,7 @@ function ConversationList({
               c.id === activeId ? "bg-primary/8" : ""
             }`}
           >
-            <Avatar character={c} size={44} status={c.proactiveEnabled ? "online" : "offline"} />
+            <Avatar character={c} size={44} status={c.proactiveEnabled ? "online" : "offline"} badge={unreadCount(c.id, marks)} />
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline justify-between gap-2">
                 <span className="truncate text-[13.5px] font-semibold">{c.name || "未命名角色"}</span>
@@ -853,7 +891,7 @@ function Bubble({ side, children }: { side: "left" | "right"; children: React.Re
 
 type DotStatus = "online" | "typing" | "offline";
 
-function Avatar({ character, size, status }: { character: Character; size: number; status?: DotStatus }) {
+function Avatar({ character, size, status, badge }: { character: Character; size: number; status?: DotStatus; badge?: number }) {
   const isImg = character.avatar.startsWith("data:") || character.avatar.startsWith("http");
   return (
     <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
@@ -863,7 +901,7 @@ function Avatar({ character, size, status }: { character: Character; size: numbe
       >
         {isImg ? <img src={character.avatar} alt="角色头像" className="size-full object-cover" /> : character.avatar || "👤"}
       </span>
-      {status && (
+      {status && !badge && (
         <span
           className={`absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-white/80 ${
             status === "online" ? "bg-success" : status === "typing" ? "bg-warning pulse-dot" : "bg-muted-foreground/50"
@@ -871,6 +909,14 @@ function Avatar({ character, size, status }: { character: Character; size: numbe
           style={{ width: Math.max(7, size * 0.28), height: Math.max(7, size * 0.28) }}
           aria-label={status === "online" ? "在线" : status === "typing" ? "正在输入" : "离线"}
         />
+      )}
+      {!!badge && (
+        <span
+          className="absolute -right-1.5 -top-1.5 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold leading-4 text-white shadow-sm"
+          aria-label={`${badge} 条未读`}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
       )}
     </span>
   );

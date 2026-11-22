@@ -28,7 +28,12 @@ export interface ChatEntry {
   photoUrl?: string;
   /** 用户手动发送的表情包图片 URL */
   stickerUrl?: string;
+  /** 角色主动发来的消息（未打开的会话计未读） */
+  proactive?: boolean;
 }
+
+/** 会话已读水位：charId → 最后查看时间戳 */
+export type ReadMarks = Record<string, number>;
 
 /** 输入与发送习惯（对应 SullyOS「聊天设置 → 输入与发送」） */
 export interface SendPrefs {

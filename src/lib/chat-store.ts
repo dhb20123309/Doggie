@@ -1,6 +1,6 @@
 // 角色与聊天记录的本地持久化（localStorage），刷新后保留；首次使用预置周氏双子
 import { useEffect, useState } from "react";
-import { type Character, type ChatEntry, type SendPrefs, DEFAULT_SEND_PREFS } from "./chat-types";
+import { type Character, type ChatEntry, type ReadMarks, type SendPrefs, DEFAULT_SEND_PREFS } from "./chat-types";
 import type { WorldBook, Sticker } from "./worldbook";
 
 const CHARS_KEY = "vp-phone:characters:v2";
@@ -9,16 +9,24 @@ const ACTIVE_KEY = "vp-phone:active-character:v1";
 const PREFS_KEY = "vp-phone:send-prefs:v1";
 const WB_KEY = "vp-phone:worldbooks:v1";
 const ST_KEY = "vp-phone:stickers:v1";
+const READ_KEY = "vp-phone:chat-read:v1";
 
 export const ZHOU_CHENYAN_ID = "zhou-chenyan";
 export const ZHOU_FENGYAN_ID = "zhou-fengyan";
 export const ZHOU_WORLD_BOOK_ID = "wb-zhoushishuangzi";
 
-/** 照片素材：AI 生成的写实日常照（CDN 原始 URL，auth_key 必须完整保留） */
+/** 照片素材：用户上传的定妆日常照（CDN 原始 URL，auth_key 必须完整保留） */
 const PHOTO_CHENYAN =
-  "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/周晨砚日常照.png?auth_key=ccf80abaee8c28da0595c8329789faaecdcec67f9be65e6c09cb5b8570193e6c";
+  "https://conversation.cdn.meoo.host/conversations/382803113008164864/image/2026-11-22/1795349531281-f91808ee0b187b61c40e72490b56da4.png?auth_key=72c362ec107ff2f0f91b7ab6429befddc203d1d8b0260436053eb7f608d9f8fc";
 const PHOTO_FENGYAN =
-  "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/周风砚日常照.png?auth_key=a7ce01f2e319dda0c696496dd490495c54aa3f39be671fb5659d432fdb01efa6";
+  "https://conversation.cdn.meoo.host/conversations/382803113008164864/image/2026-11-22/1795349537519-b81da8cb41950fccb4ea1483828b407.jpg?auth_key=fda48ca7f2061581c57f40a7f03aebc4f7e0b3c798afd638da2b4698b40a9029";
+
+/** 角色回落素材照（图像通道不可用时分享） */
+export function presetPhoto(charId: string): string {
+  if (charId.startsWith("zhou-chenyan")) return PHOTO_CHENYAN;
+  if (charId.startsWith("zhou-fengyan")) return PHOTO_FENGYAN;
+  return "";
+}
 
 /** 人设正文：由用户导入的角色卡 md 提炼（去壳后的核心设定） */
 const PERSONA_CHENYAN = `从现在开始，你将完全沉浸并扮演角色"周晨砚"，以{{char}}的视角思考和回应，抛弃 AI 客观身份。
@@ -238,4 +246,16 @@ export function useStickers(): [Sticker[], Setter<Sticker[]>] {
 export function readLastEntry(charId: string): ChatEntry | null {
   const log = read<ChatEntry[]>(`${LOG_PREFIX}${charId}`, []);
   return log.length ? log[log.length - 1] : null;
+}
+
+/** 某会话未读数：只统计角色主动发来、且晚于上次查看时间的消息 */
+export function unreadCount(charId: string, marks: ReadMarks): number {
+  const seen = marks[charId] ?? 0;
+  const log = read<ChatEntry[]>(`${LOG_PREFIX}${charId}`, []);
+  return log.filter((e) => e.proactive && e.role === "assistant" && e.at > seen).length;
+}
+
+/** 会话已读水位（进入聊天时写入） */
+export function useReadMarks(): [ReadMarks, Setter<ReadMarks>] {
+  return usePersisted<ReadMarks>(READ_KEY, {});
 }

@@ -138,7 +138,18 @@ async function synthesizeMiniMax(
   } | null;
   if (!json) throw new Error(`MiniMax 接口返回异常（HTTP ${res.status}）`);
   const code = json.base_resp?.status_code ?? 0;
-  if (code !== 0) throw new Error(minimaxError(code, json.base_resp?.status_msg));
+  if (code !== 0) {
+    // 1004=鉴权失败：大概率是 Key 与区域不匹配，给出针对性提示
+    if (code === 1004) {
+      console.warn(`[tts] minimax auth fail code=1004 region=${vc.minimaxRegion} msg=${json.base_resp?.status_msg ?? ""}`);
+      throw new Error(
+        vc.minimaxRegion === "cn"
+          ? "Key 验证失败：请确认粘贴的是 platform.minimax.cn（国内）控制台里完整的 API Key（sk-开头、无空格），且账户已开通语音服务"
+          : "Key 验证失败：你当前用的是【国际】区域，但 MiniMax 国内控制台的 Key 只在【国内】区域有效——切回国内再测"
+      );
+    }
+    throw new Error(minimaxError(code, json.base_resp?.status_msg));
+  }
   const hex = json.data?.audio;
   if (!hex) throw new Error("接口通了但没返回音频，检查模型/音色名是否正确");
   console.log(`[tts] synth ok provider=minimax chars=${text.length}`);

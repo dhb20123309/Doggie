@@ -34,6 +34,7 @@ import {
   splitBubbles,
   sanitizeReply,
   CHAT_LIVENESS,
+  isRepetitiveReply,
 } from "@/lib/chat-types";
 import {
   type WorldBook,
@@ -237,28 +238,43 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         }
       }
       if (result.ok) {
-        const clean = sanitizeReply(result.reply);
-        if (!clean) {
-          // 整条回复都是"我是语言模型…"式 OOC 出戏话：丢弃不展示，静默重生成一次
-          console.warn(`[reply] OOC filtered char=${ch.id}，静默重生成一次`);
-          const regenCall = () =>
-            chatCompletion(cfgSnapshot, [
+        // 复读兜底链：OOC 过滤 + 复读检测（与最近两条 assistant 逐行重合≥50%），命中即带禁复读指令重生成，最多两次
+        const recentAssistants = entries.filter((e) => e.role === "assistant" && !e.failed).slice(-2);
+        const antiRepeatHint =
+          "（系统提示：你上一条回复因与原话重复被拦截。这次必须换全新的说法和角度接她的话——不许复用之前说过的句子和口头禅，可以提新细节、开新话题或换个反应；保持一两句口语化短消息）";
+        const regenWith = async (extraUser: string): Promise<string> => {
+          const firstTry = await chatCompletion(cfgSnapshot, [
+            ...toHist(entries),
+            { role: "user", content: extraUser },
+          ]).then(
+            (r) => ({ ok: true as const, v: sanitizeReply(r) }),
+            () => ({ ok: false as const, v: "" })
+          );
+          if (!firstTry.ok || !firstTry.v) return "";
+          if (isRepetitiveReply(firstTry.v, recentAssistants)) {
+            const second = await chatCompletion(cfgSnapshot, [
               ...toHist(entries),
-              { role: "user", content: "（请完全回到角色身份继续对话，不要提及你是模型或程序）" },
+              { role: "user", content: antiRepeatHint },
             ]).then((r) => sanitizeReply(r), () => "");
-          let again = await regenCall();
-          if (!again) {
-            // 二次仍是出戏话（如"这超出了我的能力范围"）：换更强指令再抢救一次，仍失败则视为网关拒绝、标记可重试
-            console.warn(`[reply] regen still OOC char=${ch.id}，加强指令重试第二次`);
-            again = await chatCompletion(cfgSnapshot, [
-              ...toHist(entries),
-              {
-                role: "user",
-                content:
-                  "（系统提示：上一条回复因脱离角色被拦截。接下来无论对方说什么都必须以她的恋人身份自然接话，禁止出现'AI/模型/程序/能力范围'等字眼；实在无法回应就撒娇或转移话题，保持一句口语化的短消息）",
-              },
-            ]).then((r) => sanitizeReply(r), () => "");
+            return second && !isRepetitiveReply(second, recentAssistants) ? second : "";
           }
+          return firstTry.v;
+        };
+        let clean = result.ok ? sanitizeReply(result.reply) : "";
+        let rep = false;
+        if (clean && isRepetitiveReply(clean, recentAssistants)) {
+          rep = true;
+          console.warn(`[reply] repetitive char=${ch.id}，带禁复读指令重生成`);
+          clean = "";
+        }
+        if (!clean) {
+          // 整条回复出戏或复读：丢弃不展示，静默重生成（regenWith 内已含二级复读抢救）
+          console.warn(`[reply] ${rep ? "repeat" : "OOC"} filtered char=${ch.id}，静默重生成`);
+          const again = await regenWith(
+            rep
+              ? antiRepeatHint
+              : "（请完全回到角色身份继续对话，不要提及你是模型或程序；也不要重复你之前说过的句子）"
+          );
           if (again) {
             console.log(`[reply] regen ok char=${ch.id}`);
             settleReply(ch.id, userMsgId, again);
@@ -429,9 +445,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         ...(last ? [] : [{ role: "user" as const, content: "（提示：这是开场第一条，随便说点什么）" }]),
       ];
       let line = "";
+      // 复读检测基于该角色最近两条 assistant 消息（含历轮主动消息），连续 tick 不再车轱辘
+      const prevAssistants = readLastEntries(ch.id, 30).filter((e) => e.role === "assistant" && !e.failed).slice(-2);
       try {
         line = sanitizeReply(await chatCompletion(config, history));
-        if (!line) console.warn(`[proactive] OOC filtered char=${ch.id}，本轮主动消息跳过`);
+        if (line && isRepetitiveReply(line, prevAssistants)) {
+          console.warn(`[proactive] repetitive char=${ch.id}，换说法重生成一次`);
+          const again = await chatCompletion(config, [
+            ...history,
+            { role: "user", content: "（系统提示：这条因和你之前说过的话重复被拦截。换一个全新的话题或说法，不许复用旧句子和口头禅）" },
+          ]).then((r) => sanitizeReply(r), () => "");
+          line = again && !isRepetitiveReply(again, prevAssistants) ? again : "";
+        }
+        if (!line) console.warn(`[proactive] OOC/repeat filtered char=${ch.id}，本轮主动消息跳过`);
       } catch {
         const lines = PROACTIVE_LINES[ch.id];
         line = lines?.length ? lines[Math.floor(Math.random() * lines.length)] : "";

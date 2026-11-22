@@ -80,7 +80,37 @@ export const CHAT_LIVENESS =
   "1. 接话优先：对方上一条消息才是你回复的第一依据——必须先回应她说的内容（她讲的事要有反应：追问细节、吐槽、共情、开玩笑都行），绝对禁止无视她的话题、自顾自聊你自己的日常或抛不相干的新话题；答非所问算严重失败。\n" +
   "2. 像真人手机聊天：短句为主、口语化，可用语气词和表情；一次最多两三条短消息，别长篇大论，别书面腔。\n" +
   "3. 记忆连贯：之前聊过的事（她的喜好、你们之间发生的事）要自然记住、可以顺带提起，不要装作没聊过。\n" +
-  "4. 输出格式：每条消息单独占一行，按内容自然分条；正文只写角色说出口的话，不带旁白、动作描写、解释或格式标记。";
+  "4. 输出格式：每条消息单独占一行，按内容自然分条；正文只写角色说出口的话，不带旁白、动作描写、解释或格式标记。\n" +
+  "5. 禁止复读：绝对不许重复你自己之前说过的句子和口头禅——翻一遍上面的历史，说过的心事、夸过的话、用过的开场不要再原样说来；同一件事换新的角度、新的说法，或者干脆开新话题。连续几天聊过的事就别天天提。像真人一样：每天说的话都不一样。";
+
+/** 上一条 assistant 消息（最近成功回复里最后一条） */
+export function lastAssistantText(entries: ChatEntry[]): string {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.role === "assistant" && !e.failed) return e.content;
+  }
+  return "";
+}
+
+/** 复读检测：新回复与最近两条 assistant 消息逐行重合 ≥50% 视为复读（短语气词行不计入比对） */
+export function isRepetitiveReply(reply: string, prevEntries: ChatEntry[]): boolean {
+  const banned = new Set<string>();
+  for (const e of prevEntries) {
+    if (e.role !== "assistant" || e.failed) continue;
+    for (const l of e.content.split(/\r?\n/)) {
+      const t = l.trim();
+      if (t.length >= 6) banned.add(t);
+    }
+  }
+  if (banned.size === 0) return false;
+  const lines = reply
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 6);
+  if (lines.length === 0) return false;
+  const dup = lines.filter((s) => banned.has(s)).length;
+  return dup / lines.length >= 0.5;
+}
 
 /** 组装发给模型的上下文：人设 system + 最近 20 条记录 + 新消息 */
 export function buildHistory(

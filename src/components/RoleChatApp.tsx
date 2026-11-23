@@ -93,6 +93,7 @@ import {
   LIVING_PERSON_PROTOCOL,
   TEXT_STYLE_PROTOCOL,
   PROGRESSIVE_BOND_PROTOCOL,
+  EMOTION_RESTRAINT_PROTOCOL,
   NARRATIVE_NO_AI_FLAVOR,
 } from "@/lib/liveliness-worldbook";
 import { PRESET_MEME_BOOK } from "@/lib/meme-book-data";
@@ -631,6 +632,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           ANTI_GREASE_BASELINE +
           LIVING_PERSON_PROTOCOL +
           PROGRESSIVE_BOND_PROTOCOL +
+          EMOTION_RESTRAINT_PROTOCOL +
           NARRATIVE_NO_AI_FLAVOR +
           worldText +
           memeText
@@ -654,6 +656,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         ANTI_GREASE_BASELINE +
         LIVING_PERSON_PROTOCOL +
         PROGRESSIVE_BOND_PROTOCOL +
+        EMOTION_RESTRAINT_PROTOCOL +
         TEXT_STYLE_PROTOCOL +
         buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +

@@ -22,6 +22,7 @@ import {
   Ban,
   Quote,
   Banknote,
+  ImagePlus,
   Coins,
   MapPin,
   UtensilsCrossed,
@@ -34,7 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { AiConfig } from "@/lib/types";
 import { isConfigured } from "@/lib/types";
-import { chatCompletion } from "@/lib/ai-api";
+import { chatCompletion, chatStream, type ChatPart } from "@/lib/ai-api";
 import {
   type Character,
   type ChatEntry,
@@ -544,6 +545,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const [transferOpen, setTransferOpen] = useState(false);
   /** 定位选择面板（输入框上方弹层） */
   const [locationOpen, setLocationOpen] = useState(false);
+  /** 发图输入：相册/拍照共用隐藏 file input */
+  const photoInputRef = useRef<HTMLInputElement>(null);
   /** 点开详情的转账单 id */
   const [transferSheet, setTransferSheet] = useState<string | null>(null);
   /** 点开详情/收下的订单卡 id */
@@ -613,6 +616,54 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     writeLogNow(active.id, (prev) => prev.map((e) => (e.id === entry.id ? { ...e, transfer: { ...e.transfer!, settled: "refunded" } } : e)));
     setLog((prev) => prev.map((e) => (e.id === entry.id ? { ...e, transfer: { ...e.transfer!, settled: "refunded" } } : e)));
     console.log(`[transfer] user refunded ¥${entry.transfer.amount} back to ${active.id}`);
+  };
+
+  /** 用户发图片（相册选择/相机拍照压缩后的 data URL）：即时上屏并请求 TA 看图回复 */
+  const sendPhoto = (dataUrl: string) => {
+    if (!active || pending) return;
+    const story = Boolean(active.storyMode);
+    const userMsg: ChatEntry = {
+      id: `i${Date.now()}`,
+      role: "user",
+      content: "",
+      imageUrl: dataUrl,
+      at: Date.now(),
+      ...(story ? { story: true } : {}),
+    };
+    setLog((prev) => [...prev, userMsg]);
+    writeLogNow(active.id, (prev) => [...prev, userMsg]);
+    scrollBottom();
+    console.log(`[photo] user → ${active.id} image attached (${Math.round(dataUrl.length / 1024)}KB base64)`);
+    void requestReply([...stateRef.current.log, userMsg], userMsg.id, story);
+  };
+
+  const handlePhotoFile = async (file: File | undefined) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    try {
+      // 与表情库同款压缩路径：最长边 ≤1280、质量压到 ~200KB 内，防 localStorage 超限
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error("decode"));
+        img.src = objUrl;
+      });
+      URL.revokeObjectURL(objUrl);
+      const scale = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      let q = 0.85;
+      let out = canvas.toDataURL("image/jpeg", q);
+      while (out.length > 280_000 && q > 0.4) {
+        q -= 0.15;
+        out = canvas.toDataURL("image/jpeg", q);
+      }
+      sendPhoto(out);
+    } catch {
+      console.warn("[photo] compress fail, drop");
+    }
   };
 
   /** AI 回复里的定位/外卖/礼物标记 → 结构化卡片（TA 送出的外卖挂账扣 TA 余额，等用户点收） */
@@ -881,6 +932,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const mcpCtx = buildMcpContext(loadMcpPrefs());
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
+      // 本轮触发消息（最后一条用户消息）带图时走 vision 多模态；历史图片只留文本占位省 token
+      const lastUserIdx = msgs.map((e) => e.role).lastIndexOf("user");
       const fmt = (e: ChatEntry) =>
         e.transfer
           ? `[转账卡片 ¥${e.transfer.amount.toFixed(2)} 备注:${e.transfer.note}${e.transfer.settled ? ` ${e.transfer.settled === "received" ? "已收" : "已退"}` : e.transfer.type === "incoming" ? " 待收" : ""}]`
@@ -889,20 +942,38 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             : e.order
               ? `[${e.order.kind === "gift" ? "礼物" : "外卖"}卡片 ${e.order.shop}${e.order.items.map((i) => `${i.name}x${i.qty}`).join("+") ? "：" + e.order.items.map((i) => `${i.name}x${i.qty}`).join("+") : ""} ¥${e.order.amount.toFixed(2)}${e.order.note ? ` 留言:${e.order.note}` : ""}${e.order.status === "received" ? " 已收" : e.order.from === "user" ? " 待收" : ""}]`
               : e.content;
+      /** 该条消息的多模态 content：仅本轮用户图片/表情包转 image_url part，其余纯文本 */
+      const fmtCite = (e: ChatEntry, idx: number): string | ChatPart[] => {
+        const img = e.imageUrl ?? (e.stickerUrl && e.role === "user" ? e.stickerUrl : undefined);
+        if (!img || idx !== lastUserIdx || e.transfer || e.location || e.order) return fmt(e);
+        const parts: ChatPart[] = [];
+        const txt = e.content.replace(/\[表情:[^\]]*\]/g, "").trim();
+        parts.push({ type: "text", text: txt || (e.imageUrl ? "（对方发来一张图片）" : "（对方发来一个表情包）") });
+        parts.push({ type: "image_url", image_url: { url: img } });
+        console.log(`[vision] attach msg=${e.id} kind=${e.imageUrl ? "photo" : "sticker"}`);
+        return parts;
+      };
       // 重新回复：上一条不满意已被截掉，但模型需要知道要换个说法——追加一条系统指令再请求
       const regenDirective = regenHintRef.current
         ? { role: "user" as const, content: storyMode ? "（系统提示：刚才那段剧情被删掉了。这次换全新的叙述角度、意象和措辞重写这一段——不许复用被删版本的句子，情节走向可以不同但必须承接更早的前文）" : "（系统提示：你上一句回复被撤回了。这次用完全不同的说法和角度接她的话——不许复用刚才的句子和口头禅，可以换个反应、换个话题切入点；保持口语化短消息）" }
         : null;
-      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx + richCtx + mcpCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) })), ...(regenDirective ? [regenDirective] : [])];
+      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx + richCtx + mcpCtx }, ...msgs.map((e, i) => ({ role: e.role, content: fmtCite(e, i) })), ...(regenDirective ? [regenDirective] : [])];
       // 剧情链路：玩家消息带人称锚点包装（前文叙述转"你"），assistant 历史原样保留——记忆完整互通
-      const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt + mcpCtx }];
+      const out: { role: string; content: string | ChatPart[] }[] = [{ role: "system", content: sysPrompt + mcpCtx }];
       let lastStoryNarration = "";
-      for (const e of msgs) {
+      for (let i = 0; i < msgs.length; i++) {
+        const e = msgs[i];
         if (e.role === "user") {
           const anchor = lastStoryNarration
             ? `${toSecondPerson(lastStoryNarration)}\n（以上为既定剧情，请承接推进，勿重复上文句子）\n\n`
             : "（互动剧情开场。请以第三人称叙述男主、第二人称\"你\"叙述玩家）\n";
-          out.push({ role: "user", content: anchor + e.content });
+          const cited = fmtCite(e, i);
+          if (Array.isArray(cited)) {
+            // 剧情模式发图：把锚点拼进第一个 text part，图片照常喂 vision
+            out.push({ role: "user", content: [{ type: "text", text: anchor + ((cited[0] as { text: string }).text || "") }, cited[1]] });
+          } else {
+            out.push({ role: "user", content: anchor + cited });
+          }
           lastStoryNarration = "";
         } else {
           out.push({ role: e.role, content: e.content });
@@ -920,10 +991,55 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     scrollBottom();
     // 拟真节奏：至少显示 1.2s"正在输入中"，避免秒回穿帮；期间请求已在进行
     const minTyping = new Promise((r) => setTimeout(r, 1_200));
-    const call = chatCompletion(cfgSnapshot, toHist(entries)).then(
-      (reply) => ({ ok: true as const, reply }),
-      (err) => ({ ok: false as const, err })
-    );
+    // 流式输出开关（发送习惯）：开启走 SSE 逐段上屏；STREAM_UNSUPPORTED/网关异常自动回落一次性 chatCompletion
+    const streamOn = Boolean(stateRef.current.prefs.streamingEnabled);
+    const hist = toHist(entries);
+    /** 流式临时气泡：onChunk 实时刷新，落库时移除 */
+    const streamId = `s${Date.now()}`;
+    let streamStarted = false;
+    const clearStreamBubble = () => {
+      if (!streamStarted) return;
+      setLog((prev) => prev.filter((e) => e.id !== streamId));
+    };
+    const onChunk = (acc: string) => {
+      if (!streamStarted) {
+        streamStarted = true;
+        setPending(false); // "正在输入中"让位给真实文字
+      }
+      setLog((prev) => {
+        const tmp: ChatEntry = { id: streamId, role: "assistant", content: acc, at: Date.now(), ...(storyMode ? { story: true } : {}) };
+        const i = prev.findIndex((e) => e.id === streamId);
+        if (i >= 0) {
+          const next = [...prev];
+          next[i] = tmp;
+          return next;
+        }
+        return [...prev, tmp];
+      });
+      scrollBottom();
+    };
+    const call: Promise<{ ok: true; reply: string } | { ok: false; err: unknown }> = (async () => {
+      try {
+        if (streamOn) {
+          const reply = await chatStream(cfgSnapshot, hist, onChunk);
+          return { ok: true as const, reply };
+        }
+        return { ok: true as const, reply: await chatCompletion(cfgSnapshot, hist) };
+      } catch (err) {
+        if (streamOn && err instanceof Error && err.message === "STREAM_UNSUPPORTED") {
+          console.warn(`[stream] unsupported char=${ch.id}，回落一次性返回`);
+          clearStreamBubble();
+          streamStarted = false;
+          try {
+            return { ok: true as const, reply: await chatCompletion(cfgSnapshot, hist) };
+          } catch (err2) {
+            return { ok: false as const, err: err2 };
+          }
+        }
+        clearStreamBubble();
+        return { ok: false as const, err };
+      }
+    })();
     try {
       const first = await Promise.race([call, minTyping.then(() => null)]);
       let result = first ?? (await call);
@@ -933,7 +1049,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         if (retryable) {
           console.warn(`[reply] fail char=${ch.id}，3 秒后自动重试一次:`, result.err instanceof Error ? result.err.message : result.err);
           await new Promise((r) => setTimeout(r, 3_000));
-          result = await chatCompletion(cfgSnapshot, toHist(entries)).then(
+          result = await chatCompletion(cfgSnapshot, hist).then(
             (reply) => ({ ok: true as const, reply }),
             (err) => ({ ok: false as const, err })
           );
@@ -988,6 +1104,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         if (!clean) {
           // 整条回复出戏或复读：丢弃不展示，静默重生成（regenWith 内已含二级复读抢救）
           console.warn(`[reply] ${rep ? "repeat" : "OOC"} filtered char=${ch.id}，静默重生成`);
+          clearStreamBubble();
+          streamStarted = false;
           const again = await regenWith(
             rep
               ? antiRepeatHint
@@ -1012,10 +1130,12 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}${mcp.actions.length ? ` mcp=${mcp.actions.length}` : ""}`);
           // 手机能力动作真实执行（按开关），结果串作为执行记录随消息落库
           const mcpNote = mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : undefined;
+          clearStreamBubble();
           settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order, mcpNote);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
+        clearStreamBubble();
         settleReply(ch.id, userMsgId, null);
       }
     } finally {
@@ -1658,8 +1778,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           if (entry.story || prevStory) {
             console.log(`[story] render char=${active.id} mode=${inStory ? "on" : "off"} entry=${entry.id} role=${entry.role} → 居中剧情展示（非气泡、不归属角色）`);
             return (
-              <div key={entry.id} className={`fade-up mx-auto w-full max-w-[92%] whitespace-pre-wrap break-words rounded-xl px-3.5 py-2.5 text-[12px] leading-relaxed backdrop-blur-sm ${inStory ? "bg-black/[0.05] text-muted-foreground" : "bg-transparent text-muted-foreground/70"}`}>
-                {entry.role === "user" ? `你：${entry.content}` : entry.content}
+              <div key={entry.id} className="fade-up mx-auto w-full max-w-[92%]">
+                {entry.role === "user" && entry.imageUrl && <img src={entry.imageUrl} alt="图片" className="mb-1 ml-auto block w-40 rounded-2xl opacity-90" />}
+                <div className={`whitespace-pre-wrap break-words rounded-xl px-3.5 py-2.5 text-[12px] leading-relaxed backdrop-blur-sm ${inStory ? "bg-black/[0.05] text-muted-foreground" : "bg-transparent text-muted-foreground/70"}`}>
+                  {entry.role === "user" ? `${entry.content ? `你：${entry.content}` : "你发来了一张图片"}` : entry.content}
+                </div>
               </div>
             );
           }
@@ -1675,6 +1798,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
                   <LocationCard entry={entry} />
                 ) : entry.order ? (
                   <OrderCard entry={entry} charName={displayName(active)} onOpen={() => setOrderSheet(entry.id)} />
+                ) : entry.imageUrl ? (
+                  <img src={entry.imageUrl} alt="图片" className="w-44 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
                 ) : entry.stickerUrl ? (
                   <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
                 ) : (
@@ -1798,6 +1923,29 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         )}
         <div className="flex items-center gap-2">
           <ToolboxButton open={toolboxOpen} onClick={() => setToolboxOpen((v) => !v)} />
+          {/* 发图：相册选择或相机拍照，压缩后走 vision 让 TA 看图说话 */}
+          <button
+            type="button"
+            onClick={() => {
+              if (!ready || pending) return;
+              console.log(`[photo] picker open char=${active.id}`);
+              photoInputRef.current?.click();
+            }}
+            aria-label="发送图片"
+            className="jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-primary"
+          >
+            <ImagePlus className="size-[18px]" />
+          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              void handlePhotoFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
           <button
             type="button"
             onClick={() => {
@@ -2728,6 +2876,7 @@ function PrefsEditor({ prefs, onSave, onCancel }: { prefs: SendPrefs; onSave: (p
     { key: "enterSendsText", label: "回车发送文字", desc: "开启后回车立即发出这条文字；关闭时回车不发，可连发多条后再点触发。" },
     { key: "autoReplyAfterSend", label: "发完后自动生成回复", desc: "输入框没有草稿且停止输入 2 秒后自动开始回复；期间继续输入或发新消息会重新等待。" },
     { key: "batchQueueMode", label: "连发模式", desc: "开启后每条消息先暂存上屏（不触发回复），点「发送全部」或停止输入 20 秒视为说完，角色才统一回复一次。" },
+    { key: "streamingEnabled", label: "流式输出", desc: "开启后 TA 的回复逐段实时上屏（打字机效果）。需要接口支持流式返回；个别网关不支持时自动回落为一次性回复。" },
   ];
 
   return (
@@ -2749,7 +2898,7 @@ function PrefsEditor({ prefs, onSave, onCancel }: { prefs: SendPrefs; onSave: (p
           <div key={r.key} className="rounded-xl border border-border bg-card p-3">
             <div className="flex items-center justify-between gap-3">
               <Label className="cursor-pointer text-[13px] font-semibold" htmlFor={r.key}>{r.label}</Label>
-              <Switch id={r.key} checked={form[r.key]} onCheckedChange={(v) => setForm((f) => ({ ...f, [r.key]: v }))} />
+              <Switch id={r.key} checked={Boolean(form[r.key])} onCheckedChange={(v) => setForm((f) => ({ ...f, [r.key]: v }))} />
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{r.desc}</p>
           </div>

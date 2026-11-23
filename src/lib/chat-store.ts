@@ -265,7 +265,9 @@ export function clearChatLog(charId: string): void {
 }
 
 export function useSendPrefs(): [SendPrefs, Setter<SendPrefs>] {
-  return usePersisted(PREFS_KEY, DEFAULT_SEND_PREFS);
+  const [p, setP] = usePersisted<SendPrefs>(PREFS_KEY, DEFAULT_SEND_PREFS);
+  // 旧存档缺新字段（如 streamingEnabled）时浅合并默认值，PrefsEditor 的 Boolean() 兜底之外再保一层
+  return [{ ...DEFAULT_SEND_PREFS, ...p }, setP];
 }
 
 export function useWorldBooks(): [WorldBook[], Setter<WorldBook[]>] {

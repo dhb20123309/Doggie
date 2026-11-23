@@ -59,6 +59,8 @@ export interface ChatEntry {
   queued?: boolean;
   /** Reality MCP 手机能力执行记录（细灰字展示，如 "✓ 已震动·标准 ｜ ✓ 已创建提醒…"），仅 assistant 条目 */
   mcpNote?: string;
+  /** 用户发送的图片（data URL，压缩 ≤200KB）：渲染成图片气泡，且喂给 vision 模型识别内容 */
+  imageUrl?: string;
   /** 定位共享卡片（微信式地图卡）：from 标记谁发的；place 地点名、addr 地址描述 */
   location?: { place: string; addr: string; from: "user" | "char" };
   /** 外卖/礼物订单卡：kind=delivery 外卖 | gift 礼物；status=pending 待收可点开收下，received 已完成 */
@@ -200,6 +202,8 @@ export interface SendPrefs {
   autoReplyAfterSend: boolean;
   /** 连发模式：开启后每条消息先暂存上屏（queued），点「发送全部」或 20 秒静默才真正发出并请求回复 */
   batchQueueMode?: boolean;
+  /** 流式输出：开启后角色回复经 SSE 逐段实时上屏（打字机效果）；网关不支持流式时自动回落一次性返回 */
+  streamingEnabled?: boolean;
 }
 
 export const DEFAULT_SEND_PREFS: SendPrefs = {
@@ -207,6 +211,7 @@ export const DEFAULT_SEND_PREFS: SendPrefs = {
   enterSendsText: true,
   autoReplyAfterSend: false,
   batchQueueMode: false,
+  streamingEnabled: false,
 };
 
 /** 模型出戏兜底：网关/模型偶尔返回"我是语言模型/AI助手"等 OOC 声明，直接丢弃不展示给用户 */

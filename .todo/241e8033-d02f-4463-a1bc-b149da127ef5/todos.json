@@ -1,28 +1,35 @@
 [
   {
-    "content": "reality-mcp.ts 能力数据层（开关/探测/执行器/协议解析）",
-    "id": "m1",
+    "content": "ai-api.ts 新增 chatStream SSE + content 类型放宽",
+    "id": "s1",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "McpApp.tsx 手机能力页 + ScreenId/PhoneShell/设置入口/桌面入口",
-    "id": "m2",
+    "content": "chat-types.ts ChatEntry.imageUrl + SendPrefs.streamingEnabled",
+    "id": "s2",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "RoleChatApp 协议注入/mcpCtx/digestMcpActions/执行记录渲染",
-    "id": "m3",
+    "content": "RoleChatApp toHist vision / requestReply 流式 / 输入栏图片按钮 / 渲染",
+    "id": "s3",
     "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "发送习惯页流式开关（PrefsEditor）+ 旧存档浅合并",
+    "id": "s4",
+    "priority": "medium",
     "skills": [],
     "status": "completed"
   },
   {
     "content": "双门禁验证 + AGENTS.md + 交付",
-    "id": "m4",
+    "id": "s5",
     "priority": "medium",
     "skills": [],
     "status": "completed"

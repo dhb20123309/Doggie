@@ -144,10 +144,13 @@ function toFriendlyTestError(err: unknown, cfg: AiConfig): Omit<TestResult, "lat
   return { status: "error", title: "出错了", detail: err instanceof Error ? err.message : String(err), hints: [] };
 }
 
-/** 聊天补全：走候选地址兜底，temperature 可配 */
+/** 聊天补全：走候选地址兜底，temperature 可配；content 支持多模态 array（vision 识图） */
+export type ChatPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+export type ChatMessage = { role: string; content: string | ChatPart[] };
+
 export async function chatCompletion(
   cfg: AiConfig,
-  history: { role: string; content: string }[],
+  history: ChatMessage[],
   signal?: AbortSignal
 ): Promise<string> {
   const json = await withCandidates(cfg.baseUrl, {}, (base) =>
@@ -158,4 +161,71 @@ export async function chatCompletion(
     throw new Error("接口未返回文本内容，请检查模型名或服务商响应格式");
   }
   return reply.trim();
+}
+
+/**
+ * 流式聊天补全：stream:true + SSE 逐段解析，onChunk 每次收到累计全文。
+ * 兼容两种网关行为：标准 OpenAI delta 协议；个别中转站不吐 delta 时自动退回一次性 JSON。
+ * 结束后返回完整文本（与 chatCompletion 同口径 trim）。
+ */
+export async function chatStream(
+  cfg: AiConfig,
+  history: ChatMessage[],
+  onChunk: (accumulated: string) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  let full = "";
+  let sawDelta = false;
+  const consume = (payload: string) => {
+    if (payload === "[DONE]") return;
+    try {
+      const obj = JSON.parse(payload);
+      // 少数网关在流末尾整包返回 message.content（无 delta），一并消化
+      const delta = obj?.choices?.[0]?.delta?.content ?? obj?.choices?.[0]?.message?.content;
+      if (typeof delta === "string" && delta) {
+        if (obj?.choices?.[0]?.delta) sawDelta = true;
+        full += delta;
+        onChunk(full);
+      }
+    } catch {
+      /* 心跳/非 JSON 行忽略 */
+    }
+  };
+  await withCandidates(cfg.baseUrl, {}, async (base) => {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: authHeaders(cfg),
+      body: JSON.stringify({ model: cfg.model.trim(), messages: history, temperature: cfg.temperature ?? 0.8, stream: true }),
+      signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let msg = text.slice(0, 200) || res.statusText;
+      try {
+        msg = JSON.parse(text)?.error?.message || msg;
+      } catch {
+        /* ignore */
+      }
+      throw new HttpError(res.status, String(msg));
+    }
+    if (!res.body) throw new Error("该浏览器不支持流式读取");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        const t = line.trim();
+        if (t.startsWith("data:")) consume(t.slice(5).trim());
+      }
+    }
+    if (buf.trim().startsWith("data:")) consume(buf.trim().slice(5).trim());
+    if (!sawDelta && !full) throw new Error("STREAM_UNSUPPORTED");
+  });
+  if (!full.trim()) throw new Error("接口未返回文本内容，请检查模型名或服务商响应格式");
+  return full.trim();
 }

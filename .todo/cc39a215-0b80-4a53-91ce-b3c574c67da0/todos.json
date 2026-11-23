@@ -1,16 +1,30 @@
 [
   {
-    "id": "c4",
-    "status": "completed",
-    "content": "SettingsApp 云端账号 Section + PhoneShell 引导卡/自动备份",
+    "id": "a1",
+    "status": "in_progress",
+    "content": "A. 麦克风权限+按键启停录音（WAV输出）+通话UI骨架",
     "priority": "high",
     "skills": []
   },
   {
-    "id": "c5",
-    "status": "completed",
-    "content": "双门禁 + 测试账号验证备份恢复闭环 + AGENTS.md + 交付",
-    "priority": "medium",
+    "id": "b1",
+    "status": "pending",
+    "content": "B. MiniMax STT转文字（文本+置信度+分类失败原因）",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "c1",
+    "status": "pending",
+    "content": "C. 通话上下文走角色LLM链路生成回复",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "d1",
+    "status": "pending",
+    "content": "D. MiniMax TTS播放（角色绑定voice_id）",
+    "priority": "high",
     "skills": []
   }
 ]

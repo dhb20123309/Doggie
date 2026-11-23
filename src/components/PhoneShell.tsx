@@ -14,6 +14,7 @@ import { StickerApp } from "./StickerApp";
 import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
 import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
 import { DeliveryApp } from "./DeliveryApp";
+import { VoiceCallApp } from "./VoiceCallApp";
 import { McpApp } from "./McpApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 import { onNotify, onOpenChat, requestOpenChat, useNotifyOn, type NotifyPayload } from "@/lib/notification-store";
@@ -275,6 +276,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "delivery" && (
                 <DeliveryApp onBack={goHome} onSend={(charId, order) => sendOrderToChat(charId, order)} />
               )}
+              {screen === "voicecall" && <VoiceCallApp config={config} onBack={goHome} />}
               {screen === "mcp" && <McpApp config={config} onBack={goHome} />}
             </div>
 

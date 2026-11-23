@@ -31,6 +31,7 @@ export type ScreenId =
   | "theater"
   | "profile"
   | "delivery"
+  | "voicecall"
   | "mcp";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";

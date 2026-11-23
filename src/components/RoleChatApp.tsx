@@ -223,6 +223,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   });
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  /** 并发闸门：charId → 是否有回复请求在飞（含流式输出中）。pending 在流式首 chunk 即释放，不能作为唯一闸门 */
+  const inflightRef = useRef<Set<string>>(new Set());
   const [voiceBusy, setVoiceBusy] = useState<string | null>(null);
   const [proactiveBusy, setProactiveBusy] = useState(false);
   const [marks, setMarks] = useReadMarks();
@@ -987,6 +989,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       `[reply] start char=${ch.id} msg=${userMsgId} story=${storyMode ? "on" : "off"} typing=${storyMode ? "narrative" : "human-protocol"}${regenHintRef.current ? " regen=1" : ""} → pending(正在输入中) sysLen=${sysPrompt.length}`
     );
     regenHintRef.current = false;
+    // 并发闸门：同一会话同时只允许一条回复请求在飞（含流式输出中）。此前流式首 chunk 即 setPending(false)，
+    // 倒计时兜底 effect / generate 重试会在流未结束时再次发起 requestReply，导致同一条消息落库两遍（重复气泡）
+    const inflightKey = ch.id;
+    if (inflightRef.current.has(inflightKey)) {
+      console.warn(`[reply] skip duplicate request char=${inflightKey} msg=${userMsgId}（上一条仍在飞行中）`);
+      return;
+    }
+    inflightRef.current.add(inflightKey);
     setPending(true);
     scrollBottom();
     // 拟真节奏：至少显示 1.2s"正在输入中"，避免秒回穿帮；期间请求已在进行
@@ -1139,6 +1149,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         settleReply(ch.id, userMsgId, null);
       }
     } finally {
+      inflightRef.current.delete(inflightKey);
       await minTyping;
       setPending(false);
       scrollBottom();
@@ -1150,8 +1161,36 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
+      // 自愈去重：同一条用户消息后若出现内容一模一样的多条 assistant（历史 bug 遗留数据），只保留最早一条
+      const seenReply = new Set<string>();
+      const deduped: ChatEntry[] = [];
+      let removed = 0;
+      for (const e of prev) {
+        if (e.role === "assistant" && !e.failed && !e.proactive && !e.transfer && !e.location && !e.order) {
+          const sig = `${e.content}|${e.story ? "s" : ""}`;
+          if (seenReply.has(sig)) {
+            removed++;
+            continue;
+          }
+          seenReply.add(sig);
+        } else {
+          seenReply.clear();
+        }
+        deduped.push(e);
+      }
+      if (removed) console.warn(`[reply] settle heal dedupe char=${charId} removed=${removed}（清理历史重复回复）`);
+      const base = removed ? deduped : prev;
       // 只标记本次新产出的回复为剧情内容：历史消息的 story 标记原样保留（记忆互通）
-      const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
+      const kept = base.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
+      // 幂等防重复：该触发消息之后已存在 assistant 回复则不再追加（流式期间兜底重发曾导致同一条落库两遍）
+      if (reply != null) {
+        const uid = base.findIndex((e) => e.id === userMsgId);
+        if (uid >= 0 && base.slice(uid + 1).some((e) => e.role === "assistant")) {
+          console.warn(`[reply] settle dedupe char=${charId} msg=${userMsgId}（该消息已有回复，丢弃重复落库）`);
+          if (removed) localStorage.setItem(key, JSON.stringify(deduped));
+          return;
+        }
+      }
       const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}), ...(mcpNote ? { mcpNote } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
@@ -1320,7 +1359,15 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     autoTimer.current = window.setTimeout(() => {
       const cur = stateRef.current.log;
       const l = cur[cur.length - 1];
-      if (l && l.role === "user" && !cur.some((e) => e.role === "assistant" && e.at > l.at)) generate();
+      // 兜底补发前必须确认上一条请求真的结束了：流式期间 pending=false 但请求仍在飞，直接 generate 会重复落库
+      if (l && l.role === "user" && !cur.some((e) => e.role === "assistant" && e.at > l.at)) {
+        if (active?.id && inflightRef.current.has(active.id)) {
+          console.warn(`[reply] fallback skipped char=${active.id} msg=${l.id}（上一条仍在飞行中，防重复）`);
+          return;
+        }
+        console.log(`[reply] fallback fire char=${active?.id} msg=${l.id}`);
+        generate();
+      }
     }, wait);
     return () => {
       if (autoTimer.current) clearTimeout(autoTimer.current);

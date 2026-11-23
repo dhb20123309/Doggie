@@ -106,6 +106,8 @@
 
 - **MCP 握手协议头与可观测性（第81轮，"安全检查显示读取配置失败"）**：rpcDirectProbe 补 MCP-Protocol-Version 请求头（initialize 协商成功后才带，符合规范）；每步 rpc →/← 打日志（method、HTTP 状态、content-type 前缀），initialize 被拒 console.warn，inspectSource url 分支打 `[mcp-remote] inspect rpc path ok= reason=`。跨域被浏览器拦截时 fetch 抛 TypeError→reason 含"网络握手失败"；若最终仍走 mcp.json 兜底则报"读取配置失败（HTTP xxx）"——用户回报需看具体红字/控制台日志定位。
 
+- **远程 MCP 手动登记通道（第82轮，Galatea 仍连不上→根因确诊）**：Galatea 官方只支持 Claude/GPT/Gemini 网页连接器与本地 IDE token 两类白名单环境，且 MCP 握手必须带自定义头触发 CORS 预检——第三方自建网页应用无法直连，继续修握手细节无意义。方案改为双通道：①remote-mcp.ts addManualServer（仅 validateMcpUrl+stripUrlSecrets，不发网络请求；RemoteMcpServer.manual=true 标记，工具清单由用户按服务方文档逐个登记写进 toolCache，上限40）+ setManualTools（面板增删后更新缓存）+ buildCurlCommand（tools/call JSON-RPC curl，token 过 CURL_ARG_RE 白名单才内联、否则占位符，日志只打 tokenInline 布尔）；②inspectSource/rpcDirectProbe 失败原因人话化（TypeError→"浏览器无法直连该服务（跨域/DNS）…可改用手动添加"；HTTP 404→"该地址下没有 mcp.json"）。RemoteMcpPanel：「手动添加服务」折叠表单（名称/认证方式/端点/密钥 + TOOL_TEMPLATES 快捷模板4个 + 工具草稿行 name/desc/risk/private + 加入清单）；服务卡对 manual 服务显示「手动」徽章+编辑工具内联列表；所有服务挂「复制调用指令」（clipboard.writeText，成功 notice 提醒含密钥勿外发）。关键日志 [mcp-remote] manual installed/tools updated/curl command built/inspect manifest fetch failed/rpc handshake threw。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

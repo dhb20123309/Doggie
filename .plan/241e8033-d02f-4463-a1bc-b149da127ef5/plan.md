@@ -2,84 +2,86 @@
 
 ## 一、概述
 
-修复与增强三件事：
+新增「建群」功能：用户可把多个角色拉进群聊，在群里同时与她们对话、推进剧情；每个角色在群里说的话、你说的话都会同步进该角色的私聊记忆——群里聊过的事，回到私聊她记得；私聊里发生的事，群里她也知道。
 
-1. **进会话默认停在最新消息**：点进对话界面时消息列表应自动滚到底部（上一次聊到的地方），不需要用户手动往下滑。
-2. **世界书植入核实与可视化**：确认世界书内容确实拼进了发给 API 模型的 system prompt，并解释"为什么感觉没体现"，同时把注入情况变得可见可验证。
-3. **多选一键删除**：世界书管理工具条在「改为全局/改为局部」旁新增「删除选中」，带二次确认。
+## 二、现状分析（Explore 结论）
 
-## 二、现状分析（Explore + 定点阅读结论）
+### 受影响文件全清单
 
-### 问题①：进入会话不滚动
+| 文件绝对路径 | 现状与关联点 |
+|---|---|
+| `/home/project/src/components/RoleChatApp.tsx` | L2301-2398 ConversationList 仅枚举 characters[]；L905-1170 requestReply/settleReply 硬编码单 charId；L1397-1494 fireOne 主动消息调度（20s interval、跳过 storyMode）；L2498-2572 AssistantRow 固定单头像；L177-193 进入会话 log 对齐 effect |
+| `/home/project/src/lib/chat-store.ts` | L203 usePersisted；L253 useChatLog(charId)→vp-phone:rolechat-log:{charId}；L287 readLastEntry；L263 clearChatLog |
+| `/home/project/src/lib/chat-types.ts` | ChatEntry{id,role,content,at,...} 无发送者标识；Character 含 storyMode/blocked/alias |
+| `/home/project/src/lib/types.ts` | ScreenId 联合类型（无 groupchat，本方案不新增 screen，复用 rolechat 内 view） |
+| `/home/project/src/lib/companion-store.ts` | L200-296 Theater SCRIPTS 静态多人剧本——仅作多人轮次编排文案参照，不复用其数据 |
+| `/home/project/src/components/PhoneShell.tsx` | 路由分发保持不动（群聊在 RoleChatApp 内部视图，不加新 ScreenId） |
 
-- `src/components/RoleChatApp.tsx` L870-873：`scrollBottom()` 用 `requestAnimationFrame` + `scrollTo({ behavior: "smooth" })`。
-- 全文 11 处 `scrollBottom()` 调用（L384/578/637/702/739/1001/1029/1155/1232/1245/1273/1292）全部发生在**发消息/落库/加载剧情**等动作里；**没有任何一处是"进入会话（view 切到 chat / activeId 切换 / log 从 localStorage 恢复完成）时"触发的**。这就是每次点进会话都停在中上部、要手动下滑的直接根因。
-- 加重因素：开场白档案卡（OpenerCard）默认展开撑高内容、图片气泡懒加载后高度变化，即使有滚动也需等内容稳定后二次校正；smooth 行为在容器高度未定时会被截断。
+### 关键机制确认
 
-### 问题②：世界书是否真的喂给了模型
-
-链路逐环核实（结论：**代码上确实植入了**）：
-
-1. `src/components/RoleChatApp.tsx` L807-809 `buildSys`：`getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? [])` → `buildWorldSectionV2(activeBooks, recentText, unlocked)` 得 `worldText`。
-2. L828（剧情分支）与 L855（私聊分支）均把 `worldText` 拼进 system 字符串。
-3. L895 requestReply：`sysPrompt = buildSys(...)`；L960 私聊 messages[0] = `{ role:"system", content: sysPrompt + transferCtx + richCtx + mcpCtx }`；剧情分支同样含 worldText。fireOne 主动消息 L1341 `buildSys(ch, false, ...)` 走私聊分支也含。→ **发送请求体第一句 system 里就有【世界设定】段**。
-4. `src/lib/worldbook.ts` L30-31：`scope==="global"` 全角色生效；`local` 必须角色设定页勾选绑定（`boundWorldBookIds`）。
-5. L116-118 深度分层：`depth=0` 常驻全文；**`depth=1`（默认值）只有触发词命中最近消息才输出全文**（L115 子串或 ≥2 字公共片段匹配）；`depth=2` 只进目录、AI 申请 `[查设定:名]` 才展开。
-
-**"植入没体现"的三个真实原因**（非 bug，是机制+可见性问题）：
-- a) 导入条目默认 `depth=1`（触发式），聊天里没出现触发词就永远不进 system——用户以为注入了其实没有；
-- b) `local` 条目没在角色设定页绑定该角色，直接被过滤掉；
-- c) 协议明令"不要复述或提及这是设定"，模型遵守后用户看不到任何痕迹，无从验证。
-
-现有佐证日志：`[worldbook] section resident=x triggered=y unlocked=z catalog=n`（worldbook.ts L136）与 `[reply] start … sysLen=`（RoleChatApp L987），但界面上不可见。
-
-### 问题③：多选工具栏现状
-
-- `src/components/WorldBookApp.tsx` L56-57：`managing` + `sel: Set<string>`；L76-80 `applyScope(scope)` 批量改 scope 并清空选择；L163-199 工具条 JSX（全选/改为全局/改为局部/清空选择）。
-- 单条删除已有模式：L59-62 `save({ ...wb, __del: true })` → `prev.filter(b => b.id !== wb.id)`。
-- 项目已有 `@/components/ui/alert-dialog.tsx` 可作二次确认。
+- 记忆存储天然互通的前提：所有会话都是 `ChatEntry[]`，人设注入走 `buildSys(ch)`，模型请求历史走 `toHist(entries)`。
+- 转账/定位/外卖/MCP 标记消化、OOC 过滤、复读检测、流式输出都在 requestReply 主链路内，群聊复用同一链路即可继承全部能力。
+- 通知横幅 emitNotify 按 charId 定位会话，群聊消息需带群 id 直达。
 
 ## 三、方案设计
 
-### ① 进入会话自动滚到底
+### 核心决策：独立群 log + 私聊双写镜像（记忆双向同步）
 
-RoleChatApp 新增 effect：依赖 `[view, active?.id]`，当 `view === "chat"` 时用**瞬时滚动**（behavior:"auto"，避免 smooth 被内容增长截断）滚到底，并在 300ms 后（开场白卡/图片渲染完成后）再校正一次；打日志 `[chat] enter scroll bottom char=… len=…`。为不影响流式输出的连续滚动体验，仅"进入会话"这一时机用瞬时定位。
+- **群聊记录**存 `vp-phone:groupchat-log:{groupId}`（GroupEntry = ChatEntry + senderId），群界面只读这份，干净可控。
+- **记忆同步（群→私）**：群里每条消息落库的同时，向每位成员的私聊 log 追加一条"镜像条目"——assistant 消息以该角色第一人称原样写入她的私聊（她说过什么自己记得）；user 消息写成 `[群聊] 你在「群名」说：…` 前缀条目；其他角色的话写成 `[群聊] ${名字}说：…` 第三人称旁白条目。私聊 toHist 现有 fmt 原样带出这些文本，模型自然理解那是共同经历。
+- **记忆同步（私→群）**：喂群聊模型时，除群历史外，为每个在场角色额外拼接其私聊最近 N 条摘要（`【你和对方最近的私聊】`锚点），保证群里也能接住私聊话题。零迁移、零破坏：私聊 log 结构不变，只是多了几条可读的镜像消息。
+- **备选对比**：曾考虑"群聊直接合并读取各成员私聊 log 展示"——被否，因为会出现同一句话重复渲染、无法表达"谁对谁说的"场景，且清空私聊会连带毁群史。
 
-实现细节：
-- 复用 listRef；effect 内 `requestAnimationFrame(() => listRef.current?.scrollTo({ top: scrollHeight }))` + `setTimeout(300)` 二次校正（cleanup 清 timer）。
-- 若 log 尚未从存储恢复完（usePersisted 同步读取，首帧即有数据），无需额外等待。
+### 发言人编排（剧情发展引擎）
 
-### ② 世界书注入可视化 + 降低"未命中"困惑
+- 每轮由你（用户）发消息触发：系统按"点名优先，否则自动轮换"选 1~2 位在场角色依次回复。
+- **@点名**：输入含某成员名字（displayName/alias 匹配）则该角色必回；无人被点名时按 least-recently-spoken 轮换。
+- **角色互聊**：每次回复后小概率（约 35%）追加"另一位成员接话"一轮——system 里给接话者【当前情境】+对方刚说的话，制造哥哥弟弟争宠、互相拆台这类剧情推进。
+- 每人回复都走完整既有链路：buildSys(该角色)+群专属协议 GROUP_PROTOCOL（多人场景文体：第三人称叙述可选、禁止替别人说话、可引用群内公开信息）→ digest 序列（转账/定位/外卖/MCP/表情/OOC/复读）→ settleGroupReply。
+- 群内也支持剧情模式开关（整群叙事体，一次一段而非碎句）。
 
-- **诊断日志增强**（worldbook.ts buildWorldSectionV2）：现有日志追加未触发条目名单与各自关键词，形如 `[worldbook] miss=<名字(关键词)>…`，控制台可直接核对为何某条没进 system。
-- **角色编辑页提示保持现状**（已有说明文案），不改交互。
-- **可选优化（纳入本次）**：ImportPanel 导入档位文案已含深度说明，不动。
-- 回复用户疑问的结论会写进交付总结：世界书确实已接入 API（system 第一段），"没体现"多为 depth=1 未命中触发词或 local 未绑定。
+### UI 与入口
 
-### ③ 多选一键删除
+- **会话列表混排**：ConversationList 行数据改为 `characters ∪ groups` 统一按最后消息时间排序；群条目显示多头像堆叠（前3个成员 Avatar 错位叠加）+ 群名 + 预览"[群名] 周晨砚：…"；未读角标沿用 chat-read:v1 水位（key 用 groupId）。
+- **建群流程**：列表顶栏加「+ 建群」按钮 → 弹层：群名输入（默认"和 XX、XX 的小群"）+ 成员多选（checkbox 卡片，已拉黑角色置灰不可选）→ 创建即进群，首条系统提示"你创建了群聊「…」"。
+- **群聊天页**：复用 chat 视图骨架——顶栏返回+群名+成员头像横排（点开成员速览）；消息行 assistant 显示各自头像+名字（小字灰色）；输入栏保留图片/转账/定位/表情按钮（转账需先选收款人，简化为首个被 @ 成员或弹出选择）。
+- **群管理**：顶栏菜单：改名、添加/移除成员、解散群（清群 log，镜像条目保留在私聊）。
+- **主动消息兼容**：fireOne 保持只针对私聊角色；群聊不做不请自来（避免多人群刷屏），后续可迭代。
 
-WorldBookApp：
-- 新增 `deleteSelected()`：仿 applyScope，`setBooks(prev => prev.filter(b => !sel.has(b.id)))`，日志 `[worldbook] batch delete count=N`，清空 sel。
-- 工具条在「改为局部」后加 rose 色「删除」按钮（Trash2 图标，disabled={!sel.size}）。
-- 点击先弹 AlertDialog 确认（标题"删除选中的 N 条世界书？"，说明"删除后不再注入模型，不可恢复"，取消/删除两键）；确认后执行。
+## 四、实现步骤
 
-## 四、涉及文件清单
+1. **数据层** `src/lib/group-chat-store.ts`（新建）：GroupChat{id,name,memberIds,createdAt,storyMode?}；useGroups()（vp-phone:groups:v1）；useGroupLog(groupId)（复用 usePersisted）；appendGroupEntry + mirrorToMembers(groupId, entry)（双写镜像，防重入标记 mirroredFrom）；readGroupLast(groupId) 供列表排序。
+2. **契约扩展** `src/lib/chat-types.ts`：ChatEntry 加 `senderId?: string`、`groupTip?: boolean`（系统提示行）、`mirroredFrom?: string`（镜像来源群 id，幂等去重）。
+3. **群聊视图** `src/components/GroupChatView.tsx`（新建，紧耦合子组件同文件内联）：群消息渲染（头像+名字行、镜像无关）、发送→pickSpeakers→逐人 requestGroupReply（复用 ai-api chatCompletion/chatStream 与 worldbook/meme 注入）、digest 精简版（转账/定位/MCP 标记保留，钱包收款人=发言者）、建群弹层与群管理弹层。
+4. **接线** `RoleChatApp.tsx`：view 增加 "group"（携带 activeGroupId state）；ConversationList 混排群条目与建群按钮；unreadCount 扩展支持 group key；emitNotify 群消息 tag:"群聊"。
+5. **私聊侧承接记忆**：`chat-store.ts` readLastEntry 无需改；`RoleChatApp` 私聊 toHist fmt 对 `[群聊]` 前缀镜像条目正常输出文本即可（零改动验证）；镜像条目渲染为普通气泡但带小字"来自群聊「…」"角标（entry.mirroredFrom 存在时）。
+6. **样式**：styles.css 复用 glass/bubble-cream/msg-time，多头像堆叠用 -ml-2 z-index 错位，fade-up 入场。
 
-| 文件绝对路径 | 改动 |
+## 五、涉及文件清单
+
+| 文件 | 类型 |
 |---|---|
-| `/home/project/src/components/RoleChatApp.tsx` | 新增进入会话滚动 effect（view/activeId 变化时瞬时滚底 + 300ms 校正，带 [chat] enter scroll 日志） |
-| `/home/project/src/lib/worldbook.ts` | buildWorldSectionV2 日志追加 miss 明细（未命中的触发式条目名+关键词） |
-| `/home/project/src/components/WorldBookApp.tsx` | 工具条加「删除」按钮 + AlertDialog 二次确认 + deleteSelected()（[worldbook] batch delete 日志） |
+| `/home/project/src/lib/group-chat-store.ts` | 新建（群数据层+镜像双写） |
+| `/home/project/src/components/GroupChatView.tsx` | 新建（群聊天页+建群/群管理弹层，内联子组件） |
+| `/home/project/src/lib/chat-types.ts` | 修改（senderId/groupTip/mirroredFrom） |
+| `/home/project/src/components/RoleChatApp.tsx` | 修改（view="group" 分支、ConversationList 混排、建群入口、私聊镜像角标渲染） |
+| `/home/project/src/styles.css` | 微调（头像堆叠辅助类，如需） |
 
-## 五、验收标准
+## 六、验收标准
 
-1. 从会话列表/桌面点进一个已有大量历史的对话，界面直接停在最底部最新消息处，无需手动下滑；来回切换两个会话均正确。
-2. 打开浏览器控制台发一条消息，能看到 `[worldbook] section resident/triggered/...` 与 `[reply] start … sysLen=`；把某 local 条目绑定角色并把某条目设为常驻后，sysLen 明显增大、miss 日志列出未命中条目——证明注入链路真实有效。
-3. 世界书页进入管理模式→勾选若干条目→点「删除」→弹确认框→确认后条目消失且刷新后不复现；取消则不删；全选删除也可用。
-4. `pnpm run build` + `npx tsc --noEmit` 零错误，dev 预览正常。
+1. 会话列表点「+ 建群」→ 勾选周晨砚、周风砚 → 创建成功进入群聊，列表出现双头像堆叠的群条目。
+2. 群里发"你们俩谁先去洗澡"→ 两位角色按性格先后接话、互相拆台，@周风砚 则他必回；开启群剧情后变为一段叙事推进。
+3. 回到周晨砚私聊，能看到群里她说过的话（第一人称）和你说的话（[群聊] 前缀），且她回复时会主动提及群里刚发生的事（如"你刚才在群里还说我…"）；反过来在私聊说过的事，群里她也能自然提起。
+4. 群里发的转账卡片收款人是被 @/发言的角色，钱包流水正确记到该 charId；MCP 标记照常执行并留执行记录。
+5. 移除成员/解散群：群 log 处理正确，私聊镜像不删；旧存档（无 groups key）首次打开不报错。
+6. build + tsc 零错误，dev 预览截图验收列表混排与群聊界面。
 
-## 六、风险与兼容
+## 七、风险评估
 
-- 进入会话瞬时滚动不影响消息流内的 smooth 滚动体验（只在 view/charId 切换时机触发）。
-- 删除为不可恢复操作，故强制 AlertDialog 确认；不影响热梗世界书（预置 300 条独立存储，不在本列表）。
-- 世界书机制本身零改动（scope/depth/触发逻辑原样保留），只加日志与 UI，不会改变现有 AI 行为。
+| 风险 | 缓解 |
+|---|---|
+| 镜像双写导致私聊 log 膨胀/循环复制 | mirroredFrom 幂等标记：同一群同一 entry id 只镜像一次；镜像条目自身不再二次镜像 |
+| 多角色轮流回复 token 翻倍 | 每轮最多 2 人次回复；私聊摘要注入限最近 6 条且截断 |
+| 模型替他人说话/串人格 | GROUP_PROTOCOL 明令"只扮演你自己，不许代写他人台词"；接话轮单独请求天然隔离 |
+| 清空私聊记录误删群记忆 | 群 log 独立存储，clearChatLog 不动群；解散群反向亦然 |
+| 会话列表排序逻辑回归 | 混排仅在 rows 构造处合并，点击分流 onSelectChar/onSelectGroup 两条独立路径 |

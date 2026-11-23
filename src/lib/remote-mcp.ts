@@ -256,6 +256,199 @@ export function parseManifest(text: string): { ok: boolean; manifest?: McpManife
   return { ok: true, manifest: mf };
 }
 
+/* ---------- MCP 标准握手（Streamable HTTP：initialize → tools/list） ---------- */
+
+const PROTOCOL_VERSION = "2025-03-26";
+
+/** 从端点推导 OAuth issuer（RFC 8414：https://host/.well-known/oauth-authorization-server） */
+function oauthIssuerFromEndpoint(endpoint: string): string | null {
+  try {
+    const u = new URL(endpoint);
+    if (u.protocol !== "https:") return null;
+    return `${u.origin}/.well-known/oauth-authorization-server`;
+  } catch {
+    return null;
+  }
+}
+
+/** 按 RFC 8414 依次探测授权服务器元数据（含 MCP 路径后缀变体），命中即返回 */
+async function discoverOAuthMeta(endpoint: string, signal?: AbortSignal): Promise<Partial<OAuthParams> | null> {
+  const candidates: string[] = [];
+  const derived = oauthIssuerFromEndpoint(endpoint);
+  if (derived) {
+    candidates.push(derived);
+    try {
+      const u = new URL(endpoint);
+      const path = u.pathname.replace(/\/+$/, "");
+      if (path && path !== "/") {
+        candidates.push(`${u.origin}${path}/.well-known/oauth-authorization-server`);
+        // issuer 只到第一段路径（如 https://host/galatea）
+        const firstSeg = path.split("/")[1];
+        if (firstSeg) candidates.push(`${u.origin}/${firstSeg}/.well-known/oauth-authorization-server`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const url of candidates) {
+    if (!validateMcpUrl(url).ok) continue;
+    try {
+      const res = await fetch(url, { redirect: "manual", signal });
+      if (!res.ok) continue;
+      const j = (await res.json().catch(() => null)) as { authorization_endpoint?: string; token_endpoint?: string; registration_endpoint?: string; scopes_supported?: string[] } | null;
+      if (!j?.authorization_endpoint || !j?.token_endpoint) continue;
+      console.log(`[mcp-remote] oauth meta discovered via ${new URL(url).pathname}`);
+      return { authorizeUrl: j.authorization_endpoint, tokenUrl: j.token_endpoint };
+    } catch {
+      /* 下一候选 */
+    }
+  }
+  return null;
+}
+
+interface RpcInit {
+  protocolVersion?: string;
+  serverInfo?: { name?: string; title?: string };
+  instructions?: string;
+}
+
+/**
+ * 直连 MCP 端点完成 initialize + tools/list。
+ * 兼容 JSON 响应与 SSE（text/event-stream）帧；401 时自动探测 OAuth 元数据供 UI 引导授权。
+ */
+async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortSignal): Promise<{ ok: boolean; reason?: string; init?: RpcInit; tools?: unknown[]; unauthorized?: boolean; oauthHint?: Partial<OAuthParams> }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  const post = async (method: string, params: unknown, id: number) => {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+      signal,
+    });
+    return res;
+  };
+  /** 响应体可能是 JSON，也可能是 SSE 帧（data: {...}），统一解析出 JSON-RPC message */
+  const parseBody = async (res: Response): Promise<{ result?: unknown; error?: { message?: string; code?: number } } | null> => {
+    const text = await res.text();
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("text/event-stream")) {
+      let last: unknown = null;
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          last = JSON.parse(line.slice(5).trim());
+        } catch {
+          /* 忽略非 JSON 帧 */
+        }
+      }
+      return (last as { result?: unknown; error?: { message?: string } }) ?? null;
+    }
+    try {
+      return JSON.parse(text) as { result?: unknown; error?: { message?: string } };
+    } catch {
+      return null;
+    }
+  };
+  try {
+    let res = await post("initialize", { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "vp-phone", version: "1.0" } }, 1);
+    if (res.status === 401 || res.status === 403) {
+      const unauthorized = res.status === 401;
+      const oauthHint = unauthorized ? (await discoverOAuthMeta(endpoint, signal)) ?? undefined : undefined;
+      return { ok: false, unauthorized, oauthHint, reason: unauthorized ? "该服务需要 OAuth 登录授权后才能获取工具清单" : `服务端拒绝访问（HTTP ${res.status}）` };
+    }
+    const initMsg = await parseBody(res);
+    if (!res.ok || !initMsg || initMsg.error) {
+      return { ok: false, reason: `握手失败：${initMsg?.error?.message ?? `HTTP ${res.status}`}` };
+    }
+    const init = initMsg.result as RpcInit;
+    // notifications/initialized 尽力通知（失败不阻断）
+    await post("notifications/initialized", {}, 2).catch(() => undefined);
+    const listRes = await post("tools/list", {}, 3);
+    if (listRes.status === 401 || listRes.status === 403) {
+      const oauthHint = listRes.status === 401 ? (await discoverOAuthMeta(endpoint, signal)) ?? undefined : undefined;
+      return { ok: true, init, tools: [], unauthorized: listRes.status === 401, oauthHint, reason: "已连接但工具清单需授权后可见" };
+    }
+    const listMsg = await parseBody(listRes);
+    if (!listRes.ok || !listMsg || listMsg.error) {
+      return { ok: true, init, tools: [], reason: `工具清单读取失败：${listMsg?.error?.message ?? `HTTP ${listRes.status}`}` };
+    }
+    const tools = ((listMsg.result as { tools?: unknown[] })?.tools ?? []) as unknown[];
+    return { ok: true, init, tools };
+  } catch (e) {
+    if (signal?.aborted) return { ok: false, reason: "已取消" };
+    return { ok: false, reason: e instanceof Error ? `网络握手失败：${e.message}` : "网络握手失败" };
+  }
+}
+
+/** tools/list 原始项 → McpToolMeta（风险分级启发式：写操作=高危、涉私读取=中危、其余低风险） */
+function normalizeRpcTools(raw: unknown[]): McpToolMeta[] {
+  return raw.slice(0, 40).map((t0) => {
+    const t = t0 as { name?: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } };
+    const desc = String(t?.description ?? "").slice(0, 120);
+    const name = String(t?.name ?? "未命名工具").slice(0, 48);
+    const destructive = Boolean(t?.annotations?.destructiveHint) || /(发送|写入|删除|转账|下单|创建|修改|send|write|delete|create|update|post)/i.test(name);
+    const isPrivate = /私人|私信|消息|文件|邮箱|通讯录|private|message|email|inbox|file/i.test(desc + name);
+    const risk: McpToolMeta["risk"] = destructive ? "high" : isPrivate ? "medium" : "low";
+    return { name, description: desc, risk, private: isPrivate };
+  });
+}
+
+/**
+ * 标准 MCP 端点直连安装预览：initialize → tools/list。
+ * 服务端 401 时自动探测 OAuth 授权服务器元数据；找不到 clientId 则留空由用户在面板补填后发起授权。
+ */
+export async function inspectByRpc(endpointRaw: string, signal?: AbortSignal): Promise<{ ok: boolean; preview?: InstallPreview; reason?: string }> {
+  const v = validateMcpUrl(endpointRaw);
+  if (!v.ok) return { ok: false, reason: v.reason ?? "地址无效" };
+  const endpoint = stripUrlSecrets(endpointRaw);
+  const probe = await rpcDirectProbe(endpoint, undefined, signal);
+  const host = v.host as string;
+  const name = (probe.init?.serverInfo?.title || probe.init?.serverInfo?.name || host.split(".")[0]).slice(0, 30);
+  if (probe.ok) {
+    const tools = normalizeRpcTools(probe.tools ?? []);
+    const warnings: string[] = [];
+    let oauth: OAuthParams | undefined;
+    let auth: AuthKind = "none";
+    if (probe.unauthorized || !tools.length) {
+      const hint = probe.oauthHint;
+      if (hint?.authorizeUrl && hint?.tokenUrl) {
+        // OAuth 服务：clientId 未知，安装后在面板「去授权」处补填（Galatea 类页面会提供 web 连接器 client id）
+        oauth = { authorizeUrl: hint.authorizeUrl, tokenUrl: hint.tokenUrl, clientId: "" };
+        auth = "oauth";
+        warnings.push("该服务使用 OAuth 登录授权：安装后点「去授权」，如平台要求 client id 请在授权表单里填写对应值");
+      } else if (probe.unauthorized) {
+        warnings.push("该服务需要认证但未能自动发现 OAuth 授权信息，可尝试改用 GitHub 仓库/配置清单方式导入");
+      }
+    }
+    if (!tools.length && !probe.unauthorized) warnings.push("握手成功但该服务暂未返回工具清单，可能需授权后才可见");
+    console.log(`[mcp-remote] rpc inspect ${host} tools=${tools.length} auth=${auth}`);
+    return {
+      ok: true,
+      preview: { sourceLabel: host, kind: "url", name, endpoint, host, auth, oauth, tools, warnings },
+    };
+  }
+  // 401 且拿到 OAuth 线索也允许安装（先装后授权）
+  if (probe.unauthorized && probe.oauthHint?.authorizeUrl && probe.oauthHint?.tokenUrl) {
+    console.log(`[mcp-remote] rpc inspect ${host} unauthorized→oauth install`);
+    return {
+      ok: true,
+      preview: {
+        sourceLabel: host,
+        kind: "url",
+        name,
+        endpoint,
+        host,
+        auth: "oauth",
+        oauth: { authorizeUrl: probe.oauthHint.authorizeUrl, tokenUrl: probe.oauthHint.tokenUrl, clientId: "" },
+        tools: [],
+        warnings: ["该服务需 OAuth 登录后才能列出工具：已按授权模式安装，请在服务列表点「去授权」（如需 client id 请填平台提供的值）"],
+      },
+    };
+  }
+  return { ok: false, reason: probe.reason ?? "标准 MCP 握手失败" };
+}
+
 /* ---------- 安装预览（步骤 3：域名/工具/权限/认证） ---------- */
 
 export interface InstallPreview {
@@ -277,6 +470,11 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
   if (!cand) {
     const v = validateMcpUrl(input);
     return { ok: false, reason: v.ok ? "仅支持 https 服务地址或 GitHub 仓库链接" : v.reason ?? "地址无效" };
+  }
+  // 直接粘贴 MCP 端点（非仓库、非清单 URL）：先走标准 initialize/tools/list 握手，失败再退回 mcp.json
+  if (cand.kind === "url") {
+    const direct = await inspectByRpc(input, signal);
+    if (direct?.ok) return direct;
   }
   let lastErr = "未找到约定的 mcp.json 配置清单";
   for (const url of cand.urls) {

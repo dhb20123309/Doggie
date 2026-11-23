@@ -133,8 +133,9 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
       else setNotice("已打开系统浏览器授权页（PKCE + state），完成授权后回到本页自动接收结果");
       refresh();
     } else {
+      // 缺 clientId（标准 MCP 端点自动发现时常见）：展开表单让用户填平台提供的 client id
       setOauthFor(s.id);
-      setOauthForm({ authorizeUrl: "", tokenUrl: "", clientId: "", scope: "" });
+      setOauthForm({ authorizeUrl: s.oauth?.authorizeUrl ?? "", tokenUrl: s.oauth?.tokenUrl ?? "", clientId: s.oauth?.clientId ?? "", scope: s.oauth?.scope ?? "" });
     }
   };
 
@@ -158,7 +159,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
           </button>
         </div>
         <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
-          支持粘贴 https 服务地址或 GitHub 仓库链接。系统只读取仓库里明确约定的 mcp.json 配置清单，绝不下载或执行任何仓库代码。
+          支持直接粘贴 https MCP 服务地址（自动完成标准握手并读取工具清单），或 GitHub 仓库链接（只读约定的 mcp.json，绝不下载执行仓库代码）。
         </p>
 
         {/* 输入 + 检查 */}

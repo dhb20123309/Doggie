@@ -1,20 +1,25 @@
-// 语音通话 App（步骤A）：按键启停录音 + 时长/波形 + 试听与下载；B/C/D 后续在此链路上叠加
+// 语音通话 App（步骤A+B+C+D）：按键启停录音 → MiniMax STT 转文字 → 角色生成通话回复 → MiniMax TTS 播放（角色绑定音色）
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, Download, Mic, PhoneOff, Play, Square } from "lucide-react";
+import { ChevronLeft, Download, Loader2, Mic, PhoneOff, Play, RotateCcw, Square, Volume2, VolumeX } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
-import { displayName, type Character } from "@/lib/chat-types";
-import { useActiveCharId, useCharacters } from "@/lib/chat-store";
+import { isConfigured } from "@/lib/types";
+import { displayName, splitBubbles, type Character } from "@/lib/chat-types";
+import { useActiveCharId, useCharacters, useWorldBooks, usePersisted } from "@/lib/chat-store";
 import { createRecorder, MAX_RECORD_SEC, micErrorMessage, type RecordedAudio } from "@/lib/recorder";
+import { transcribeRecording, type SttResult } from "@/lib/stt";
+import { requestCallReply, commitCallExchange } from "@/lib/call-reply";
+import { loadVoiceConfig, synthesizeSpeech, voiceReady } from "@/lib/tts";
 
 interface Props {
   config: AiConfig;
   onBack: () => void;
 }
 
-export function VoiceCallApp({ onBack }: Props) {
+export function VoiceCallApp({ config, onBack }: Props) {
   const characters = useCharacters()[0];
   const [activeId, setActiveId] = useActiveCharId(characters.map((c) => c.id));
   const ch: Character | undefined = characters.find((c) => c.id === activeId) ?? characters[0];
+  const books = useWorldBooks()[0];
 
   const recRef = useRef<ReturnType<typeof createRecorder> | null>(null);
   const [recording, setRecording] = useState(false);
@@ -24,6 +29,19 @@ export function VoiceCallApp({ onBack }: Props) {
   const [take, setTake] = useState<RecordedAudio | null>(null);
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // ===== 步骤B：STT 转写状态机 idle → running → ok / fail =====
+  const [sttState, setSttState] = useState<"idle" | "running" | "ok" | "fail">("idle");
+  const [sttResult, setSttResult] = useState<SttResult | null>(null);
+  const [sttError, setSttError] = useState("");
+  // ===== 步骤C：通话往来（你说 + TA 回），仅内存展示，落库走 rolechat-log 与聊天页记忆互通 =====
+  const [callTurns, setCallTurns] = useState<{ you: string; reply: string[] | null; pending: boolean }[]>([]);
+  const apiRetryRef = useRef(false);
+  // ===== 步骤D：TA 的回复自动送 MiniMax TTS 合成播放（角色绑定音色优先）=====
+  const [ttsState, setTtsState] = useState<"idle" | "synth" | "playing">("idle");
+  const [ttsError, setTtsError] = useState("");
+  const [autoSpeak, setAutoSpeak] = usePersisted<boolean>("vp-phone:call-autospeak:v1", true);
+  const speakUrlRef = useRef<string | null>(null);
+  const speakGenRef = useRef(0);
 
   // 秒表（仅录音中走字）
   useEffect(() => {
@@ -32,10 +50,12 @@ export function VoiceCallApp({ onBack }: Props) {
     return () => clearInterval(t);
   }, [recording]);
 
-  // 离开页面释放麦克风
+  // 离开页面释放麦克风与播报音频
   useEffect(() => {
     return () => {
       recRef.current?.cancel();
+      speakAudioRef.current?.pause();
+      if (speakUrlRef.current) URL.revokeObjectURL(speakUrlRef.current);
       if (playingUrl) URL.revokeObjectURL(playingUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,6 +64,7 @@ export function VoiceCallApp({ onBack }: Props) {
   const startRec = async () => {
     setError("");
     stopPlayback();
+    stopSpeakRef.current();
     setTake(null);
     const rec = createRecorder();
     recRef.current = rec;
@@ -76,8 +97,115 @@ export function VoiceCallApp({ onBack }: Props) {
     }
     setTake(result);
     console.log(`[call-rec] take ready ${result.durationSec}s ${(result.blob.size / 1024).toFixed(0)}KB`);
+    void runStt(result);
   };
   const autoFinish = () => void finishRec();
+
+  /** 步骤B：把本段录音送去 MiniMax STT 转写 */
+  const runStt = async (audio: RecordedAudio) => {
+    setSttState("running");
+    setSttResult(null);
+    setSttError("");
+    try {
+      const r = await transcribeRecording(loadVoiceConfig(), audio, audio.samples);
+      setSttResult(r);
+      setSttState("ok");
+      void runReply(r.text);
+    } catch (e) {
+      setSttError(e instanceof Error ? e.message : String(e));
+      setSttState("fail");
+    }
+  };
+
+  /** 步骤C：把转写文本交给当前角色生成通话回复（写入 rolechat-log，聊天页同步可见） */
+  const runReply = async (text: string) => {
+    if (!ch) return;
+    if (!isConfigured(config)) {
+      setError("AI 接口还没配置好：先去设置页填接口地址、API Key 和模型名，TA 才能接电话");
+      return;
+    }
+    const turn = { you: text, reply: null as string[] | null, pending: true };
+    setCallTurns((prev) => [...prev.slice(-4), turn]);
+    apiRetryRef.current = false;
+    try {
+      const reply = await requestCallReply(config, ch, books, text);
+      commitCallExchange(ch.id, text, reply);
+      setCallTurns((prev) => prev.map((t) => (t === turn ? { ...t, reply: splitBubbles(reply), pending: false } : t)));
+      // 步骤D：自动播报（开关可关）——多条气泡拼成一段连续口语再合成
+      if (autoSpeak) startSpeakRef.current(reply.replace(/\r?\n/g, "，"));
+    } catch (e) {
+      commitCallExchange(ch.id, text, null);
+      const msg = e instanceof Error ? e.message : String(e);
+      setCallTurns((prev) => prev.map((t) => (t === turn ? { ...t, pending: false } : t)));
+      setError(`TA 没听清（回复生成失败）：${msg}`);
+      console.log(`[call-reply] fail ${msg}`);
+    }
+  };
+
+  /** 失败重试：拿上次的转写文本重新请求角色回复 */
+  const retryReply = () => {
+    if (!sttResult || apiRetryRef.current) return;
+    apiRetryRef.current = true;
+    setError("");
+    void runReply(sttResult.text);
+  };
+
+  /** 步骤D：把 TA 的回复文本送 TTS 合成并播放。音色优先级：
+   *  minimax 通道 → ch.minimaxVoiceId（角色绑定）→ vc.minimaxVoice；openai 通道 → ch.voiceId → 默认。
+   *  gen 代际号防竞态：新一段播报开始时作废旧的合成/播放结果。 */
+  const speakReply = async (text: string) => {
+    const vc = loadVoiceConfig();
+    if (!voiceReady(vc, { baseUrl: config.baseUrl, apiKey: config.apiKey })) {
+      setTtsError("语音通道还没配置好：去设置页 → 语音服务填好 Key 或聊天接口，TA 才能开口说话");
+      return;
+    }
+    const voiceId = vc.provider === "minimax" ? ch?.minimaxVoiceId?.trim() || undefined : ch?.voiceId?.trim() || undefined;
+    const gen = ++speakGenRef.current;
+    setTtsState("synth");
+    setTtsError("");
+    stopSpeakRef.current();
+    try {
+      const url = await synthesizeSpeech(vc, { baseUrl: config.baseUrl, apiKey: config.apiKey }, text, voiceId);
+      if (gen !== speakGenRef.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      speakUrlRef.current = url;
+      const a = new Audio(url);
+      speakAudioRef.current = a;
+      a.onended = () => {
+        if (gen === speakGenRef.current) setTtsState("idle");
+      };
+      setTtsState("playing");
+      await a.play();
+      console.log(`[call-tts] play provider=${vc.provider} voice=${voiceId ?? "(默认)"} chars=${text.length}`);
+    } catch (e) {
+      if (gen !== speakGenRef.current) return;
+      setTtsState("idle");
+      setTtsError(e instanceof Error ? e.message : String(e));
+      console.log(`[call-tts] fail ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const speakAudioRef = useRef<HTMLAudioElement | null>(null);
+  // ref 持有 stop/合成启动器，供 startRec / runReply 等更早声明的回调安全引用（规避函数声明顺序 TDZ）
+  const stopSpeakRef = useRef<() => void>(() => {});
+  const startSpeakRef = useRef<(text: string) => void>(() => {});
+  /** 步骤D：停止/释放 TA 播报（不影响自己录音的试听）。只走 ref 调用。 */
+  stopSpeakRef.current = () => {
+    speakGenRef.current++;
+    speakAudioRef.current?.pause();
+    speakAudioRef.current = null;
+    if (speakUrlRef.current) {
+      URL.revokeObjectURL(speakUrlRef.current);
+      speakUrlRef.current = null;
+    }
+    setTtsState("idle");
+  };
+  /** fire-and-forget 启动一段播报（runReply 自动播与"播一次"按钮共用入口） */
+  startSpeakRef.current = (text: string) => {
+    void speakReply(text);
+  };
 
   const playTake = () => {
     if (!take) return;
@@ -167,9 +295,112 @@ export function VoiceCallApp({ onBack }: Props) {
         </div>
       </section>
 
-      {/* 错误提示 */}
+      {/* 错误提示（回复失败时带重试按钮） */}
       {error && (
-        <div className="mx-4 mt-3 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-600 ring-1 ring-rose-200/70">{error}</div>
+        <div className="mx-4 mt-3 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-600 ring-1 ring-rose-200/70">
+          {error}
+          {sttState === "ok" && sttResult && !callTurns[callTurns.length - 1]?.pending && (
+            <button type="button" onClick={retryReply} className="jelly-btn ml-2 inline-flex items-center gap-1 rounded-full bg-white/85 px-2.5 py-0.5 text-[10.5px] font-medium text-rose-600 shadow-sm">
+              <RotateCcw className="size-3" />
+              重试回复
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 步骤B：转写结果区 */}
+      {take && !recording && (
+        <div className="mx-4 mt-3">
+          {sttState === "running" && (
+            <div className="glass flex items-center gap-2.5 rounded-2xl px-3.5 py-3 shadow-sm">
+              <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+              <p className="text-[11.5px] text-[oklch(0.38_0.04_80)]">正在转写这段 {take.durationSec} 秒的语音…</p>
+            </div>
+          )}
+          {sttState === "ok" && sttResult && (
+            <div className="glass rounded-2xl p-3.5 shadow-sm">
+              <div className="flex items-center gap-2 text-[10px] font-semibold tracking-wide text-[oklch(0.45_0.05_80)]">
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-600">转写成功</span>
+                <span className="ml-auto tabular-nums">置信度 {sttResult.confidence}% · 本地估算</span>
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-relaxed text-[oklch(0.28_0.04_80)]">“{sttResult.text}”</p>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/70">
+                <div className="h-full rounded-full bg-gradient-to-r from-[oklch(0.72_0.14_75)] to-[oklch(0.6_0.13_70)] transition-all duration-700" style={{ width: `${sttResult.confidence}%` }} />
+              </div>
+              <p className="mt-1.5 text-[9.5px] leading-snug text-[oklch(0.55_0.03_80)]">置信度由本地音量与有效语音占比估算（MiniMax 接口本身不返回模型置信度）· 音频 {sttResult.durationSec}s{sttResult.traceId ? ` · trace ${sttResult.traceId.slice(0, 12)}` : ""}</p>
+              {/* 步骤C：TA 的通话回复（pending → 气泡 / error 条兜底展示失败原因） */}
+              {(() => {
+                const turn = callTurns[callTurns.length - 1];
+                if (!turn || turn.you !== sttResult.text) return null;
+                if (turn.pending) {
+                  return (
+                    <div className="mt-2.5 flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2 text-[11px] text-[oklch(0.42_0.04_80)]">
+                      <Loader2 className="size-3.5 animate-spin text-primary" />
+                      {displayName(ch!)}正在思考怎么回你…
+                    </div>
+                  );
+                }
+                if (!turn.reply) return null;
+                return (
+                  <div className="mt-2.5 space-y-1.5 border-t border-white/60 pt-2.5">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[9.5px] font-semibold tracking-wide text-[oklch(0.5_0.04_80)]">{displayName(ch!)}说</p>
+                      {/* 步骤D：自动播报开关 + 合成/播放状态 */}
+                      <button
+                        type="button"
+                        onClick={() => setAutoSpeak((v) => !v)}
+                        className={`jelly-btn ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[9.5px] ${autoSpeak ? "bg-emerald-100 text-emerald-600" : "bg-white/60 text-[oklch(0.5_0.03_80)]"}`}
+                      >
+                        {autoSpeak ? <Volume2 className="size-3" /> : <VolumeX className="size-3" />}
+                        自动播报{autoSpeak ? "开" : "关"}
+                      </button>
+                      {ttsState === "synth" && (
+                        <span className="flex items-center gap-1 text-[9.5px] text-[oklch(0.5_0.04_80)]">
+                          <Loader2 className="size-3 animate-spin text-primary" />
+                          正在合成语音…
+                        </span>
+                      )}
+                      {ttsState === "playing" && (
+                        <button type="button" onClick={() => stopSpeakRef.current()} className="jelly-btn flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[9.5px] text-rose-600">
+                          <Square className="size-2.5" />
+                          停止播报
+                        </button>
+                      )}
+                      {!autoSpeak && ttsState === "idle" && (
+                        <button
+                          type="button"
+                          onClick={() => startSpeakRef.current(turn.reply!.join("，"))}
+                          className="jelly-btn flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[9.5px] text-[oklch(0.4_0.04_80)]"
+                        >
+                          <Volume2 className="size-3" />
+                          播一次
+                        </button>
+                      )}
+                    </div>
+                    {turn.reply.map((b, i) => (
+                      <div key={i} className="bubble-cream w-fit max-w-[92%] px-3 py-1.5 text-[12.5px] leading-relaxed text-[oklch(0.28_0.04_80)]">
+                        {b}
+                      </div>
+                    ))}
+                    {ttsError && (
+                      <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] leading-relaxed text-amber-700 ring-1 ring-amber-200/60">语音没放出来：{ttsError}</p>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+          {sttState === "fail" && (
+            <div className="rounded-2xl bg-rose-50 p-3.5 ring-1 ring-rose-200/70">
+              <p className="text-[11.5px] font-semibold text-rose-600">转写失败</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-rose-500">{sttError}</p>
+              <button type="button" onClick={() => take && runStt(take)} className="jelly-btn mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-white/85 px-3.5 py-1.5 text-[11px] font-medium text-rose-600 shadow-sm">
+                <RotateCcw className="size-3.5" />
+                重试转写
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* 本段录音结果 */}
@@ -180,7 +411,7 @@ export function VoiceCallApp({ onBack }: Props) {
             录音 {take.durationSec} 秒 · WAV 16kHz 单声道（{(take.blob.size / 1024).toFixed(0)} KB）
             <span className="ml-auto rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-medium text-emerald-600">格式合规</span>
           </div>
-          <p className="mt-1 text-[10px] leading-relaxed text-[oklch(0.5_0.03_80)]">下一步将把这段音频送去 MiniMax 语音转文字（STT），当前版本先支持试听与下载核对。</p>
+          <p className="mt-1 text-[10px] leading-relaxed text-[oklch(0.5_0.03_80)]">完整链路已接通：录音 → STT 转文字 → TA 生成通话回复 → MiniMax TTS 语音播报（音色跟随角色绑定）。</p>
           <div className="mt-2.5 flex gap-2">
             <button type="button" onClick={playingUrl ? stopPlayback : playTake} className="jelly-btn flex flex-1 items-center justify-center gap-1.5 rounded-full bg-white/85 py-2 text-[11.5px] font-medium text-[oklch(0.34_0.05_80)] shadow-sm">
               {playingUrl ? <Square className="size-3.5" /> : <Play className="size-3.5" />}

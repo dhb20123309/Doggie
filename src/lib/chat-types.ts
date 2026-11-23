@@ -10,6 +10,8 @@ export interface Character {
   boundWorldBookIds?: string[];
   /** 绑定的外部语音音色 id（VoiceConfig.voices 里的 id） */
   voiceId?: string;
+  /** 绑定的 MiniMax 音色 voice_id（系统/克隆音色；留空回落 VoiceConfig.minimaxVoice） */
+  minimaxVoiceId?: string;
   /** 是否允许该角色主动生成"写实日常照片"分享 */
   photoEnabled?: boolean;
   /** 主动消息开关：关闭后该角色不会不请自来 */

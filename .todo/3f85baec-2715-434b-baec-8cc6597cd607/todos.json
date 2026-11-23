@@ -1,0 +1,30 @@
+[
+  {
+    "content": "A. 麦克风权限+按键启停录音（WAV输出）+通话UI骨架",
+    "id": "a1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "B. MiniMax STT转文字（文本+置信度+分类失败原因）",
+    "id": "b1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "C. 通话上下文走角色LLM链路生成回复",
+    "id": "c1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "D. MiniMax TTS播放（角色绑定voice_id）",
+    "id": "d1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  }
+]

@@ -22,6 +22,8 @@ export interface VoiceConfig {
   minimaxModel: string;
   /** MiniMax 默认音色 voice_id，如 male-qn-qingse */
   minimaxVoice: string;
+  /** MiniMax 语音识别（ASR）模型名，官方当前仅 asr-1.0 */
+  minimaxSttModel?: string;
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {

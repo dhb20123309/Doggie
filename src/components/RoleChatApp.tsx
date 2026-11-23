@@ -95,7 +95,7 @@ import {
   PROACTIVE_LINES,
   usePersisted,
 } from "@/lib/chat-store";
-import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
+import { loadVoiceConfig, voiceReady, synthesizeSpeech, MINIMAX_VOICES } from "@/lib/tts";
 import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
@@ -1749,6 +1749,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, storyMode: v } : x)));
         }}
         onPickVoice={(vid) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, voiceId: vid } : x)))}
+        onPickMiniMaxVoice={(vid) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, minimaxVoiceId: vid } : x)))}
       />
     );
   }
@@ -3210,6 +3211,7 @@ function CharacterEditor({
   onTogglePhoto,
   onToggleStory,
   onPickVoice,
+  onPickMiniMaxVoice,
 }: {
   character: Character;
   books: WorldBook[];
@@ -3221,10 +3223,12 @@ function CharacterEditor({
   onTogglePhoto: (v: boolean) => void;
   onToggleStory: (v: boolean) => void;
   onPickVoice: (id: string) => void;
+  onPickMiniMaxVoice: (id: string) => void;
 }) {
   const [form, setForm] = useState<Character>(character);
   const fileRef = useRef<HTMLInputElement>(null);
-  const voices = loadVoiceConfig().voices;
+  const vcConfig = loadVoiceConfig();
+  const voices = vcConfig.voices;
 
   const pickFile = (file?: File) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -3373,6 +3377,40 @@ function CharacterEditor({
             音色清单在「设置 → 外部语音」维护；绑定后点消息旁的喇叭就用这个音色朗读。
             {books.length > 0 && ""}
           </p>
+          {/* MiniMax 通道音色绑定（语音通话播报用）：留空回落全局默认 minimaxVoice */}
+          {vcConfig.provider === "minimax" && (
+            <div className="space-y-1.5 border-t border-border pt-2.5">
+              <p className="text-[12px] font-medium">MiniMax 通话音色</p>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm((f) => ({ ...f, minimaxVoiceId: undefined }));
+                    onPickMiniMaxVoice("");
+                  }}
+                  className={`jelly-btn rounded-full px-2.5 py-1 text-[11px] ${!form.minimaxVoiceId ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+                >
+                  跟随默认（{vcConfig.minimaxVoice || "male-qn-qingse"}）
+                </button>
+                {[...MINIMAX_VOICES, ...(vcConfig.voices.filter((v) => v.id.includes("-") && !voices.some((o) => o.id === v.id)))]
+                  .filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i)
+                  .map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => {
+                        setForm((f) => ({ ...f, minimaxVoiceId: v.id }));
+                        onPickMiniMaxVoice(v.id);
+                      }}
+                      className={`jelly-btn rounded-full px-2.5 py-1 text-[11px] ${form.minimaxVoiceId === v.id ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+                    >
+                      {v.label}
+                    </button>
+                  ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">语音通话里 TA 用这个音色说话；克隆音色先在设置页拉取「我的音色」再手填 voice_id。</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

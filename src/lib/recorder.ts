@@ -12,6 +12,8 @@ export interface RecordedAudio {
   durationSec: number;
   /** 采样率（固定 16000，MiniMax STT 推荐值） */
   sampleRate: number;
+  /** 重采样后的 16k PCM 样本（本地置信度估算用，不上传） */
+  samples: Float32Array;
 }
 
 /** 单段录音上限：60 秒，超时自动结束 */
@@ -144,7 +146,7 @@ export function createRecorder() {
     const wav = encodeWav(pcm16k, 16000);
     const base64 = await blobToBase64(wav);
     console.log(`[call-rec] stop ok duration=${durationSec}s bytes=${wav.size} sr=16000 mono=1`);
-    return { blob: wav, base64, mimeType: "audio/wav", durationSec, sampleRate: 16000 };
+    return { blob: wav, base64, mimeType: "audio/wav", durationSec, sampleRate: 16000, samples: pcm16k };
   }
 
   /** 放弃本段录音（取消/退出通话时释放设备） */

@@ -1,10 +1,12 @@
 // Reality MCP · 手机能力页：9 项能力开关卡片（权限标签+支持态探测+试一下）+ 我创建的提醒清单
 import { useEffect, useState } from "react";
-import { BellRing, ChevronLeft, CircleCheck, CircleX, Clock3, Gauge, HardDrive, MessageSquareText, Play, Radio, Share2, Sparkles, Vibrate, X } from "lucide-react";
+import { BellRing, ChevronLeft, CircleCheck, CircleX, Clock3, Gauge, Globe2, HardDrive, MessageSquareText, Play, Radio, Share2, Sparkles, Vibrate, X } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import type { AiConfig } from "@/lib/types";
 import { emitNotify } from "@/lib/notification-store";
 import { loadMusicTracks } from "@/lib/media";
+import { RemoteMcpPanel } from "./RemoteMcpPanel";
+import { loadServers, loadToolCache, saveToolCache } from "@/lib/remote-mcp";
 import {
   MCP_CARDS,
   useMcpPrefs,
@@ -44,6 +46,8 @@ export function McpApp({ config, onBack }: Props) {
   const [prefs, setPrefs] = useMcpPrefs();
   const [toast, setToast] = useState<string>("");
   const [reminders, setReminders] = useState<McpReminder[]>(listReminders);
+  const [remoteOpen, setRemoteOpen] = useState(false);
+  const [remoteCount, setRemoteCount] = useState(() => loadServers().length);
   const flash = (t: string) => {
     setToast(t);
     setTimeout(() => setToast(""), 3500);
@@ -183,6 +187,25 @@ export function McpApp({ config, onBack }: Props) {
           );
         })}
 
+        {/* 远程 MCP 导入 */}
+        <section className="fade-up glass rounded-2xl p-3.5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Globe2 className="size-4 shrink-0 text-primary" />
+            <h2 className="text-[13px] font-bold text-neutral-800">远程 MCP 服务</h2>
+            <span className="ml-auto text-[10px] text-muted-foreground">{remoteCount ? `已连接 ${remoteCount} 个` : "未连接"}</span>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            粘贴 https 服务地址或 GitHub 仓库链接导入第三方工具。系统只读取明确约定的配置清单，绝不执行仓库代码；安装前展示域名、工具、权限与认证方式，高危调用每次都要你确认。
+          </p>
+          <button
+            type="button"
+            onClick={() => setRemoteOpen(true)}
+            className="jelly-btn mt-2 flex w-full items-center justify-center gap-1 rounded-full border border-primary/30 py-1.5 text-[11px] font-semibold text-primary"
+          >
+            <Sparkles className="size-3" /> 导入 / 管理远程服务
+          </button>
+        </section>
+
         {/* 我创建的提醒 */}
         <section className="fade-up glass rounded-2xl p-3.5">
           <div className="flex items-center gap-2">
@@ -219,6 +242,17 @@ export function McpApp({ config, onBack }: Props) {
           说明：网页运行在浏览器沙箱里，无法读取系统通知栏、其他 App 使用时长或静默写入日历——这些需要原生 App 权限。本页面把能真实做到的部分做到位，做不到的如实标注。
         </p>
       </div>
+
+      {/* 远程 MCP 导入面板 */}
+      {remoteOpen && (
+        <RemoteMcpPanel
+          onClose={() => setRemoteOpen(false)}
+          onChanged={() => {
+            setRemoteCount(loadServers().length);
+            saveToolCache(loadToolCache());
+          }}
+        />
+      )}
 
       {/* 测试结果浮层 */}
       {toast && (

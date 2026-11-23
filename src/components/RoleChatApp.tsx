@@ -28,6 +28,7 @@ import {
   MapPin,
   UtensilsCrossed,
   Gift,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,7 +115,8 @@ import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } 
 import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, OpenerCard, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 import { emitNotify } from "@/lib/notification-store";
-import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, type McpAction } from "@/lib/reality-mcp";
+import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, extractRemoteMarks, execRemoteMarks, answerRemoteConfirm, type McpAction } from "@/lib/reality-mcp";
+import { loadServers as loadRemoteServers, loadToolCache, callTool, buildRemoteMcpContext, type RemoteMcpServer } from "@/lib/remote-mcp";
 import { GroupChatView } from "@/components/GroupChatView";
 import { Avatar } from "@/components/Avatar";
 import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog, groupDigestFor } from "@/lib/group-chat-store";
@@ -956,7 +958,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       return lines.length ? "\n" + lines.join("\n") : "";
     })();
     // 手机能力状态清单：TA 看得见哪些能力开着、有哪些待触发提醒，才敢用 [震动:]/[播报:]/[提醒:] 标记
-    const mcpCtx = buildMcpContext(loadMcpPrefs());
+    const mcpCtx = buildMcpContext(loadMcpPrefs()) + buildRemoteMcpContext(loadRemoteServers(), loadToolCache());
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
       // 本轮触发消息（最后一条用户消息）带图时走 vision 多模态；历史图片只留文本占位省 token
@@ -1128,6 +1130,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         // 手机能力标记拆行动作：[震动:] / [播报:] / [提醒:] → 真实执行 + 执行记录（异步，剧情模式不注入碎句协议但标记仍消化）
         const mcp = clean ? extractMcpMarks(clean) : { clean, actions: [] as McpAction[] };
         clean = mcp.clean;
+        // 远程 MCP 标记消化：[远程MCP:服务:工具:参数] → 授权校验 + 高危确认 + 真实调用
+        const remote = clean ? extractRemoteMarks(clean) : { clean, marks: [] };
+        clean = remote.clean;
         // 自然语言收款兜底：TA 没写标记但话说"收下啦"——最近一笔用户转账卡片自动置为已收
         if (!trans.transfer && !rich.order && clean) settleIncomingByWords(clean, entries);
         let rep = false;
@@ -1154,17 +1159,25 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             const againTrans = !storyMode ? digestTransfer(againDigest.text) : { text: againDigest.text, transfer: undefined };
             const againRich = !storyMode ? digestRichCards(againTrans.text) : { text: againTrans.text };
             const againMcp = extractMcpMarks(againRich.text);
-            const againNote = againMcp.actions.length ? await execMcpActions(againMcp.actions, loadMcpPrefs(), cfgSnapshot) : undefined;
-            settleReply(ch.id, userMsgId, againMcp.clean, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote);
+            const againRemote = extractRemoteMarks(againMcp.clean);
+            const againNote = [
+              againMcp.actions.length ? await execMcpActions(againMcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
+              againRemote.marks.length ? await execRemoteMarks(againRemote.marks, remoteBridge()) : "",
+            ].filter(Boolean).join(" ｜ ") || undefined;
+            settleReply(ch.id, userMsgId, againRemote.clean, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
           }
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
-          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}${mcp.actions.length ? ` mcp=${mcp.actions.length}` : ""}`);
-          // 手机能力动作真实执行（按开关），结果串作为执行记录随消息落库
-          const mcpNote = mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : undefined;
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}${mcp.actions.length ? ` mcp=${mcp.actions.length}` : ""}${remote.marks.length ? ` remote=${remote.marks.length}` : ""}`);
+          // 手机能力动作真实执行（按开关），结果串作为执行记录随消息落库；远程 MCP 同理
+          const notes = [
+            mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
+            remote.marks.length ? await execRemoteMarks(remote.marks, remoteBridge()) : "",
+          ].filter(Boolean).join(" ｜ ");
+          const mcpNote = notes || undefined;
           clearStreamBubble();
           settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order, mcpNote);
         }
@@ -1180,6 +1193,24 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       scrollBottom();
     }
   };
+
+  /** 远程 MCP 桥：execRemoteMarks 通过它拿服务清单/工具缓存/真实调用 */
+  const remoteBridge = () => ({
+    servers: () => loadRemoteServers(),
+    toolCache: () => loadToolCache(),
+    call: (server: RemoteMcpServer, tool: Parameters<typeof callTool>[1], args: Record<string, unknown>, confirmed: boolean) => callTool(server, tool, args, confirmed),
+  });
+
+  // 高危远程调用确认卡：execRemoteMarks 经 CustomEvent 抛出请求，用户点允许/拒绝后 resolve
+  const [remoteConfirm, setRemoteConfirm] = useState<{ id: string; serverName: string; tool: string; argsPreview: string } | null>(null);
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { id: string; serverName: string; tool: string; argsPreview: string } | null;
+      setRemoteConfirm(detail);
+    };
+    window.addEventListener("vp-mcp:confirm", onAsk);
+    return () => window.removeEventListener("vp-mcp:confirm", onAsk);
+  }, []);
 
   /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
   const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"], location?: ChatEntry["location"], order?: ChatEntry["order"], mcpNote?: string) => {
@@ -1456,8 +1487,12 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       if (!line) return;
       // 主动消息也可能带手机能力标记（如"提醒我喝水"类）：拆出执行，结果记入 mcpNote
       const pmcp = extractMcpMarks(line);
-      const pnote = pmcp.actions.length ? await execMcpActions(pmcp.actions, loadMcpPrefs(), config) : undefined;
-      line = pmcp.clean;
+      const premote = extractRemoteMarks(pmcp.clean);
+      const pnote = [
+        pmcp.actions.length ? await execMcpActions(pmcp.actions, loadMcpPrefs(), config) : "",
+        premote.marks.length ? await execRemoteMarks(premote.marks, remoteBridge()) : "",
+      ].filter(Boolean).join(" ｜ ") || undefined;
+      line = premote.clean;
       if (!line && !pnote) return;
       setLogForChar(ch.id, {
         id: `p${Date.now()}`,
@@ -1990,6 +2025,31 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       </div>
 
       <div className="glass-nav border-t border-white/50 px-3 py-2.5">
+        {/* 远程 MCP 高危调用确认卡 */}
+        {remoteConfirm && (
+          <div className="absolute inset-x-0 bottom-0 z-[74] bg-black/40 p-3" onClick={() => answerRemoteConfirm(remoteConfirm.id, false)}>
+            <div className="drawer-panel glass-strong rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
+              <p className="flex items-center gap-1.5 text-[12px] font-bold text-neutral-800">
+                <ShieldCheck className="size-4 shrink-0 text-amber-600" /> TA 想调用外部服务，需要你确认
+              </p>
+              <p className="mt-2 break-all text-[11.5px] leading-relaxed text-neutral-700">
+                服务：<span className="font-semibold">{remoteConfirm.serverName}</span> · 工具：<span className="font-semibold">{remoteConfirm.tool}</span>
+              </p>
+              {remoteConfirm.argsPreview && remoteConfirm.argsPreview !== "{}" && (
+                <p className="mt-1 max-h-20 overflow-y-auto break-all rounded-lg bg-white/60 px-2 py-1.5 text-[10.5px] leading-relaxed text-muted-foreground">参数：{remoteConfirm.argsPreview}</p>
+              )}
+              <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">该操作被标记为高危，拒绝后 TA 只会知道你不同意，不会执行任何请求。</p>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" className="jelly-btn h-8 flex-1 bg-primary text-[12px] text-primary-foreground" onClick={() => answerRemoteConfirm(remoteConfirm.id, true)}>
+                  允许执行
+                </Button>
+                <Button size="sm" variant="outline" className="jelly-btn h-8 flex-1 text-[12px]" onClick={() => answerRemoteConfirm(remoteConfirm.id, false)}>
+                  拒绝
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* 连发暂存条：待发数量 + 一键发送全部 */}
         {queuedEntries.length > 0 && (
           <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5">

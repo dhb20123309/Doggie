@@ -2,6 +2,7 @@
 // 原则：能用真实 Web API 就真做（震动/通知/播报/提醒/状态），拿不到的（系统通知栏、其他App时长）如实降级为应用内数据版，不假装可用。
 import { useEffect, useState } from "react";
 import { loadVoiceConfig, synthesizeSpeech, voiceReady, type VoiceConfig } from "./tts";
+import type { McpToolMeta, RemoteMcpMark, RemoteMcpServer } from "./remote-mcp";
 
 /* ---------- 能力清单与开关 ---------- */
 
@@ -444,6 +445,96 @@ export async function shareTrackToMusicApp(url: string, title: string): Promise<
 }
 
 /* ---------- AI 协议与标记解析 ---------- */
+
+/** 远程 MCP 高危调用确认：内存 Promise 表，UI 弹卡 resolve；60 秒无操作视为拒绝 */
+const pendingConfirms = new Map<string, { resolve: (v: boolean) => void; timer: number }>();
+
+export function requestRemoteConfirm(req: { serverName: string; tool: string; argsPreview: string }): Promise<boolean> {
+  const id = `c${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
+  return new Promise<boolean>((resolve) => {
+    const timer = window.setTimeout(() => {
+      pendingConfirms.delete(id);
+      window.dispatchEvent(new CustomEvent("vp-mcp:confirm", { detail: null }));
+      resolve(false);
+    }, 60_000);
+    pendingConfirms.set(id, { resolve, timer });
+    window.dispatchEvent(new CustomEvent("vp-mcp:confirm", { detail: { id, ...req } }));
+  });
+}
+
+export function answerRemoteConfirm(id: string, accept: boolean) {
+  const p = pendingConfirms.get(id);
+  if (!p) return;
+  clearTimeout(p.timer);
+  pendingConfirms.delete(id);
+  window.dispatchEvent(new CustomEvent("vp-mcp:confirm", { detail: null }));
+  p.resolve(accept);
+}
+
+/** 从回复行里拆出远程 MCP 标记（只认独立成行的），返回剩余干净文本与标记列表 */
+export function extractRemoteMarks(reply: string): { clean: string; marks: RemoteMcpMark[] } {
+  const kept: string[] = [];
+  const marks: RemoteMcpMark[] = [];
+  for (const line of reply.split(/\r?\n/)) {
+    const m = line.trim().match(REMOTE_MCP_RE);
+    if (m) {
+      let args: Record<string, unknown> = {};
+      if (m[3]) {
+        try {
+          const parsed = JSON.parse(m[3]) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+        } catch {
+          /* 参数非法按空参数处理 */
+        }
+      }
+      marks.push({ serverName: m[1].trim(), toolName: m[2].trim(), args });
+      continue;
+    }
+    kept.push(line);
+  }
+  return { clean: kept.join("\n").trim(), marks };
+}
+
+const REMOTE_MCP_RE = /^\[远程MCP[:：]\s*([^:\]]{1,30})\s*[:：]\s*([^:\]]{1,48})\s*(?:[:：]\s*(\{[\s\S]*\}))?\]$/;
+
+export interface RemoteMcpBridge {
+  servers: () => RemoteMcpServer[];
+  toolCache: () => Record<string, McpToolMeta[]>;
+  call: (server: RemoteMcpServer, tool: McpToolMeta, args: Record<string, unknown>, confirmed: boolean) => Promise<{ ok: boolean; text: string; content: string }>;
+}
+
+/** 执行 AI 输出的远程 MCP 标记（由 RoleChatApp 注入桥接实现），返回执行记录串 */
+export async function execRemoteMarks(marks: RemoteMcpMark[], bridge: RemoteMcpBridge): Promise<string> {
+  if (!marks.length) return "";
+  const parts: string[] = [];
+  for (const m of marks.slice(0, 2)) {
+    const server = bridge.servers().find((s) => s.name === m.serverName || s.id === m.serverName);
+    if (!server) {
+      parts.push(`✗ ${m.serverName}/${m.toolName}（未安装该服务）`);
+      continue;
+    }
+    const tools = bridge.toolCache()[server.id] ?? [];
+    const tool = tools.find((t) => t.name === m.toolName);
+    if (!tool) {
+      parts.push(`✗ ${server.name}/${m.toolName}（不在授权工具清单内，已拒绝）`);
+      console.warn(`[mcp-remote] denied unlisted tool ${server.name}/${m.toolName}`);
+      continue;
+    }
+    let confirmed = false;
+    if (tool.risk === "high") {
+      const preview = JSON.stringify(m.args).slice(0, 80);
+      confirmed = await requestRemoteConfirm({ serverName: server.name, tool: m.toolName, argsPreview: preview });
+      if (!confirmed) {
+        const r = await bridge.call(server, tool, m.args, false);
+        parts.push(`✗ ${r.text}`);
+        continue;
+      }
+    }
+    const r = await bridge.call(server, tool, m.args, true);
+    parts.push(`${r.ok ? "✓" : "✗"} ${r.text}${r.content ? `\n返回摘要：${r.content.slice(0, 120)}` : ""}`);
+  }
+  return parts.join(" ｜ ");
+}
 
 export const REALITY_MCP_PROTOCOL =
   "\n【手机能力】你可以通过在回复里单独一行输出下列标记，真实操作对方的手机（系统会替你执行并在聊天里留下执行记录）：" +

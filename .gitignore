@@ -108,6 +108,14 @@ obj/
 tmp/
 .microcompact/
 
+# 平台会话元数据与开发过程产物（不随代码发布）
+.plan/
+.todo/
+.websearch/
+skills/
+AGENTS.md
+.meoo-template-version.json
+
 # OneDay 托管的代码智能状态（只由沙箱控制面维护，不进入 Git/NAS）
 .codegraph/
 /.codegraph-offline-*/

@@ -1,5 +1,6 @@
 // 虚拟手机机身：外壳 + 锁屏流程 + 屏幕路由（桌面 / 各 App）
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
 import { LockScreen } from "./LockScreen";
@@ -13,6 +14,7 @@ import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
 import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
 import { DeliveryApp } from "./DeliveryApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
+import { onNotify, onOpenChat, requestOpenChat, useNotifyOn, type NotifyPayload } from "@/lib/notification-store";
 
 interface Props {
   config: AiConfig;
@@ -31,6 +33,33 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const [lockWp, setLockWp] = useLockWallpaper();
   const [homeWp, setHomeWp] = useHomeWallpaper();
   const [chatBg, setChatBg] = useChatBackground();
+  const [notifyOn, setNotifyOn] = useNotifyOn();
+
+  // ===== 消息通知横幅：聊天页发事件 → 这里弹出 iOS 式顶部横幅，点按直达会话 =====
+  const [banner, setBanner] = useState<NotifyPayload | null>(null);
+  const bannerTimer = useRef<number | null>(null);
+  const notifyOnRef = useRef(notifyOn);
+  notifyOnRef.current = notifyOn;
+  useEffect(() => {
+    const offN = onNotify((p) => {
+      if (!notifyOnRef.current) return;
+      setBanner(p);
+      if (bannerTimer.current) clearTimeout(bannerTimer.current);
+      bannerTimer.current = window.setTimeout(() => setBanner(null), 5_000);
+    });
+    const offO = onOpenChat((charId) => {
+      if (charId) setScreen("rolechat");
+    });
+    return () => {
+      offN();
+      offO();
+      if (bannerTimer.current) clearTimeout(bannerTimer.current);
+    };
+  }, []);
+  const dismissBanner = () => {
+    if (bannerTimer.current) clearTimeout(bannerTimer.current);
+    setBanner(null);
+  };
 
   const goHome = () => setScreen("home");
   /** 外卖 App 下单后：订单写入待投递表（RoleChatApp 进入会话时消化成聊天卡片），并跳进该角色会话 */
@@ -64,6 +93,57 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
           <span className="size-2.5 rounded-full bg-[oklch(0.25_0.03_260)] ring-1 ring-white/10" />
         </div>
 
+        {/* 消息通知横幅：锁屏与所有 App 之上（iOS 式顶部下滑卡） */}
+        {banner && (
+          <div className="notify-banner absolute inset-x-2.5 top-[42px] z-[70]">
+            <div className="glass-strong flex items-start gap-2.5 rounded-2xl p-3 shadow-lg">
+              <button
+                type="button"
+                onClick={() => {
+                  console.log(`[notify] open chat char=${banner.charId}`);
+                  requestOpenChat(banner.charId);
+                  dismissBanner();
+                }}
+                aria-label={`打开与${banner.name}的聊天`}
+                className="jelly-icon shrink-0 text-left"
+              >
+                <span className="flex size-9 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-wallpaper-from to-wallpaper-to text-[16px] ring-1 ring-white/40">
+                  {banner.avatar.startsWith("data:") || banner.avatar.startsWith("http") ? (
+                    <img src={banner.avatar} alt="" className="size-full object-cover" />
+                  ) : (
+                    banner.avatar || "👤"
+                  )}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  console.log(`[notify] open chat char=${banner.charId}`);
+                  requestOpenChat(banner.charId);
+                  dismissBanner();
+                }}
+                aria-label="查看消息"
+                className="jelly-btn min-w-0 flex-1 text-left"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate text-[12px] font-semibold">{banner.name}</span>
+                  {banner.tag && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">{banner.tag}</span>}
+                  <span className="ml-auto shrink-0 text-[9px] text-muted-foreground">现在</span>
+                </span>
+                <span className="mt-0.5 line-clamp-2 block text-[11px] leading-snug text-muted-foreground">{banner.text}</span>
+              </button>
+              <button
+                type="button"
+                onClick={dismissBanner}
+                aria-label="关闭通知"
+                className="jelly-icon -m-1 shrink-0 self-center p-1 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {locked ? (
           <LockScreen passcode={passcode} wallpaper={lockWp} onUnlock={() => setLocked(false)} />
         ) : (
@@ -78,6 +158,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                   onSave={onSaveConfig}
                   onBack={goHome}
                   onLock={lock}
+                  notify={{ on: notifyOn, setOn: setNotifyOn }}
                   wallpapers={{ lockWp, homeWp, chatBg, setLockWp, setHomeWp, setChatBg }}
                 />
               )}

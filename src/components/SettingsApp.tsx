@@ -1,8 +1,9 @@
 // 手机内「设置」应用：接口地址 / API Key / 模型名 / 连接测试 + 锁屏密码与壁纸自定义
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X, BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import type { AiConfig, TestResult } from "@/lib/types";
@@ -17,6 +18,7 @@ interface Props {
   onSave: (cfg: AiConfig) => void;
   onBack: () => void;
   onLock: () => void;
+  notify: { on: boolean; setOn: (v: boolean | ((p: boolean) => boolean)) => void };
   wallpapers: {
     lockWp: string;
     homeWp: string;
@@ -35,7 +37,7 @@ const PROVIDERS = [
   { name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
 ];
 
-export function SettingsApp({ config, onSave, onBack, onLock, wallpapers }: Props) {
+export function SettingsApp({ config, onSave, onBack, onLock, notify, wallpapers }: Props) {
   const [form, setForm] = useState<AiConfig>(config);
   const [showKey, setShowKey] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
@@ -238,6 +240,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, wallpapers }: Prop
         {result && <TestResultCard result={result} />}
 
         <PasscodeSection onLock={onLock} />
+        <NotificationSection notify={notify} />
         <WallpaperSection wallpapers={wallpapers} />
         <ImageSection />
         <VoiceSection config={config} />
@@ -307,6 +310,24 @@ function PasscodeSection({ onLock }: { onLock: () => void }) {
           立即锁屏
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** 消息通知：角色来消息时屏幕顶部弹横幅，点按直达会话 */
+function NotificationSection({ notify }: { notify: Props["notify"] }) {
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <BellRing className="size-4 text-primary" />
+          消息通知
+        </div>
+        <Switch checked={notify.on} onCheckedChange={(v) => notify.setOn(v)} aria-label="消息通知" />
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        开启后，TA 发来回复或主动消息时屏幕顶部会弹出横幅（正在看该会话时不打扰）；点横幅直接进入聊天。关闭则完全静默。
+      </p>
     </div>
   );
 }

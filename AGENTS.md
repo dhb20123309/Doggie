@@ -70,6 +70,8 @@
 
 - **世界书管理模式（第56轮）**：`WorldBookApp.tsx` 列表页顶栏新增「管理」按钮（有条目才可用）→ managing 态：标题变「管理（已选 N）」、下方 fade-up 工具条（全选 checkbox / 改为全局 / 改为局部 / 清空选择 X）、条目卡左侧出现勾选框（点击 toggleSel、选中 border-primary bg-primary/10），再点管理退出并清选择；applyScope(scope) setBooks map 批量改 scope，日志 [worldbook] batch scope。sel 用 Set<string>。顺带修复：DEPTH_META.icon emoji 徽章在沙箱浏览器渲染豆腐块——新增 DEPTH_ICON（Pin/Clock/Waves lucide）+ DepthBadge 组件替换列表徽章、导入面板与 BookEditor 深度三档按钮、scope 切换按钮的 🌍🔒 全部改 lucide 图标。
 
+- **消息通知横幅（第57轮）**：新数据层 `src/lib/notification-store.ts`——useNotifyOn（vp-phone:notify-on:v1，默认开）+ CustomEvent 总线：emitNotify/onNotify（EVT_SHOW "vp-notify:show"）、requestOpenChat/onOpenChat（EVT_OPEN "vp-notify:open"，先写 active-character:v1 再请求切屏）。PhoneShell 顶层订阅：banner state + 5s 自动消失 timer，notifyOnRef 承载最新开关值（effect 空依赖闭包会读旧值！）；横幅 JSX 挂在灵动岛之后、locked 三元之前 → z-[70] absolute inset-x-2.5 top-[42px]，锁屏与各 App 之上都能弹；头像复用角色 avatar（data:/http 判 img 否则 emoji），点按 requestOpenChat 直达会话，X 关闭。styles.css 新增 notify-in keyframes + .notify-banner（灵动岛下滑入回弹）。RoleChatApp 两个发通知点：settleReply 尾部（reply!=null 且非当前打开该会话时，characters.find 取名字头像，blocked 不发）、fireOne 主动消息落库后（tag:"主动消息"）——正在看该会话时消息直接上屏不打扰。SettingsApp Props 加 notify:{on,setOn}（PhoneShell 传入），PasscodeSection 后新增 NotificationSection（BellRing 标题+Switch+说明）。关键日志 [notify] banner reply/proactive char=… / open chat。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

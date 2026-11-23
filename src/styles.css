@@ -312,6 +312,13 @@ body {
 }
 .typing-dot { animation: typing-bounce 1s infinite; }
 
+/* 消息通知横幅：从灵动岛下方滑入，5s 后由 JS 移除 */
+@keyframes notify-in {
+  from { opacity: 0; transform: translateY(-26px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.notify-banner { animation: notify-in 0.38s cubic-bezier(0.32, 1.6, 0.5, 1) backwards; }
+
 ::-webkit-scrollbar { width: 0; height: 0; }
 
 /* ===== 果冻反馈（保留原有手感） ===== */

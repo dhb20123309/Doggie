@@ -110,6 +110,7 @@ import { type MemeEntry, type MemePrefs, DEFAULT_MEME_PREFS, buildMemeSection } 
 import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
 import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, OpenerCard, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
+import { emitNotify } from "@/lib/notification-store";
 
 interface Props {
   config: AiConfig;
@@ -1021,6 +1022,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
+      // 通知横幅：角色新回复且当前没有盯着这个会话（正在看该会话时消息已直接上屏，不打扰）
+      if (reply != null && !(charId === activeId && view === "chat")) {
+        const ch = characters.find((c) => c.id === charId);
+        if (ch && !ch.blocked) {
+          emitNotify({ charId, name: displayName(ch), avatar: ch.avatar, text: reply.split(/\r?\n/)[0] });
+          console.log(`[notify] banner reply char=${charId}`);
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -1246,6 +1255,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         at: Date.now(),
         proactive: true,
       });
+      // 主动消息：不在该会话界面时弹横幅通知（正在看这个会话则消息已直接上屏）
+      if (!(ch.id === activeId && view === "chat") && !ch.blocked) {
+        emitNotify({ charId: ch.id, name: displayName(ch), avatar: ch.avatar, text: line.split(/\r?\n/)[0], tag: "主动消息" });
+        console.log(`[notify] banner proactive char=${ch.id}`);
+      }
       // 附带照片必须贴合聊天话题：从最近对话内容匹配场景，匹配不到就宁可不发（不再随机发莫名其妙的图）
       if (ch.photoEnabled && Math.random() < PHOTO_CHANCE && Date.now() - lastPhotoAt(ch.id) > PHOTO_COOLDOWN_MS) {
         const recentText = (last ? readLastEntries(ch.id, 6).map((e) => e.content).join(" ") : ch.name ?? "") + " " + (line || "");

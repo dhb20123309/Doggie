@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { supabase } from '@/supabase/client';
+import { requireSupabase } from '../cloud-auth';
 import { normalizeMainlandPhone } from '../auth-phone';
 import { useAuth } from '../AuthProvider';
 import type { createAuthActions } from '../auth-actions';
@@ -97,6 +97,7 @@ export function usePasswordRecoveryFlow(actions: RecoveryActions) {
   }
 
   async function readSessionUser() {
+    const supabase = await requireSupabase();
     const { data, error } = await supabase.auth.getSession();
     if (error) throw error;
     return data.session?.user ?? null;
@@ -112,6 +113,7 @@ export function usePasswordRecoveryFlow(actions: RecoveryActions) {
     if (!live(id)) return;
     if (user && user.id !== ownerId.current) throw invalidIdentity();
     if (user) {
+      const supabase = await requireSupabase();
       const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (!live(id)) return;
       if (error) throw error;
@@ -154,6 +156,7 @@ export function usePasswordRecoveryFlow(actions: RecoveryActions) {
   }
 
   async function checkIdentity(id: number) {
+    const supabase = await requireSupabase();
     const { data, error } = await supabase.auth.getUser();
     if (!live(id)) return;
     if (error) throw error;
@@ -174,6 +177,7 @@ export function usePasswordRecoveryFlow(actions: RecoveryActions) {
   function save(password: string) {
     return run(['password'], 'updatePassword', async id => {
       // 再核对当前身份，不能用 URL、普通 Session 或旧验证结果直接改密。
+      const supabase = await requireSupabase();
       const { data, error } = await supabase.auth.getUser();
       if (!live(id)) return;
       if (error) throw error;

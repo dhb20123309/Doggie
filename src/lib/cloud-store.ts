@@ -1,7 +1,7 @@
 // 云存档数据层：把本机全部 vp-phone:* localStorage 数据打包成快照存云端（vp_snapshots 表），
 // 其中 base64 图片自动抽取上传到私有桶 vp-assets（users/<uid>/ 命名空间），原位替换为签名 URL。
 // 恢复时反向写回 localStorage，并给每个被改写的 key 留一份本机保险副本（vp-phone:pre-restore:*）。
-import { supabase } from "@/supabase/client";
+import { getSupabase } from "@/lib/cloud-client";
 
 const BUCKET = "a1b2c3d4-0000-4000-8000-000000000001"; // storage.buckets.id（name=vp-assets，查询确认）
 const PREFIX = "vp-phone:";
@@ -160,6 +160,8 @@ function injectUrls(node: unknown, urls: Map<string, string>): unknown {
 
 /** 立即备份：捕获 → 抽图上传统桶 → upsert 快照行 */
 export async function backupNow(onProgress?: (p: BackupProgress) => void): Promise<BackupResult> {
+  const supabase = await getSupabase();
+  if (!supabase) return { ok: false, images: 0, bytes: 0, error: "当前部署未配置云服务，仅本地存档" };
   const { data: sess, error: sessErr } = await supabase.auth.getSession();
   const uid = sess.session?.user.id;
   if (sessErr || !uid) return { ok: false, images: 0, bytes: 0, error: "请先登录账号" };
@@ -217,6 +219,8 @@ export async function backupNow(onProgress?: (p: BackupProgress) => void): Promi
 
 /** 云端快照元信息（不存在返回 null） */
 export async function fetchSnapshotMeta(): Promise<SnapshotMeta | null> {
+  const supabase = await getSupabase();
+  if (!supabase) return null;
   const { data: sess } = await supabase.auth.getSession();
   const uid = sess.session?.user.id;
   if (!uid) return null;
@@ -231,6 +235,8 @@ export async function fetchSnapshotMeta(): Promise<SnapshotMeta | null> {
 
 /** 从云端恢复：拉快照 → 图片重签 URL → 覆盖写回 localStorage（旧值先留底） */
 export async function restoreNow(): Promise<RestoreResult> {
+  const supabase = await getSupabase();
+  if (!supabase) return { ok: false, entries: 0, error: "当前部署未配置云服务，无法恢复云端存档" };
   const { data: sess } = await supabase.auth.getSession();
   const uid = sess.session?.user.id;
   if (!uid) return { ok: false, entries: 0, error: "请先登录账号" };

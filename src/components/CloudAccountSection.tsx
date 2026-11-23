@@ -5,6 +5,7 @@ import { Cloud, CloudUpload, CloudDownload, LogOut, LoaderCircle, CheckCircle2, 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/features/supabase-auth-runtime";
+import { cloudAvailable } from "@/lib/cloud-client";
 import { authActions } from "@/lib/auth";
 import {
   backupNow,
@@ -105,7 +106,11 @@ export function CloudAccountSection({ onOpenAuth }: Props) {
         )}
       </div>
 
-      {!signedIn ? (
+      {!cloudAvailable ? (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          当前部署（如 GitHub Pages）未配置云服务，账号登录与云端备份暂不可用；所有数据仍安全保存在本机浏览器中。
+        </p>
+      ) : !signedIn ? (
         <>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             注册专属账号后，角色、聊天、群聊、世界书、相册等全部数据可备份到云端，换设备登录即可找回。

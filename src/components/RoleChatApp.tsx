@@ -1858,9 +1858,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             <BookText className="size-3" />
             剧情
           </button>
-          <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("stickers")} aria-label="表情库">
-            <SmilePlus className="size-4" />
-          </Button>
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={() => setView("prefs")} aria-label="输入与发送设置">
             <SlidersHorizontal className="size-4" />
           </Button>
@@ -2155,6 +2152,41 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           </Button>
         </div>
       </div>
+
+      {/* 表情快捷条：从顶栏挪到输入栏下方，点一下直接作为消息发出 */}
+      {(() => {
+        const usable = stickers.filter((s) => s.isGlobal);
+        if (!usable.length) return null;
+        return (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setView("stickers")}
+              aria-label="打开表情库"
+              className="jelly-icon flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-primary"
+            >
+              <SmilePlus className="size-[17px]" />
+            </button>
+            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5">
+              {usable.slice(0, 12).map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    console.log(`[sticker] quick send name=${s.name}`);
+                    sendSticker(s);
+                  }}
+                  title={s.name}
+                  aria-label={`发送表情 ${s.name}`}
+                  className="jelly-icon shrink-0 rounded-xl border border-border/60 bg-card p-0.5"
+                >
+                  <img src={s.url} alt={s.name} className="size-7 rounded-lg object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 转账详情弹层：点卡片打开，微信式金额详情页，待收时提供收下/退还 */}
       {transferSheet && (() => {

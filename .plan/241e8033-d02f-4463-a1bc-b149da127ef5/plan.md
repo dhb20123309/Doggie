@@ -2,127 +2,84 @@
 
 ## 一、概述
 
-在现有「虚拟手机恋爱模拟器」中新增两项能力：
+修复与增强三件事：
 
-1. **流式输出开关**：聊天回复支持逐字/逐段实时上屏（打字机效果），可在设置中开启或关闭；关闭时维持现在的一次性返回。
-2. **用户发图 + AI 识图回应**：聊天输入栏新增图片按钮，用户可从相册选图或直接拍照上传发给角色；表情包发送链路同步升级——AI 请求体改为多模态格式，把图片真实喂给模型，让 TA 能"看见"图片内容并针对性回应。
+1. **进会话默认停在最新消息**：点进对话界面时消息列表应自动滚到底部（上一次聊到的地方），不需要用户手动往下滑。
+2. **世界书植入核实与可视化**：确认世界书内容确实拼进了发给 API 模型的 system prompt，并解释"为什么感觉没体现"，同时把注入情况变得可见可验证。
+3. **多选一键删除**：世界书管理工具条在「改为全局/改为局部」旁新增「删除选中」，带二次确认。
 
-## 二、现状分析
+## 二、现状分析（Explore + 定点阅读结论）
 
-### 已确认的关键代码位置
+### 问题①：进入会话不滚动
 
-| 文件 | 行号 | 现状 |
-|------|------|------|
-| `src/lib/ai-api.ts` L148-161 | chatCompletion 纯一次性 JSON 返回，无 stream/SSE 解析 |
-| `src/components/RoleChatApp.tsx` L923/936/951/960/1242/1294 | 共 7 处调用 chatCompletion，全部传 string content |
-| `src/components/RoleChatApp.tsx` L823-914 | toHist 构造 messages，content 全是纯 string |
-| `src/components/RoleChatApp.tsx` L1029-1049 | settleReply 落库结构（第9参 mcpNote） |
-| `src/components/RoleChatApp.tsx` L1799-1848 | 输入栏 JSX，目前无图片按钮 |
-| `src/lib/chat-types.ts` L31-74 | ChatEntry 有 stickerUrl?，无通用 imageUrl 字段 |
-| `src/lib/chat-types.ts` L194-203 | SendPrefs 有 sendReplacesGenerate 等 4 个开关，无 streamingEnabled |
-| `src/lib/types.ts` L3-12 | AiConfig 无 stream 字段 |
-| `src/lib/photo-store.ts` L4-18 | Photo.url 是 data URL（base64） |
-| `src/components/StickerApp.tsx` L14-43 | compressToDataUrl 压缩到 200KB 以内转 data URL |
-| `src/lib/media.ts` L230-285 | fetchPollinations/tryOpenAIImages 已有 base64/data URL 处理路径 |
+- `src/components/RoleChatApp.tsx` L870-873：`scrollBottom()` 用 `requestAnimationFrame` + `scrollTo({ behavior: "smooth" })`。
+- 全文 11 处 `scrollBottom()` 调用（L384/578/637/702/739/1001/1029/1155/1232/1245/1273/1292）全部发生在**发消息/落库/加载剧情**等动作里；**没有任何一处是"进入会话（view 切到 chat / activeId 切换 / log 从 localStorage 恢复完成）时"触发的**。这就是每次点进会话都停在中上部、要手动下滑的直接根因。
+- 加重因素：开场白档案卡（OpenerCard）默认展开撑高内容、图片气泡懒加载后高度变化，即使有滚动也需等内容稳定后二次校正；smooth 行为在容器高度未定时会被截断。
 
-### 核心约束
+### 问题②：世界书是否真的喂给了模型
 
-- 项目无任何现成 SSE/fetch ReadableStream 代码，需从零实现流式解析。
-- vision 改动影响所有 chatCompletion 调用点（私聊/剧情/主动消息/regenWith 重试）。
-- localStorage 持久化 key 前缀 vp-phone:*，SendPrefs 存 vp-phone:send-prefs:v1。
+链路逐环核实（结论：**代码上确实植入了**）：
+
+1. `src/components/RoleChatApp.tsx` L807-809 `buildSys`：`getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? [])` → `buildWorldSectionV2(activeBooks, recentText, unlocked)` 得 `worldText`。
+2. L828（剧情分支）与 L855（私聊分支）均把 `worldText` 拼进 system 字符串。
+3. L895 requestReply：`sysPrompt = buildSys(...)`；L960 私聊 messages[0] = `{ role:"system", content: sysPrompt + transferCtx + richCtx + mcpCtx }`；剧情分支同样含 worldText。fireOne 主动消息 L1341 `buildSys(ch, false, ...)` 走私聊分支也含。→ **发送请求体第一句 system 里就有【世界设定】段**。
+4. `src/lib/worldbook.ts` L30-31：`scope==="global"` 全角色生效；`local` 必须角色设定页勾选绑定（`boundWorldBookIds`）。
+5. L116-118 深度分层：`depth=0` 常驻全文；**`depth=1`（默认值）只有触发词命中最近消息才输出全文**（L115 子串或 ≥2 字公共片段匹配）；`depth=2` 只进目录、AI 申请 `[查设定:名]` 才展开。
+
+**"植入没体现"的三个真实原因**（非 bug，是机制+可见性问题）：
+- a) 导入条目默认 `depth=1`（触发式），聊天里没出现触发词就永远不进 system——用户以为注入了其实没有；
+- b) `local` 条目没在角色设定页绑定该角色，直接被过滤掉；
+- c) 协议明令"不要复述或提及这是设定"，模型遵守后用户看不到任何痕迹，无从验证。
+
+现有佐证日志：`[worldbook] section resident=x triggered=y unlocked=z catalog=n`（worldbook.ts L136）与 `[reply] start … sysLen=`（RoleChatApp L987），但界面上不可见。
+
+### 问题③：多选工具栏现状
+
+- `src/components/WorldBookApp.tsx` L56-57：`managing` + `sel: Set<string>`；L76-80 `applyScope(scope)` 批量改 scope 并清空选择；L163-199 工具条 JSX（全选/改为全局/改为局部/清空选择）。
+- 单条删除已有模式：L59-62 `save({ ...wb, __del: true })` → `prev.filter(b => b.id !== wb.id)`。
+- 项目已有 `@/components/ui/alert-dialog.tsx` 可作二次确认。
 
 ## 三、方案设计
 
-### 方案选型
+### ① 进入会话自动滚到底
 
-**流式输出**：采用 OpenAI 兼容协议的 `stream: true` + SSE 解析（`data: {...}\n\n` 行协议），新建 `chatStream` 函数，回调式逐 chunk 上报文本片段，由 RoleChatApp 维护临时 state 实时刷新界面，最终完整文本走既有 settleReply 落库。候选地址兜底逻辑复用 withCandidates。
+RoleChatApp 新增 effect：依赖 `[view, active?.id]`，当 `view === "chat"` 时用**瞬时滚动**（behavior:"auto"，避免 smooth 被内容增长截断）滚到底，并在 300ms 后（开场白卡/图片渲染完成后）再校正一次；打日志 `[chat] enter scroll bottom char=… len=…`。为不影响流式输出的连续滚动体验，仅"进入会话"这一时机用瞬时定位。
 
-**用户发图**：ChatEntry 新增 `imageUrl?: string`（data URL）；输入栏加 ImagePlus 按钮触发隐藏 file input，选中后 compressToDataUrl 压缩、构造 user entry 立即上屏；toHist fmt 检测到 imageUrl 时将 content 改为多模态 array `[{type:"text",...},{type:"image_url",image_url:{url}}]`；表情包同理（stickerUrl 存在时也转多模态）。
+实现细节：
+- 复用 listRef；effect 内 `requestAnimationFrame(() => listRef.current?.scrollTo({ top: scrollHeight }))` + `setTimeout(300)` 二次校正（cleanup 清 timer）。
+- 若 log 尚未从存储恢复完（usePersisted 同步读取，首帧即有数据），无需额外等待。
 
-### 备选方案对比
+### ② 世界书注入可视化 + 降低"未命中"困惑
 
-- 流式：SSE vs WebSocket → SSE 更轻量、OpenAI 协议原生支持，无需额外依赖。
-- 发图入口：相册 App 跳转 vs 输入栏直接选图 → 输入栏直接选图体验更连贯，与转账/定位卡片同级。
-- 识图范围：仅最新一条用户图片 vs 最近 N 条历史图片均带 vision → 仅最新一条控制 token 消耗，历史记录保持文本摘要。
+- **诊断日志增强**（worldbook.ts buildWorldSectionV2）：现有日志追加未触发条目名单与各自关键词，形如 `[worldbook] miss=<名字(关键词)>…`，控制台可直接核对为何某条没进 system。
+- **角色编辑页提示保持现状**（已有说明文案），不改交互。
+- **可选优化（纳入本次）**：ImportPanel 导入档位文案已含深度说明，不动。
+- 回复用户疑问的结论会写进交付总结：世界书确实已接入 API（system 第一段），"没体现"多为 depth=1 未命中触发词或 local 未绑定。
 
-## 四、实现步骤
+### ③ 多选一键删除
 
-### Step 1：扩展类型契约（chat-types.ts / types.ts）
+WorldBookApp：
+- 新增 `deleteSelected()`：仿 applyScope，`setBooks(prev => prev.filter(b => !sel.has(b.id)))`，日志 `[worldbook] batch delete count=N`，清空 sel。
+- 工具条在「改为局部」后加 rose 色「删除」按钮（Trash2 图标，disabled={!sel.size}）。
+- 点击先弹 AlertDialog 确认（标题"删除选中的 N 条世界书？"，说明"删除后不再注入模型，不可恢复"，取消/删除两键）；确认后执行。
 
-- `src/lib/chat-types.ts` L31-74：ChatEntry 新增 `imageUrl?: string`（注释说明为 data URL，vision 输入用）。
-- `src/lib/chat-types.ts` L194-203：SendPrefs 新增 `streamingEnabled?: boolean`（默认 false，旧数据自动兼容）。
-- `src/lib/types.ts`：AiConfig 无需改动（stream 由 SendPrefs 控制，不进接口配置）。
+## 四、涉及文件清单
 
-### Step 2：新建流式 API 层（ai-api.ts）
+| 文件绝对路径 | 改动 |
+|---|---|
+| `/home/project/src/components/RoleChatApp.tsx` | 新增进入会话滚动 effect（view/activeId 变化时瞬时滚底 + 300ms 校正，带 [chat] enter scroll 日志） |
+| `/home/project/src/lib/worldbook.ts` | buildWorldSectionV2 日志追加 miss 明细（未命中的触发式条目名+关键词） |
+| `/home/project/src/components/WorldBookApp.tsx` | 工具条加「删除」按钮 + AlertDialog 二次确认 + deleteSelected()（[worldbook] batch delete 日志） |
 
-- 新增导出函数 `chatStream(cfg, history, onChunk, signal?): Promise<string>`：
-  - body 带 `stream: true`，走 withCandidates 兜底。
-  - 读取 response.body.getReader()，TextDecoder 按 `\n` 分行，解析 `data: ` 前缀的 JSON，提取 `choices[0].delta.content`，拼接全量文本并每次调用 onChunk(累计文本)。
-  - 遇到 `data: [DONE]` 结束，返回完整字符串。
-  - 错误处理复用 HttpError/toFriendlyTestError 模式。
-- 保留原 `chatCompletion` 不动（非流式场景仍用）。
+## 五、验收标准
 
-### Step 3：改造 toHist 支持 vision（RoleChatApp.tsx）
+1. 从会话列表/桌面点进一个已有大量历史的对话，界面直接停在最底部最新消息处，无需手动下滑；来回切换两个会话均正确。
+2. 打开浏览器控制台发一条消息，能看到 `[worldbook] section resident/triggered/...` 与 `[reply] start … sysLen=`；把某 local 条目绑定角色并把某条目设为常驻后，sysLen 明显增大、miss 日志列出未命中条目——证明注入链路真实有效。
+3. 世界书页进入管理模式→勾选若干条目→点「删除」→弹确认框→确认后条目消失且刷新后不复现；取消则不删；全选删除也可用。
+4. `pnpm run build` + `npx tsc --noEmit` 零错误，dev 预览正常。
 
-- L823-914 toHist 内 fmt 函数：当 entry 有 `imageUrl` 或 `stickerUrl` 且为本轮最后一条用户消息时，content 改为 array：
-  ```ts
-  content: [
-    { type: "text", text: e.content || "[图片]" },
-    { type: "image_url", image_url: { url: e.imageUrl ?? e.stickerUrl! } }
-  ]
-  ```
-- 其余历史消息保持纯 string（控制 token）。
-- 类型层面：messages 参数从 `{ role: string; content: string }[]` 放宽为 `{ role: string; content: string | VisionPart[] }[]`，chatCompletion/chatStream 签名同步。
+## 六、风险与兼容
 
-### Step 4：接入流式开关到 requestReply（RoleChatApp.tsx）
-
-- L839 requestReply 开头读取 `prefs.streamingEnabled`。
-- 若开启：调用 chatStream，onChunk 回调里 setLog 更新一个临时 assistant entry（id 固定如 `streaming-temp`，content 实时更新），流结束后删除临时 entry、走 settleReply 正式落库。
-- 若关闭：维持现有 chatCompletion 一次性返回。
-- regenWith 内部两处调用同样分支（跟随全局开关）。
-- fireOne 主动消息暂不接流式（后台静默生成，无界面感知）。
-
-### Step 5：输入栏新增图片按钮（RoleChatApp.tsx）
-
-- L1799-1848 输入区 JSX：在 ToolboxButton 旁插入 `<button onClick={() => fileInputRef.current?.click()}><ImagePlus/></button>`。
-- 隐藏 `<input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden"/>`。
-- handleFileSelect：compressToDataUrl(file) → 构造 `{ id, role:"user", content:"", imageUrl: dataUrl, at }` → setLog + writeLogNow → 触发 requestReply。
-- 渲染层：assistant/user 气泡区域检测 entry.imageUrl 显示 `<img src={entry.imageUrl} className="max-w-[200px] rounded-lg"/>`。
-
-### Step 6：设置页新增流式开关（SettingsApp.tsx）
-
-- 找到 SendPrefs 相关 UI 区块（L340-354 NotificationSection 样式参照）。
-- 新增 Switch 项「流式输出」，绑定 prefs.streamingEnabled，保存走 vp-phone:send-prefs:v1。
-- 描述文案："开启后角色回复逐字显示，模拟真人打字节奏"。
-
-### Step 7：表情包发送链路升级（StickerApp.tsx / RoleChatApp.tsx）
-
-- sendSticker 构造 entry 时同时写入 `stickerUrl`（已有）和可选 `imageUrl`（同值，便于统一 vision 判断）。
-- toHist fmt 对 stickerUrl 消息同样转多模态（见 Step 3）。
-
-## 五、涉及文件清单
-
-| 文件绝对路径 | 改动类型 | 具体改动 |
-|-------------|---------|---------|
-| `/home/project/src/lib/chat-types.ts` | 修改 | L31-74 ChatEntry 加 imageUrl?；L194-203 SendPrefs 加 streamingEnabled? |
-| `/home/project/src/lib/ai-api.ts` | 修改 | 新增 chatStream 导出函数；chatCompletion 签名放宽 content 类型 |
-| `/home/project/src/components/RoleChatApp.tsx` | 修改 | L823-914 toHist fmt 支持 vision array；L839 requestReply 分支流式；L1799-1848 输入栏加图片按钮+file input；渲染层显示 imageUrl；regenWith 两处同步 |
-| `/home/project/src/components/SettingsApp.tsx` | 修改 | SendPrefs 区块加流式开关 Switch |
-| `/home/project/src/components/StickerApp.tsx` | 可选微调 | sendSticker 写 imageUrl 字段（若 stickerUrl 已足够则不改） |
-
-## 六、测试与验证
-
-1. **构建门禁**：`pnpm run build` 零错误 + `npx tsc --noEmit` 零类型错误。
-2. **流式开关**：开启后发消息观察是否逐字上屏；关闭后恢复一次性返回；切换会话/退出重进不影响开关持久化。
-3. **发图识别**：上传一张含明显物体的照片，TA 回复应提及图片内容；表情包发送后 TA 能针对表情含义回应。
-4. **兼容性**：旧聊天记录（无 imageUrl/streamingEnabled）加载不报错；非 vision 模型（如 deepseek-chat）收到图片时接口报 400 应有友好提示而非白屏。
-5. **预览验收**：dev 启动后截图验证输入栏图片按钮可见、设置页流式开关渲染正常。
-
-## 七、风险评估
-
-| 风险点 | 影响 | 缓解措施 |
-|--------|------|---------|
-| 网关不支持 stream | 部分中转站 SSE 格式差异导致解析失败 | chatStream 内置 fallback：解析异常时退回等待完整响应再一次性返回 |
-| vision 增加 token 消耗 | 长对话带多图成本上升 | 仅本轮最后一条用户图片转多模态，历史图片保持文本摘要 |
-| 大图片 base64 超 localStorage 配额 | 存储写入失败 | compressToDataUrl 强制 ≤200KB；catch QuotaExceededError 给出提示 |
-| 非 vision 模型报错 | 用户体验断裂 | 捕获 400/415 错误，翻译成人话"当前模型不支持看图，请换 gpt-4o 等视觉模型" |
+- 进入会话瞬时滚动不影响消息流内的 smooth 滚动体验（只在 view/charId 切换时机触发）。
+- 删除为不可恢复操作，故强制 AlertDialog 确认；不影响热梗世界书（预置 300 条独立存储，不在本列表）。
+- 世界书机制本身零改动（scope/depth/触发逻辑原样保留），只加日志与 UI，不会改变现有 AI 行为。

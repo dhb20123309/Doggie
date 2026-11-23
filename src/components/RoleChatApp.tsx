@@ -483,12 +483,49 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     console.log(`[quote] cite msg=${entry.id} role=${entry.role} → 引用条上屏`);
   };
 
-  /** 在气泡外层包一层长按/右键操作（紧耦合子组件 MessageActions 内联本文件底部） */
+  /** 在气泡外层包一层长按/右键操作（紧耦合子组件 MessageActions 内联本文件底部）；assistant 消息附带重新回复 */
   const wrapCitable = (entry: ChatEntry, node: React.ReactNode) => (
-    <MessageActions key={entry.id} open={actionFor === entry.id} onOpenChange={(v) => setActionFor(v ? entry.id : null)} onCite={() => citeEntry(entry)}>
+    <MessageActions
+      key={entry.id}
+      open={actionFor === entry.id}
+      onOpenChange={(v) => setActionFor(v ? entry.id : null)}
+      onCite={() => citeEntry(entry)}
+      {...(entry.role === "assistant" && !entry.failed && !entry.proactive && !entry.transfer ? { onRegen: () => regenReply(entry.id) } : {})}
+    >
       {node}
     </MessageActions>
   );
+
+  /** 重新回复：对 TA 这条回复不满意——删掉该条及其后的 assistant 消息，回到触发它的那句用户消息重新生成。
+   *  重发时带换说法指令，避免模型原样再回一遍；转账/剧情灰框/主动消息不参与（各有独立交互） */
+  const regenReply = (entryId: string) => {
+    if (!active || pending || !ready) return;
+    const idx = log.findIndex((e) => e.id === entryId);
+    if (idx < 0) return;
+    let anchor = -1;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (log[i].role === "user") {
+        anchor = i;
+        break;
+      }
+    }
+    if (anchor < 0) {
+      console.warn(`[regen] no user anchor before ${entryId}，跳过`);
+      return;
+    }
+    const kept = log.slice(0, anchor + 1).map((en) => (en.id === log[anchor].id ? { ...en, failed: false } : en));
+    console.log(`[regen] char=${active.id} msg=${entryId} → 截断到 ${log[anchor].id} 重发（界面丢弃 ${log.length - kept.length} 条后续消息）`);
+    setLog(kept);
+    // 存储按"删掉这条 assistant 及其后所有 assistant"处理：保留用户在此期间真实发出的新消息，只撤回复
+    writeLogNow(active.id, (prev) => {
+      const cut = prev.findIndex((e) => e.id === entryId);
+      if (cut < 0) return prev;
+      return prev.filter((e, i) => i < cut || e.role === "user");
+    });
+    setActionFor(null);
+    regenHintRef.current = true;
+    void requestReply(kept, log[anchor].id, Boolean(active.storyMode));
+  };
 
   // ===== 转账（微信式橙色卡片；余额 vp-phone:wallet:v1） =====
   const [wallet, setWallet] = useWallet();
@@ -601,6 +638,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   }, [log, pending, view, prefs.batchQueueMode]);
   /** 深层世界书解锁表：charId → AI 已用 [查设定:名字] 申请过、下一轮起全文注入的条目名（内存态，不落库） */
   const unlockedIntroRef = useRef<Record<string, string[]>>({});
+  /** 重新回复标记：requestReply 组历史时若为 true，追加"换全新说法"指令并在起播后复位 */
+  const regenHintRef = useRef(false);
 
   /** 消化回复里的 [查设定:名字] 标记：登记解锁 + 返回去掉标记的干净文本 */
   const digestIntroRequests = (charId: string, text: string): string => {
@@ -717,7 +756,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
       const fmt = (e: ChatEntry) => (e.transfer ? `[转账卡片 ¥${e.transfer.amount.toFixed(2)} 备注:${e.transfer.note}${e.transfer.settled ? ` ${e.transfer.settled === "received" ? "已收" : "已退"}` : e.transfer.type === "incoming" ? " 待收" : ""}]` : e.content);
-      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) }))];
+      // 重新回复：上一条不满意已被截掉，但模型需要知道要换个说法——追加一条系统指令再请求
+      const regenDirective = regenHintRef.current
+        ? { role: "user" as const, content: storyMode ? "（系统提示：刚才那段剧情被删掉了。这次换全新的叙述角度、意象和措辞重写这一段——不许复用被删版本的句子，情节走向可以不同但必须承接更早的前文）" : "（系统提示：你上一句回复被撤回了。这次用完全不同的说法和角度接她的话——不许复用刚才的句子和口头禅，可以换个反应、换个话题切入点；保持口语化短消息）" }
+        : null;
+      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) })), ...(regenDirective ? [regenDirective] : [])];
       // 剧情链路：玩家消息带人称锚点包装（前文叙述转"你"），assistant 历史原样保留——记忆完整互通
       const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt }];
       let lastStoryNarration = "";
@@ -733,11 +776,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           if (e.story) lastStoryNarration = e.content;
         }
       }
+      if (regenDirective) out.push(regenDirective);
       return out;
     };
     console.log(
-      `[reply] start char=${ch.id} msg=${userMsgId} story=${storyMode ? "on" : "off"} typing=${storyMode ? "narrative" : "human-protocol"} → pending(正在输入中) sysLen=${sysPrompt.length}`
+      `[reply] start char=${ch.id} msg=${userMsgId} story=${storyMode ? "on" : "off"} typing=${storyMode ? "narrative" : "human-protocol"}${regenHintRef.current ? " regen=1" : ""} → pending(正在输入中) sysLen=${sysPrompt.length}`
     );
+    regenHintRef.current = false;
     setPending(true);
     scrollBottom();
     // 拟真节奏：至少显示 1.2s"正在输入中"，避免秒回穿帮；期间请求已在进行
@@ -2127,16 +2172,19 @@ function QuoteBlock({ quote, side }: { quote: { name: string; content: string };
   );
 }
 
-/** 消息长按/右键操作条（紧耦合父子组件内联本文件）：pointer 序列判定长按（移动>10px 或 >600ms 即放弃），桌面右键直开 */
+/** 消息长按/右键操作条（紧耦合父子组件内联本文件）：pointer 序列判定长按（移动>10px 或 >600ms 即放弃），桌面右键直开；assistant 消息附带重新回复 */
 function MessageActions({
   open,
   onOpenChange,
   onCite,
+  onRegen,
   children,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCite: () => void;
+  /** 传入时在操作条显示「重新回复」按钮（仅普通 assistant 气泡） */
+  onRegen?: () => void;
   children: React.ReactNode;
 }) {
   const timer = useRef<number | null>(null);
@@ -2193,6 +2241,19 @@ function MessageActions({
             <Quote className="size-3" />
             引用
           </button>
+          {onRegen && (
+            <button
+              type="button"
+              onClick={() => {
+                console.log("[regen] action → 重新回复");
+                onRegen();
+              }}
+              className="jelly-btn flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-white hover:bg-white/10"
+            >
+              <RefreshCw className="size-3" />
+              重新回复
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onOpenChange(false)}

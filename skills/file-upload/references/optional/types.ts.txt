@@ -1,0 +1,23 @@
+// Copy this file together with fileProcessing.ts only when explicit image
+// processing is requested. It is intentionally unrelated to upload transport.
+
+export interface ProcessedFile {
+  body: Blob;
+  bytes: ArrayBuffer;
+  displayName: string;
+  extension: string;
+  mimeType: string;
+  sizeBytes: number;
+  checksumSha256: string;
+  compressed: boolean;
+}
+
+export type ImageCompressor = (
+  source: Blob,
+  options: {
+    mimeType: 'image/jpeg' | 'image/png';
+    maxDimension: number;
+    maxPixels: number;
+    jpegQuality: number;
+  },
+) => Promise<Blob | null>;

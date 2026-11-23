@@ -6,11 +6,13 @@ interface Props {
   passcode: string;
   wallpaper: string;
   onUnlock: () => void;
+  /** 真机沉浸模式：顶部时间区避开系统状态栏安全区 */
+  immersive?: boolean;
 }
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"];
 
-export function LockScreen({ passcode, wallpaper, onUnlock }: Props) {
+export function LockScreen({ passcode, wallpaper, onUnlock, immersive = false }: Props) {
   const [now, setNow] = useState(() => new Date());
   const [entered, setEntered] = useState("");
   const [error, setError] = useState(false);
@@ -61,7 +63,7 @@ export function LockScreen({ passcode, wallpaper, onUnlock }: Props) {
       {/* 内容层：自身不做 transform，玻璃子元素才不会在动画期间降级模糊 */}
       <div className="lock-content relative z-10 flex h-full flex-col">
         {/* 顶部时间区 */}
-        <div className="flex flex-col items-center pt-14">
+        <div className={`flex flex-col items-center ${immersive ? "pt-[calc(2.5rem+env(safe-area-inset-top))]" : "pt-14"}`}>
           <Lock className="size-5 text-white/85" strokeWidth={1.6} />
           <p className="mt-3 font-display text-[56px] font-semibold leading-none tracking-tight tabular-nums" style={{ textShadow: "0 2px 14px rgba(60,50,90,.45)" }}>
             {String(now.getHours()).padStart(2, "0")}:{String(now.getMinutes()).padStart(2, "0")}

@@ -70,8 +70,8 @@ export function HomeCarousel({ config, wallpaper, onOpen }: Props) {
         <Screen2 />
       </div>
 
-      {/* 分页指示点 */}
-      <div className="pointer-events-auto absolute bottom-[86px] left-1/2 z-40 flex -translate-x-1/2 items-center gap-1.5">
+      {/* 分页指示点（真机下上移避开 Home 横条安全区，防止被压成悬空线） */}
+      <div className="pointer-events-auto absolute bottom-[calc(86px+env(safe-area-inset-bottom))] left-1/2 z-40 flex -translate-x-1/2 items-center gap-1.5">
         {[0, 1].map((i) => (
           <button
             key={i}
@@ -345,7 +345,7 @@ function Dock({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   const btn = "jelly-icon flex w-16 flex-col items-center gap-0.5";
   const box = "relative flex size-9 items-center justify-center rounded-[13px] border border-white/80 bg-white/70 text-[oklch(0.42_0.05_80)] shadow-[0_3px_10px_-3px_rgba(180,150,90,0.3)]";
   return (
-    <div className="glass-strong absolute bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-8 rounded-full px-6 py-2 shadow-[0_8px_28px_-8px_rgba(180,150,90,0.35)]">
+    <div className="glass-strong absolute bottom-[calc(20px+env(safe-area-inset-bottom))] left-1/2 z-40 flex -translate-x-1/2 items-center gap-8 rounded-full px-6 py-2 shadow-[0_8px_28px_-8px_rgba(180,150,90,0.35)]">
       <button type="button" className={btn} onClick={() => onOpen("album")}>
         <span className={box}><Images className="size-[18px]" /></span>
         <span className="text-[10px] text-[oklch(0.4_0.04_80)]">相册</span>

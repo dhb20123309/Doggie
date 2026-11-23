@@ -89,6 +89,7 @@ import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
 import {
+  LANGUAGE_PROTOCOL,
   ANTI_GREASE_BASELINE,
   LIVING_PERSON_PROTOCOL,
   TEXT_STYLE_PROTOCOL,
@@ -628,7 +629,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           }\n` +
           STORY_PROTOCOL(ch.name || "他") +
           CHARACTER_FIDELITY +
-          // 第二批全局协议：反油腻底线+活人主体性+渐进交互（剧情共用），叙事去AI味仅剧情链路
+          // 语言跟随（外国角色卡自带翻译）：人设无论什么语言，回复一律中文；外语长句在 sanitizeReply 层兜底拦截
+          LANGUAGE_PROTOCOL +
           ANTI_GREASE_BASELINE +
           LIVING_PERSON_PROTOCOL +
           PROGRESSIVE_BOND_PROTOCOL +
@@ -652,7 +654,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         HUMAN_TYPING_PROTOCOL +
         CHARACTER_FIDELITY +
         ONLINE_CHAT_ECONOMY +
-        // 第二批全局协议（私聊链路）：反油腻底线+活人主体性+渐进交互为共用层，打字说话风格仅私聊
+        // 语言跟随（外国角色卡自带翻译）：人设外语也一律中文回复，她切外语才跟过去
+        LANGUAGE_PROTOCOL +
         ANTI_GREASE_BASELINE +
         LIVING_PERSON_PROTOCOL +
         PROGRESSIVE_BOND_PROTOCOL +

@@ -137,9 +137,26 @@ export const OOC_PATTERNS =
 
 /** 转账/收款话术白名单：形似"收到…转账/已到账"的 OOC 兜底词在带 transfer 上下文的回复里放行（真人收钱就会说这些） */
 const MONEY_OK_RE = /(收到|领取|收下|转入|打款).{0,6}转账|转账.{0,6}(成功|已到账|已收取)|已(经)?到账|到账了|(钱|红包).{0,4}(收下|收了)/i;
+
+/** 整行英文检测（≥12 字符且拉丁字母占比 ≥70%）：外国角色卡模型易切英文，整行英文按出戏拦截重生成；
+ *  中文为主夹杂英文短句（真人聊天习惯）不误伤，短英文（lol / ok / emmm）天然不触发 */
+const LATIN_RUN_RE = /[A-Za-zÀ-ÿ][a-zA-Z'’\-À-ÿ]*/g;
+export function isMostlyEnglish(line: string): boolean {
+  const s = line.trim();
+  if (s.length < 12) return false;
+  const runs = s.match(LATIN_RUN_RE);
+  const latinLen = runs ? runs.reduce((n, w) => n + w.length, 0) : 0;
+  return latinLen / s.length >= 0.7;
+}
+
+/** 英文出戏声明（as an AI / I cannot 等）与常见英文脏话：无论中外角色一律滤除该行——中文聊天里冒出来就是出戏 */
+const EN_OOC_RE = /\b(as an? (AI|language model|assistant)|I(?:'m| am) (?:an? )?(?:AI|language model)|I cannot|I can't help|I'?m sorry, but|I do not have (?:emotions|feelings))\b/i;
+const EN_PROFANITY_RE = /\b(fuck(?:ing|ed|s|er)?|shit(?:e)?|bitch(?:es)?|ass ?hole|motherfuck\w*|bastard|dickhead|piss \w+ off)\b/i;
+
 export function isOocLine(line: string): boolean {
   if (MONEY_OK_RE.test(line)) return false;
-  return OOC_PATTERNS.test(line);
+  if (EN_OOC_RE.test(line) || EN_PROFANITY_RE.test(line)) return true;
+  return OOC_PATTERNS.test(line) || isMostlyEnglish(line);
 }
 
 export function sanitizeReply(text: string): string {

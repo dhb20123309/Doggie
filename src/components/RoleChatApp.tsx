@@ -116,7 +116,7 @@ import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, Opene
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 import { emitNotify } from "@/lib/notification-store";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, extractRemoteMarks, execRemoteMarks, answerRemoteConfirm, type McpAction } from "@/lib/reality-mcp";
-import { loadServers as loadRemoteServers, loadToolCache, callTool, buildRemoteMcpContext, type RemoteMcpServer } from "@/lib/remote-mcp";
+import { loadServers as loadRemoteServers, loadToolCache, callTool, buildRemoteMcpContext, hasMediumConsent, grantMediumConsent, type RemoteMcpServer } from "@/lib/remote-mcp";
 import { GroupChatView } from "@/components/GroupChatView";
 import { Avatar } from "@/components/Avatar";
 import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog, groupDigestFor } from "@/lib/group-chat-store";
@@ -1194,18 +1194,20 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
   };
 
-  /** 远程 MCP 桥：execRemoteMarks 通过它拿服务清单/工具缓存/真实调用 */
+  /** 远程 MCP 桥：execRemoteMarks 通过它拿服务清单/工具缓存/真实调用 + 中风险首次授权表 */
   const remoteBridge = () => ({
     servers: () => loadRemoteServers(),
     toolCache: () => loadToolCache(),
     call: (server: RemoteMcpServer, tool: Parameters<typeof callTool>[1], args: Record<string, unknown>, confirmed: boolean) => callTool(server, tool, args, confirmed),
+    mediumConsented: (server: RemoteMcpServer, toolName: string) => hasMediumConsent(server, toolName),
+    grantMedium: (serverId: string, toolName: string) => grantMediumConsent(serverId, toolName),
   });
 
-  // 高危远程调用确认卡：execRemoteMarks 经 CustomEvent 抛出请求，用户点允许/拒绝后 resolve
-  const [remoteConfirm, setRemoteConfirm] = useState<{ id: string; serverName: string; tool: string; argsPreview: string } | null>(null);
+  // 远程调用确认卡（高危每次 / 中危首次）：execRemoteMarks 经 CustomEvent 抛出请求，用户点允许/拒绝后 resolve
+  const [remoteConfirm, setRemoteConfirm] = useState<{ id: string; serverName: string; tool: string; argsPreview: string; level?: "medium" | "high" } | null>(null);
   useEffect(() => {
     const onAsk = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { id: string; serverName: string; tool: string; argsPreview: string } | null;
+      const detail = (e as CustomEvent).detail as { id: string; serverName: string; tool: string; argsPreview: string; level?: "medium" | "high" } | null;
       setRemoteConfirm(detail);
     };
     window.addEventListener("vp-mcp:confirm", onAsk);
@@ -2025,7 +2027,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       </div>
 
       <div className="glass-nav border-t border-white/50 px-3 py-2.5">
-        {/* 远程 MCP 高危调用确认卡 */}
+        {/* 远程 MCP 调用确认卡：高危每次确认 / 中危首次授权 */}
         {remoteConfirm && (
           <div className="absolute inset-x-0 bottom-0 z-[74] bg-black/40 p-3" onClick={() => answerRemoteConfirm(remoteConfirm.id, false)}>
             <div className="drawer-panel glass-strong rounded-2xl p-4" onClick={(e) => e.stopPropagation()}>
@@ -2038,7 +2040,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               {remoteConfirm.argsPreview && remoteConfirm.argsPreview !== "{}" && (
                 <p className="mt-1 max-h-20 overflow-y-auto break-all rounded-lg bg-white/60 px-2 py-1.5 text-[10.5px] leading-relaxed text-muted-foreground">参数：{remoteConfirm.argsPreview}</p>
               )}
-              <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">该操作被标记为高危，拒绝后 TA 只会知道你不同意，不会执行任何请求。</p>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                {remoteConfirm.level === "medium"
+                  ? "该工具会读取你的私人内容（涉私）。同意后系统会记住这次授权、之后自动执行；你随时可在远程 MCP 面板撤销。拒绝则本次不执行。"
+                  : "该操作被标记为高危，每次都会这样请你确认。拒绝后 TA 只会知道你不同意，不会执行任何请求。"}
+              </p>
               <div className="mt-3 flex gap-2">
                 <Button size="sm" className="jelly-btn h-8 flex-1 bg-primary text-[12px] text-primary-foreground" onClick={() => answerRemoteConfirm(remoteConfirm.id, true)}>
                   允许执行

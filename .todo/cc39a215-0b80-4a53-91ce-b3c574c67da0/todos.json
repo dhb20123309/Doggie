@@ -1,0 +1,16 @@
+[
+  {
+    "id": "c4",
+    "status": "completed",
+    "content": "SettingsApp 云端账号 Section + PhoneShell 引导卡/自动备份",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "c5",
+    "status": "completed",
+    "content": "双门禁 + 测试账号验证备份恢复闭环 + AGENTS.md + 交付",
+    "priority": "medium",
+    "skills": []
+  }
+]

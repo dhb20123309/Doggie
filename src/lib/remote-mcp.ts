@@ -9,6 +9,17 @@ const MAX_LOG = 60;
 
 /* ---------- 类型契约 ---------- */
 
+export type AuthKind = "none" | "bearer" | "apikey" | "oauth";
+
+/** OAuth 公开客户端参数（严禁 client secret） */
+export interface OAuthParams {
+  authorizeUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  scope?: string;
+  revokeUrl?: string;
+}
+
 export interface RemoteMcpServer {
   id: string;
   name: string;
@@ -17,14 +28,16 @@ export interface RemoteMcpServer {
   host: string;
   auth: AuthKind;
   addedAt: number;
+  oauth?: OAuthParams;
+  /** 中风险工具首次授权记录（toolName → 授权时间） */
+  mediumConsents?: Record<string, number>;
 }
-
-export type AuthKind = "none" | "bearer" | "apikey";
 
 export interface McpToolMeta {
   name: string;
   description: string;
-  risk: "low" | "high";
+  /** 低=可自动调用并显示来源；中=涉私读取，首次授权并明确范围；高=写操作，每次展示参数确认 */
+  risk: "low" | "medium" | "high";
   /** 是否涉及私人内容（消息、文件、账号数据等） */
   private: boolean;
 }
@@ -35,7 +48,8 @@ export interface McpManifest {
   endpoint?: string;
   transport?: string;
   auth?: { type?: string; header?: string };
-  tools?: { name?: string; description?: string; sideEffect?: boolean; isPrivate?: boolean }[];
+  oauth?: Partial<OAuthParams>;
+  tools?: { name?: string; description?: string; sideEffect?: boolean; isPrivate?: boolean; risk?: string }[];
 }
 
 export interface McpCallLog {
@@ -251,6 +265,7 @@ export interface InstallPreview {
   endpoint: string;
   host: string;
   auth: AuthKind;
+  oauth?: OAuthParams;
   tools: McpToolMeta[];
   warnings: string[];
 }
@@ -278,20 +293,32 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
       const epCheck = validateMcpUrl(mf.endpoint);
       if (!epCheck.ok) return { ok: false, reason: `服务地址不安全：${epCheck.reason}` };
       const endpoint = stripUrlSecrets(mf.endpoint);
-      const auth: AuthKind = AUTH_LABELS[(mf.auth?.type ?? "").toLowerCase()] ?? (mf.auth?.type ? "apikey" : "none");
+      const authType = (mf.auth?.type ?? "").toLowerCase();
+      // OAuth 声明需带齐 authorize/token/clientId 才生效，且各地址过安全校验
+      const preWarnings: string[] = [];
+      let oauth: OAuthParams | undefined;
+      if (authType === "oauth" && mf.oauth?.authorizeUrl && mf.oauth?.tokenUrl && mf.oauth?.clientId) {
+        const a = validateMcpUrl(mf.oauth.authorizeUrl);
+        const t = validateMcpUrl(mf.oauth.tokenUrl);
+        if (a.ok && t.ok) oauth = { authorizeUrl: mf.oauth.authorizeUrl, tokenUrl: mf.oauth.tokenUrl, clientId: mf.oauth.clientId, scope: mf.oauth.scope, revokeUrl: mf.oauth.revokeUrl };
+        else preWarnings.push(`OAuth 地址未通过安全校验（${a.ok ? t.reason : a.reason}），已按无认证处理`);
+      }
+      const auth: AuthKind = oauth ? "oauth" : AUTH_LABELS[authType] ?? (mf.auth?.type ? "apikey" : "none");
       const tools: McpToolMeta[] = (mf.tools ?? []).slice(0, 40).map((t) => ({
         name: String(t?.name ?? "未命名工具").slice(0, 48),
         description: String(t?.description ?? "").slice(0, 120),
-        risk: t?.sideEffect ? "high" : "low",
+        risk: t?.risk === "medium" || (t?.risk === undefined && t?.isPrivate && !t?.sideEffect) ? "medium" : t?.sideEffect || t?.risk === "high" ? "high" : "low",
         private: Boolean(t?.isPrivate),
       }));
-      const warnings: string[] = [];
+      const warnings: string[] = [...preWarnings];
+      if (oauth === undefined && authType === "oauth" && !preWarnings.length) warnings.push("配置声明了 OAuth 但缺少 authorize/token/clientId，暂按无认证安装");
       if (!tools.length) warnings.push("该服务没有声明工具清单，安装后不会向 AI 开放任何能力");
       if (cand.kind === "url" && new URL(endpoint).origin !== new URL(cand.urls[0]).origin) warnings.push(`注意：配置声明的服务域名（${epCheck.host}）与仓库不同源`);
-      if (auth !== "none") warnings.push("该服务需要认证密钥，保存后仅存在本机浏览器，不会上传；请确认你信任该服务提供方");
+      if (auth !== "none" && auth !== "oauth") warnings.push("该服务需要认证密钥，保存后仅存在本机浏览器，不会上传；请确认你信任该服务提供方");
+      if (auth === "oauth") warnings.push("该服务使用 OAuth 授权：将跳转系统浏览器授权页（PKCE + state 防伪造），token 只存本机且日志遮盖；安装后可在服务列表点「OAuth 授权」发起");
       return {
         ok: true,
-        preview: { sourceLabel: cand.label, kind: cand.kind, name: (mf.name ?? cand.label).slice(0, 30), endpoint, host: epCheck.host as string, auth, tools, warnings },
+        preview: { sourceLabel: cand.label, kind: cand.kind, name: (mf.name ?? cand.label).slice(0, 30), endpoint, host: epCheck.host as string, auth, oauth, tools, warnings },
       };
     } catch (e) {
       if (signal?.aborted) return { ok: false, reason: "已取消" };
@@ -328,6 +355,7 @@ export function addServer(preview: InstallPreview, auth: AuthKind): RemoteMcpSer
     host: preview.host,
     auth,
     addedAt: Date.now(),
+    ...(preview.oauth && auth === "oauth" ? { oauth: preview.oauth } : {}),
   };
   saveServers([...loadServers(), s]);
   console.log(`[mcp-remote] installed ${s.name} host=${s.host} auth=${auth}`);
@@ -337,19 +365,31 @@ export function addServer(preview: InstallPreview, auth: AuthKind): RemoteMcpSer
 export function removeServer(id: string) {
   saveServers(loadServers().filter((s) => s.id !== id));
   writeLogEntries(loadLog().filter((l) => l.serverId !== id));
+  clearToken(id);
   console.log(`[mcp-remote] removed server=${id}`);
 }
 
-/** 清除授权：抹掉密钥引用并停用全部工具授权 */
+/** 清除授权：抹掉密钥/token 引用并停用全部工具授权 */
 export function revokeAuth(id: string) {
   try {
     localStorage.removeItem(`vp-phone:mcp-key:${id}`);
   } catch {
     /* ignore */
   }
-  const list = loadServers().map((s) => (s.id === id ? { ...s, auth: "none" as AuthKind } : s));
+  clearToken(id);
+  const list = loadServers().map((s) => (s.id === id ? { ...s, auth: "none" as AuthKind, mediumConsents: undefined } : s));
   saveServers(list);
   console.log(`[mcp-remote] auth revoked server=${id}`);
+}
+
+/** 中风险工具的首次授权记录（toolName → 时间） */
+export function hasMediumConsent(server: RemoteMcpServer, toolName: string): boolean {
+  return Boolean(server.mediumConsents?.[toolName]);
+}
+
+export function grantMediumConsent(serverId: string, toolName: string) {
+  saveServers(loadServers().map((s) => (s.id === serverId ? { ...s, mediumConsents: { ...(s.mediumConsents ?? {}), [toolName]: Date.now() } } : s)));
+  console.log(`[mcp-remote] medium consent granted server=${serverId} tool=${toolName}`);
 }
 
 export function setServerKey(id: string, key: string) {
@@ -367,6 +407,234 @@ export function hasServerKey(id: string): boolean {
   } catch {
     return false;
   }
+}
+
+/* ---------- OAuth（PKCE + state，公开客户端不存 client secret） ---------- */
+
+const OAUTH_STATE_KEY = "vp-pho…e:v1";
+const OAUTH_VERIFIER_KEY = "vp-phone:mcp-oauth:verifier:v1";
+const OAUTH_RETURN_KEY = "vp-phone:mcp-oauth:return:v1";
+/** token 安全存储：localStorage 不可用时内存兜底（本会话有效） */
+const memoryTokens = new Map<string, string>();
+
+export interface OAuthConfig {
+  authorizeUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  scope?: string;
+}
+
+function randomString(len = 40): string {
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => ("0" + b.toString(16)).slice(-2)).join("");
+}
+
+async function sha256Base64url(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** 发起授权：生成 PKCE verifier 与随机 state，跳系统浏览器授权页。serverId 传入表示对已装服务重新授权 */
+export async function startOAuth(target: { name: string; endpoint: string }, cfg: OAuthConfig, serverId?: string): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    if (!cfg.authorizeUrl || !cfg.tokenUrl || !cfg.clientId.trim()) return { ok: false, reason: "授权地址 / Token 地址 / Client ID 均不能为空" };
+    for (const [label, url] of [["authorize", cfg.authorizeUrl], ["token", cfg.tokenUrl]] as const) {
+      const v = validateMcpUrl(url);
+      if (!v.ok) return { ok: false, reason: `${label} 地址不安全：${v.reason}` };
+    }
+    const verifier = randomString(32);
+    const challenge = await sha256Base64url(verifier);
+    const state = randomString(16);
+    localStorage.setItem(OAUTH_VERIFIER_KEY, verifier);
+    localStorage.setItem(OAUTH_STATE_KEY, JSON.stringify({ state, serverName: target.name, endpoint: target.endpoint, clientId: cfg.clientId.trim(), ...(serverId ? { serverId } : {}) }));
+    localStorage.setItem(OAUTH_RETURN_KEY, location.origin + location.pathname);
+    const u = new URL(cfg.authorizeUrl);
+    u.searchParams.set("response_type", "code");
+    u.searchParams.set("client_id", cfg.clientId.trim());
+    u.searchParams.set("redirect_uri", localStorage.getItem(OAUTH_RETURN_KEY) ?? "");
+    u.searchParams.set("code_challenge", challenge);
+    u.searchParams.set("code_challenge_method", "S256");
+    u.searchParams.set("state", state);
+    if (cfg.scope?.trim()) u.searchParams.set("scope", cfg.scope.trim());
+    console.log(`[mcp-remote] oauth start host=${u.hostname} state=generated`);
+    window.open(u.toString(), "_blank", "noopener");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "无法发起授权" };
+  }
+}
+
+/** 回调处理：只认本次发起的 state（伪造回调因 state 不匹配被拒），换 code 用 PKCE verifier */
+export async function handleOAuthCallback(search: string): Promise<{ ok: boolean; message: string }> {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const code = params.get("code");
+  const state = params.get("state");
+  const err = params.get("error");
+  const raw = (() => {
+    try {
+      return localStorage.getItem(OAUTH_STATE_KEY);
+    } catch {
+      return null;
+    }
+  })();
+  // 先取出 verifier，再一次性消费 state（clearOAuthFlow 会同时抹掉 verifier）
+  const verifier = (() => {
+    try {
+      return localStorage.getItem(OAUTH_VERIFIER_KEY) || "";
+    } catch {
+      return "";
+    }
+  })();
+  clearOAuthFlow();
+  if (err) return { ok: false, message: `授权未完成：${err === "access_denied" ? "你在授权页点了取消" : err}` };
+  if (!code || !state) return { ok: false, message: "回调缺少 code/state，已忽略" };
+  if (!raw) return { ok: false, message: "已拒绝：收到伪造回调（本机没有等待中的授权流程）" };
+  let ctx: { state: string; serverName: string; endpoint: string; serverId?: string; clientId?: string };
+  try {
+    ctx = JSON.parse(raw) as typeof ctx;
+  } catch {
+    return { ok: false, message: "已拒绝：授权上下文损坏" };
+  }
+  if (ctx.state !== state) return { ok: false, message: "已拒绝：state 与本次授权不符（疑似伪造回调或 CSRF）" };
+  if (!verifier) return { ok: false, message: "已拒绝：PKCE verifier 丢失，请重新发起授权" };
+  const servers = loadServers();
+  const server = servers.find((s) => (ctx.serverId ? s.id === ctx.serverId : s.name === ctx.serverName));
+  if (!server) return { ok: false, message: `授权成功但服务「${ctx.serverName}」已被移除，token 丢弃` };
+  try {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: localStorage.getItem(OAUTH_RETURN_KEY) || location.origin + location.pathname,
+      client_id: server.oauth?.clientId ?? ctx.clientId ?? "",
+      code_verifier: verifier,
+    });
+    const res = await fetch(server.oauth?.tokenUrl ?? server.url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString(), signal: AbortSignal.timeout(15_000) });
+    const j = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string };
+    if (!res.ok || !j.access_token) return { ok: false, message: `换取 token 失败：${j.error ?? `HTTP ${res.status}`}` };
+    setToken(server.id, j.access_token, j.refresh_token, j.expires_in);
+    saveServers(loadServers().map((s) => (s.id === server.id ? { ...s, auth: "oauth" as AuthKind } : s)));
+    appendCallLog(server, "OAuth 授权", true, "access_token 已写入安全存储（日志不落原文）");
+    console.log(`[mcp-remote] oauth callback ok server=${server.name}`);
+    return { ok: true, message: `「${server.name}」授权成功，token 已保存` };
+  } catch (e) {
+    return { ok: false, message: `换取 token 失败：${e instanceof Error ? e.message : "网络错误"}` };
+  }
+}
+
+/** 对已安装服务发起 OAuth 授权（需服务带有 oauth 参数或面板手动填过） */
+export async function startOAuthForServer(server: RemoteMcpServer, cfg?: Partial<OAuthConfig>): Promise<{ ok: boolean; reason?: string }> {
+  const merged: OAuthConfig = {
+    authorizeUrl: cfg?.authorizeUrl ?? server.oauth?.authorizeUrl ?? "",
+    tokenUrl: cfg?.tokenUrl ?? server.oauth?.tokenUrl ?? "",
+    clientId: cfg?.clientId ?? server.oauth?.clientId ?? "",
+    scope: cfg?.scope ?? server.oauth?.scope,
+  };
+  const r = await startOAuth({ name: server.name, endpoint: server.url }, merged, server.id);
+  if (r.ok && cfg && (cfg.authorizeUrl || cfg.tokenUrl || cfg.clientId)) {
+    // 手动补全的参数写回服务，下次直接复用
+    saveServers(loadServers().map((s) => (s.id === server.id ? { ...s, oauth: { authorizeUrl: merged.authorizeUrl, tokenUrl: merged.tokenUrl, clientId: merged.clientId, scope: merged.scope, revokeUrl: s.oauth?.revokeUrl } } : s)));
+  }
+  return r;
+}
+
+function clearOAuthFlow() {
+  try {
+    localStorage.removeItem(OAUTH_STATE_KEY);
+    localStorage.removeItem(OAUTH_VERIFIER_KEY);
+    localStorage.removeItem(OAUTH_RETURN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+interface StoredToken {
+  access: string;
+  refresh?: string;
+  /** 过期时刻 epoch ms；无 expires_in 按 1 小时保守处理 */
+  expAt: number;
+}
+
+function setToken(serverId: string, access: string, refresh?: string, expiresIn?: number) {
+  const t: StoredToken = { access, ...(refresh ? { refresh } : {}), expAt: Date.now() + Math.max(60, expiresIn ?? 3600) * 1000 };
+  try {
+    localStorage.setItem(`vp-phone:mcp-token:${serverId}`, JSON.stringify(t));
+  } catch {
+    memoryTokens.set(serverId, JSON.stringify(t));
+  }
+}
+
+function readToken(serverId: string): StoredToken | null {
+  try {
+    const raw = localStorage.getItem(`vp-phone:mcp-token:${serverId}`) || memoryTokens.get(serverId);
+    return raw ? (JSON.parse(raw) as StoredToken) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 过期自动刷新；刷新失败即要求重新授权 */
+async function ensureFreshToken(server: RemoteMcpServer): Promise<StoredToken | null> {
+  const t = readToken(server.id);
+  if (!t) return null;
+  if (Date.now() < t.expAt - 30_000) return t;
+  if (!t.refresh || !server.oauth?.tokenUrl) {
+    clearToken(server.id);
+    return null;
+  }
+  try {
+    const res = await fetch(server.oauth.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: t.refresh, client_id: server.oauth.clientId }).toString(),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const j = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number };
+    if (!res.ok || !j.access_token) {
+      clearToken(server.id);
+      return null;
+    }
+    setToken(server.id, j.access_token, j.refresh_token ?? t.refresh, j.expires_in);
+    console.log(`[mcp-remote] token refreshed server=${server.name}`);
+    return readToken(server.id);
+  } catch {
+    clearToken(server.id);
+    return null;
+  }
+}
+
+function clearToken(serverId: string) {
+  try {
+    localStorage.removeItem(`vp-phone:mcp-token:${serverId}`);
+  } catch {
+    /* ignore */
+  }
+  memoryTokens.delete(serverId);
+}
+
+export function hasValidToken(serverId: string): boolean {
+  const t = readToken(serverId);
+  return Boolean(t && Date.now() < t.expAt);
+}
+
+/** 撤销授权：先向服务端 revoke（尽力而为），再清本地 token */
+export async function revokeOAuth(server: RemoteMcpServer): Promise<void> {
+  const t = readToken(server.id);
+  if (t && server.oauth?.revokeUrl) {
+    try {
+      await fetch(server.oauth.revokeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: t.access, token_type_hint: "access_token", client_id: server.oauth.clientId }).toString(),
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => undefined);
+    } catch {
+      /* 服务端撤销失败也要清本地 */
+    }
+  }
+  clearToken(server.id);
+  saveServers(loadServers().map((s) => (s.id === server.id ? { ...s, auth: "none" as AuthKind } : s)));
+  console.log(`[mcp-remote] oauth revoked server=${server.name}`);
 }
 
 /* ---------- 调用日志（遮盖 token 与私人内容） ---------- */
@@ -401,7 +669,7 @@ export function maskSecrets(text: string): string {
   return out;
 }
 
-function appendLog(server: RemoteMcpServer, tool: string, ok: boolean, note: string) {
+export function appendCallLog(server: RemoteMcpServer, tool: string, ok: boolean, note: string) {
   const entry: McpCallLog = { id: `l${Date.now()}${Math.random().toString(36).slice(2, 5)}`, serverId: server.id, serverName: server.name, tool, at: Date.now(), ok, note: maskSecrets(note).slice(0, 140) };
   writeLogEntries([...loadLog(), entry]);
   console.log(`[mcp-remote] call log ${server.name}/${tool} ${ok ? "ok" : "fail"}`);
@@ -421,8 +689,8 @@ export interface CallResult {
 }
 
 export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args: Record<string, unknown>, confirmed: boolean): Promise<CallResult> {
-  if (tool.risk === "high" && !confirmed) {
-    appendLog(server, tool.name, false, "高危调用未经用户确认，已拒绝");
+  if ((tool.risk === "high" || tool.risk === "medium") && !confirmed) {
+    appendCallLog(server, tool.name, false, `${tool.risk === "high" ? "高危" : "中危"}调用未经用户确认，已拒绝`);
     return { ok: false, text: "该操作需要你确认后才会执行", content: "" };
   }
   const check = validateMcpUrl(server.url);
@@ -437,6 +705,14 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
   })();
   if (server.auth === "bearer" && key) headers.Authorization = `Bearer ${key}`;
   if (server.auth === "apikey" && key) headers["X-API-Key"] = key;
+  if (server.auth === "oauth") {
+    const t = await ensureFreshToken(server);
+    if (!t) {
+      appendCallLog(server, tool.name, false, "OAuth token 缺失或已过期，需重新授权");
+      return { ok: false, text: `「${server.name}」的授权已过期或被撤销，请在远程 MCP 面板重新授权`, content: "" };
+    }
+    headers.Authorization = `Bearer ${t.access}`;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -448,7 +724,7 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
     });
     const text = await res.text();
     if (!res.ok) {
-      appendLog(server, tool.name, false, `HTTP ${res.status}`);
+      appendCallLog(server, tool.name, false, `HTTP ${res.status}`);
       return { ok: false, text: `调用失败（HTTP ${res.status}）`, content: "" };
     }
     let summary = "已完成";
@@ -456,7 +732,7 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
     try {
       const j = JSON.parse(text) as { result?: { content?: { text?: string }[] }; error?: { message?: string } };
       if (j.error?.message) {
-        appendLog(server, tool.name, false, j.error.message);
+        appendCallLog(server, tool.name, false, j.error.message);
         return { ok: false, text: `服务返回错误：${maskSecrets(j.error.message).slice(0, 60)}`, content: "" };
       }
       content = (j.result?.content ?? []).map((c) => c.text ?? "").join("\n").slice(0, 2000);
@@ -465,11 +741,11 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
       content = text.slice(0, 800);
       summary = "非 JSON 响应";
     }
-    appendLog(server, tool.name, true, `${summary}${tool.private ? " · 结果含私人内容，仅本次会话可见" : ""}`);
+    appendCallLog(server, tool.name, true, `${summary}${tool.private ? " · 结果含私人内容，仅本次会话可见" : ""}`);
     return { ok: true, text: `已调用 ${server.name}·${tool.name}（${summary}）`, content: maskSecrets(content) };
   } catch (e) {
     const msg = e instanceof Error ? (e.name === "AbortError" ? "请求超时（15 秒）" : e.message) : "网络错误";
-    appendLog(server, tool.name, false, msg);
+    appendCallLog(server, tool.name, false, msg);
     return { ok: false, text: `调用失败：${msg}`, content: "" };
   } finally {
     clearTimeout(timer);
@@ -484,11 +760,11 @@ export function buildRemoteMcpContext(servers: RemoteMcpServer[], toolCache: Rec
   const lines = ["\n【远程 MCP 服务】以下是你已获授权连接的第三方服务，可在对方要求时使用："];
   for (const s of servers) {
     const tools = toolCache[s.id] ?? [];
-    lines.push(`- ${s.name}（${s.host}）：${tools.length ? tools.map((t) => `${t.name}${t.risk === "high" ? "〔高危〕" : ""}${t.private ? "〔涉私〕" : ""}`).join("、") : "未声明工具"}`);
+    lines.push(`- ${s.name}（${s.host}）：${tools.length ? tools.map((t) => `${t.name}${t.risk === "high" ? "〔高危〕" : t.risk === "medium" ? "〔中危〕" : ""}${t.private ? "〔涉私〕" : ""}`).join("、") : "未声明工具"}${s.auth === "oauth" && !hasValidToken(s.id) ? "〔OAuth 未授权〕" : ""}`);
   }
   lines.push(
     "使用方式：单独一行输出 [远程MCP:服务名:工具名:参数JSON]（参数为 JSON 对象，可省略则写 {}）。",
-    "规则：只在对方明确要求或明显需要时调用；标注〔高危〕的工具系统会先向对方二次确认；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；绝不调用未在清单中的工具。",
+    "规则：只在对方明确要求或明显需要时调用；标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
   );
   return lines.join("\n");
 }

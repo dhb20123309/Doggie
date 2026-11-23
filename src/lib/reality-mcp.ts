@@ -446,10 +446,19 @@ export async function shareTrackToMusicApp(url: string, title: string): Promise<
 
 /* ---------- AI 协议与标记解析 ---------- */
 
-/** 远程 MCP 高危调用确认：内存 Promise 表，UI 弹卡 resolve；60 秒无操作视为拒绝 */
+/** 远程 MCP 调用确认：内存 Promise 表，UI 弹卡 resolve；60 秒无操作视为拒绝 */
 const pendingConfirms = new Map<string, { resolve: (v: boolean) => void; timer: number }>();
 
-export function requestRemoteConfirm(req: { serverName: string; tool: string; argsPreview: string }): Promise<boolean> {
+export interface RemoteConfirmRequest {
+  id: string;
+  serverName: string;
+  tool: string;
+  argsPreview: string;
+  /** medium=首次授权（记住后自动）；high=每次确认 */
+  level: "medium" | "high";
+}
+
+export function requestRemoteConfirm(req: Omit<RemoteConfirmRequest, "id">): Promise<boolean> {
   const id = `c${Date.now()}${Math.random().toString(36).slice(2, 5)}`;
   return new Promise<boolean>((resolve) => {
     const timer = window.setTimeout(() => {
@@ -501,9 +510,13 @@ export interface RemoteMcpBridge {
   servers: () => RemoteMcpServer[];
   toolCache: () => Record<string, McpToolMeta[]>;
   call: (server: RemoteMcpServer, tool: McpToolMeta, args: Record<string, unknown>, confirmed: boolean) => Promise<{ ok: boolean; text: string; content: string }>;
+  /** 中风险工具是否已首次授权 */
+  mediumConsented?: (server: RemoteMcpServer, toolName: string) => boolean;
+  /** 记住中风险工具的首次授权 */
+  grantMedium?: (serverId: string, toolName: string) => void;
 }
 
-/** 执行 AI 输出的远程 MCP 标记（由 RoleChatApp 注入桥接实现），返回执行记录串 */
+/** 执行 AI 输出的远程 MCP 标记（由 RoleChatApp 注入桥接实现），返回执行记录串。三级风险控制：低=自动并显示来源；中=首次授权后自动；高=每次确认参数 */
 export async function execRemoteMarks(marks: RemoteMcpMark[], bridge: RemoteMcpBridge): Promise<string> {
   if (!marks.length) return "";
   const parts: string[] = [];
@@ -521,17 +534,36 @@ export async function execRemoteMarks(marks: RemoteMcpMark[], bridge: RemoteMcpB
       continue;
     }
     let confirmed = false;
-    if (tool.risk === "high") {
+    if (tool.risk === "low") {
+      // 低风险：查询天气、读取公开资料等——自动调用，结果必须标注来源
+      confirmed = true;
+    } else if (tool.risk === "medium") {
+      // 中风险：读取私人日历、网盘文件等——首次需用户授权并明确范围，之后自动
+      if (bridge.mediumConsented?.(server, tool.name)) {
+        confirmed = true;
+      } else {
+        const preview = JSON.stringify(m.args).slice(0, 80);
+        confirmed = await requestRemoteConfirm({ serverName: server.name, tool: m.toolName, argsPreview: preview, level: "medium" });
+        if (confirmed) bridge.grantMedium?.(server.id, tool.name);
+        else {
+          const r = await bridge.call(server, tool, m.args, false);
+          parts.push(`✗ ${r.text}`);
+          continue;
+        }
+      }
+    } else {
+      // 高风险：发帖、发邮件、付款、删除——每次都展示参数并请用户确认
       const preview = JSON.stringify(m.args).slice(0, 80);
-      confirmed = await requestRemoteConfirm({ serverName: server.name, tool: m.toolName, argsPreview: preview });
+      confirmed = await requestRemoteConfirm({ serverName: server.name, tool: m.toolName, argsPreview: preview, level: "high" });
       if (!confirmed) {
         const r = await bridge.call(server, tool, m.args, false);
         parts.push(`✗ ${r.text}`);
         continue;
       }
     }
-    const r = await bridge.call(server, tool, m.args, true);
-    parts.push(`${r.ok ? "✓" : "✗"} ${r.text}${r.content ? `\n返回摘要：${r.content.slice(0, 120)}` : ""}`);
+    const r = await bridge.call(server, tool, m.args, confirmed);
+    const src = tool.risk === "low" ? "（来源：" + server.name + "）" : "";
+    parts.push(`${r.ok ? "✓" : "✗"} ${r.text}${src}${r.content ? `\n返回摘要：${r.content.slice(0, 120)}` : ""}`);
   }
   return parts.join(" ｜ ");
 }

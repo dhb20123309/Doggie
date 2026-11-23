@@ -21,6 +21,7 @@ import { useAuth } from "@/features/supabase-auth-runtime";
 import { AuthSheet } from "./AuthSheet";
 import { CloudOnboard } from "./CloudOnboard";
 import { backupNow, installDirtyTracker, isAutoBackupOn, isDirty, readLastBackupAt } from "@/lib/cloud-store";
+import { handleOAuthCallback } from "@/lib/remote-mcp";
 
 const ONBOARD_KEY = "vp-pho…d:v1";
 const AUTO_GAP_MS = 30 * 60 * 1000; // 自动备份节流：距上次成功至少 30 分钟
@@ -46,6 +47,26 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const { status: authStatus } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [onboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY));
+  const [oauthMsg, setOauthMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // OAuth 回调接收：URL 带 code/state（或 error）时处理一次并清理地址栏，只认本次发起的授权
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (!sp.has("code") && !sp.has("state") && !sp.has("error")) return;
+    let alive = true;
+    void handleOAuthCallback(window.location.search).then((r) => {
+      const clean = window.location.pathname + window.location.hash.replace(/[?&].*$/, "");
+      window.history.replaceState({}, "", clean);
+      if (alive) {
+        setOauthMsg({ ok: r.ok, text: r.message });
+        console.log(`[mcp-remote] oauth callback handled ok=${r.ok}`);
+        window.setTimeout(() => setOauthMsg(null), 6000);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 云存档：安装写入脏标记监听 + 切后台/关页时按开关静默自动备份
   useEffect(() => {
@@ -194,6 +215,19 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                 aria-label="关闭通知"
                 className="jelly-icon -m-1 shrink-0 self-center p-1 text-muted-foreground hover:text-foreground"
               >
+                <X className="size-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* OAuth 授权结果横幅：回调处理完显示一次，6 秒自动消失 */}
+        {oauthMsg && (
+          <div className="notify-banner absolute inset-x-2.5 top-[42px] z-[71]">
+            <div className={`glass-strong flex items-start gap-2 rounded-2xl p-3 shadow-lg ${oauthMsg.ok ? "" : "ring-1 ring-rose-300/60"}`}>
+              <span className={`mt-0.5 size-2 shrink-0 rounded-full ${oauthMsg.ok ? "bg-emerald-500" : "bg-rose-500"}`} />
+              <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-neutral-800">{oauthMsg.text}</p>
+              <button type="button" aria-label="关闭" onClick={() => setOauthMsg(null)} className="jelly-icon -m-1 shrink-0 p-1 text-muted-foreground">
                 <X className="size-4" />
               </button>
             </div>

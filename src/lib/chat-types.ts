@@ -45,6 +45,23 @@ export interface ChatEntry {
   story?: boolean;
   /** 拉黑后的拒收系统提示（居中灰字，非角色消息） */
   blockedTip?: boolean;
+  /** 引用的小消息（微信式 reply）：随本条消息一起发出并持久化；剧情灰框消息不可被引用 */
+  quote?: { name: string; content: string };
+}
+
+/** AI 引用历史消息协议：拼入私聊链路 system（编号表由调用方现算追加）。
+ *  标记语法仿 [表情:名字]，落库前由 extractQuote 消化为 ChatEntry.quote。 */
+export const QUOTE_PROTOCOL =
+  "\n【引用功能】你可以像真人一样引用对方某句旧话再接吐槽/回应：在回复的第一行单独写 [引用:N]（N 见下方编号表），第二行起写你要说的话，系统会自动渲染成气泡内嵌的引用小块。" +
+  "只在真的想回指某句旧话时才用，别每条都引用；标记必须占第一行且只有它自己，不要写在句子中间，也不要自己打「引用」二字模仿它。";
+
+const QUOTE_RE = /^\s*\[引用[:：]\s*(\d+)\]/;
+
+/** 拆出 assistant 回复开头的 [引用:N] 标记 → 序号 + 去掉标记的干净文本（无效/越界由调用方按 null 处理） */
+export function extractQuote(text: string): { idx: number | null; clean: string } {
+  const m = text.match(QUOTE_RE);
+  if (!m) return { idx: null, clean: text };
+  return { idx: Number(m[1]), clean: text.slice(m[0].length).replace(/^[\s:：,，]+/, "") };
 }
 
 /** 会话已读水位：charId → 最后查看时间戳 */

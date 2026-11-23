@@ -19,6 +19,7 @@ import {
   X,
   MoreVertical,
   Ban,
+  Quote,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,8 @@ import {
   isRepetitiveReply,
   STORY_PROTOCOL,
   displayName,
+  QUOTE_PROTOCOL,
+  extractQuote,
 } from "@/lib/chat-types";
 import {
   type WorldBook,
@@ -361,6 +364,106 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const stateRef = useRef({ log, input, pending, ready, prefs });
   stateRef.current = { log, input, pending, ready, prefs };
   const autoTimer = useRef<number | null>(null);
+
+  // ===== 引用功能（微信式 reply；剧情灰框消息不可引用） =====
+  /** 输入框上方待发送的引用条 */
+  const [quoteDraft, setQuoteDraft] = useState<{ name: string; content: string } | null>(null);
+  /** 长按/右键某条消息后浮出的操作条目标 id */
+  const [actionFor, setActionFor] = useState<string | null>(null);
+  // 切会话时清掉待发引用与操作条
+  if (profileCharRef.current !== (active?.id ?? "")) {
+    setQuoteDraft(null);
+    setActionFor(null);
+  }
+  useEffect(() => {
+    if (!actionFor) return;
+    const close = () => setActionFor(null);
+    window.addEventListener("pointerdown", close, true);
+    return () => window.removeEventListener("pointerdown", close, true);
+  }, [actionFor]);
+
+  /** 可引用候选列表：最近 20 条非失败、非剧情灰框、非拒收提示的消息（编号表与 AI 引用解析共用同一口径） */
+  const quoteCandidates = (es: ChatEntry[]): ChatEntry[] =>
+    es.filter((e) => !e.failed && !e.story && !e.blockedTip).slice(-20);
+
+  /** 给 system 拼"可引用消息编号表"：[1] TA说：… / [2] 你说：… */
+  const buildQuoteTable = (ch: Character, entries: ChatEntry[]): string => {
+    const list = quoteCandidates(entries);
+    if (!list.length) return "";
+    const lines = list.map((e, i) => `[${i + 1}] ${e.role === "user" ? "你说" : ch.name || "TA"}说：${e.content.replace(/\s+/g, " ").slice(0, 40)}`);
+    return `\n【可引用的历史消息编号表】\n${lines.join("\n")}\n（想引用哪条，就在那条回复最前面写 [引用:序号]）`;
+  };
+
+  /** 消化 assistant 回复里的 [引用:N]：行首或"引用："开头命中编号表即拆出 quote 小块；越界仅删标记 */
+  const digestQuote = (reply: string, entries: ChatEntry[]): { text: string; quote?: { name: string; content: string } } => {
+    const rawLines = reply.split(/\r?\n/);
+    const firstLine = rawLines[0] ?? "";
+    let idx: number | null = null;
+    let clean = firstLine;
+    const m = extractQuote(firstLine);
+    if (m.idx != null) {
+      idx = m.idx;
+      clean = m.clean;
+    } else {
+      // 兜底：模型爱用"引用：xxx"纯文本格式——按内容在候选里找最接近的一条
+      const t = firstLine.match(/^引用[:：]\s*(.+)$/);
+      if (t) {
+        const want = t[1].replace(/[\s"'“”‘’、。，,.!?！？~～…：:;；()（）\-—_·]/g, "");
+        const list0 = quoteCandidates(entries);
+        let best = -1;
+        let bestScore = 0;
+        list0.forEach((e, i) => {
+          const c = e.content.replace(/[\s"'“”‘’、。，,.!?！？~～…：:;；()（）\-—_·]/g, "");
+          const score = want && c && (c.includes(want) || want.includes(c)) ? Math.min(c.length, want.length) : 0;
+          if (score > bestScore) {
+            bestScore = score;
+            best = i;
+          }
+        });
+        if (best >= 0 && bestScore >= 2) {
+          idx = best + 1;
+          clean = "";
+        } else {
+          // 找不到对应原文：保留这行当普通文字，只去掉"引用："前缀易误伤，原样放行
+          return { text: reply };
+        }
+      } else return { text: reply };
+    }
+    const list = quoteCandidates(entries);
+    const target = list[idx - 1];
+    if (!target) {
+      console.log(`[quote] ai index=${idx} 越界丢弃 len=${list.length}`);
+      const rest = rawLines.slice(1).filter(Boolean);
+      return { text: rest.length ? `${clean}\n${rest.join("\n")}`.trim() : clean };
+    }
+    const quote = {
+      name: target.role === "user" ? "我" : displayName(active ?? ({ name: "TA" } as Character)),
+      content: target.content.replace(/\[表情:[^\]]*\]/g, "").trim().slice(0, 80) || "[图片]",
+    };
+    console.log(`[quote] ai cited #${idx} role=${target.role} → 渲染引用小块`);
+    const rest = rawLines.slice(1).filter(Boolean);
+    const body = clean.trim();
+    const text = [body, ...rest].filter(Boolean).join("\n");
+    return { text, quote };
+  };
+
+  /** 长按/右键消息 → 把该条塞进引用条（剧情灰框已在渲染层不挂此交互） */
+  const citeEntry = (entry: ChatEntry) => {
+    if (!active) return;
+    const content = entry.stickerUrl
+      ? "[表情包]"
+      : entry.content.replace(/\[表情:[^\]]*\]/g, "").trim().slice(0, 80) || "[空消息]";
+    setQuoteDraft({ name: entry.role === "user" ? "我" : displayName(active), content });
+    setActionFor(null);
+    console.log(`[quote] cite msg=${entry.id} role=${entry.role} → 引用条上屏`);
+  };
+
+  /** 在气泡外层包一层长按/右键操作（紧耦合子组件 MessageActions 内联本文件底部） */
+  const wrapCitable = (entry: ChatEntry, node: React.ReactNode) => (
+    <MessageActions key={entry.id} open={actionFor === entry.id} onOpenChange={(v) => setActionFor(v ? entry.id : null)} onCite={() => citeEntry(entry)}>
+      {node}
+    </MessageActions>
+  );
   /** 深层世界书解锁表：charId → AI 已用 [查设定:名字] 申请过、下一轮起全文注入的条目名（内存态，不落库） */
   const unlockedIntroRef = useRef<Record<string, string[]>>({});
 
@@ -378,7 +481,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   /** 每次请求现算：人设 + 生效世界书（按插入深度分层） + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL。
    * memeText：热梗世界书命中片段（由调用方按"本轮用户消息"现算，剧情/私聊两条链路共用注入位） */
   const buildSys = useCallback(
-    (ch: Character, story: boolean, memeText = "", recentText = "") => {
+    (ch: Character, story: boolean, memeText = "", recentText = "", quoteTable = "") => {
       const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
       const usable = stickers.filter((s) => s.isGlobal);
       const worldText = buildWorldSectionV2(activeBooks, recentText, unlockedIntroRef.current[ch.id] ?? []);
@@ -409,6 +512,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
         memeText +
+        QUOTE_PROTOCOL +
+        quoteTable +
         "\n\n" +
         buildStickerHint(usable)
       );
@@ -423,7 +528,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   const toHistory = (ch: Character, entries: ChatEntry[]) => [
-    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" ")) },
+    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), ch.storyMode ? "" : buildQuoteTable(ch, entries)) },
     ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
   ];
 
@@ -443,7 +548,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // 快照请求上下文：回复在后台继续，退出聊天页/切换会话也不会打断（结果直写该角色存储）
     const ch = active;
     const cfgSnapshot = config;
-    const sysPrompt = buildSys(ch, storyMode, memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "));
+    const sysPrompt = buildSys(ch, storyMode, memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), storyMode ? "" : buildQuoteTable(ch, entries));
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
       if (!storyMode) return [{ role: "system", content: sysPrompt }, ...msgs.map((e) => ({ role: e.role, content: e.content }))];
@@ -517,6 +622,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           return firstTry.v;
         };
         let clean = result.ok ? digestIntroRequests(ch.id, sanitizeReply(result.reply)) : "";
+        let quoted = clean ? digestQuote(clean, entries) : { text: "" };
+        clean = quoted.text;
         let rep = false;
         if (clean && isRepetitiveReply(clean, recentAssistants)) {
           rep = true;
@@ -535,15 +642,16 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           );
           if (again) {
             console.log(`[reply] regen ok char=${ch.id}`);
-            settleReply(ch.id, userMsgId, digestIntroRequests(ch.id, again), storyMode);
+            const againDigest = digestQuote(digestIntroRequests(ch.id, again), entries);
+            settleReply(ch.id, userMsgId, againDigest.text, storyMode, againDigest.quote);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
           }
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
-          console.log(`[reply] ok char=${ch.id} len=${clean.length}`);
-          settleReply(ch.id, userMsgId, clean, storyMode);
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}`);
+          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
@@ -557,13 +665,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
-  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false) => {
+  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }) => {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
       // 只标记本次新产出的回复为剧情内容：历史消息的 story 标记原样保留（记忆互通）
       const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
-      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}) }] : kept;
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
     } catch {
@@ -585,7 +693,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const text = input.trim();
     if (!text || pending || !ready) return false;
     const story = Boolean(active?.storyMode);
-    const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now(), ...(story ? { story: true } : {}) };
+    const quote = quoteDraft ?? undefined;
+    const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}) };
     // 先同步更新界面（用户气泡必须立刻出现），再直写该角色存储保证后台回复基于完整上下文；
     // 顺序反了会被后续 setLog(stored) 用旧快照覆盖掉刚发的消息（曾导致自己发的消息要退出重进才可见）
     setLog((prev) => [...prev, userMsg]);
@@ -593,6 +702,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // 重新产生记录即恢复开场白条（清空记录的隐藏标记只作用于空会话期间）
     if (chatCleared[active?.id ?? ""]) setChatCleared((prev) => ({ ...prev, [active?.id ?? ""]: false }));
     setInput("");
+    setQuoteDraft(null);
     scrollBottom();
     // 立即进入"正在输入中"并请求回复；请求发出后即与页面解耦，切走/返回也不会打断
     void requestReply([...stateRef.current.log, userMsg], userMsg.id, story);
@@ -642,7 +752,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     let targetId: string | null = null;
     const draft = s.input.trim();
     if (draft) {
-      const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: draft, at: Date.now(), ...(active.storyMode ? { story: true } : {}) };
+      const quote = quoteDraft ?? undefined;
+      const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: draft, at: Date.now(), ...(active.storyMode ? { story: true } : {}), ...(quote ? { quote } : {}) };
       entries = [...entries, userMsg];
       targetId = userMsg.id;
       // 与 flushDraft 同理：先同步更新界面，再直写存储，避免旧快照覆盖刚发的消息
@@ -650,6 +761,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       setLog(entries);
       writeLogNow(active.id, (prev) => [...prev, userMsg]);
       setInput("");
+      setQuoteDraft(null);
     } else {
       for (let i = entries.length - 1; i >= 0; i--) {
         if (entries[i].role === "user") {
@@ -1147,13 +1259,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               </div>
             );
           }
+          // 普通气泡挂长按/右键引用操作（剧情灰框在上面分支已 return，天然不可引用）
           return entry.role === "user" ? (
-            <div key={entry.id} className="flex flex-col items-end gap-1">
-              {entry.stickerUrl ? (
-                <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
-              ) : (
-                <Bubble side="right">{entry.content}</Bubble>
-              )}
+            wrapCitable(
+              entry,
+              <div className="flex flex-col items-end gap-1">
+                {entry.quote && <QuoteBlock quote={entry.quote} side="right" />}
+                {entry.stickerUrl ? (
+                  <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
+                ) : (
+                  <Bubble side="right">{entry.content}</Bubble>
+                )}
               <span className="msg-time pr-1">{fmtTime(entry.at)}</span>
               {entry.failed && !pending && (
                 <Button
@@ -1167,17 +1283,20 @@ export function RoleChatApp({ config, background, onBack }: Props) {
                 </Button>
               )}
             </div>
+            )
           ) : (
-            <AssistantRow
-              key={entry.id}
-              entry={entry}
-              character={active}
-              stickerLib={stickers}
-              online={ready}
-              canSpeak={canSpeak}
-              speaking={voiceBusy === entry.id}
-              onSpeak={() => void speak(entry.id, entry.content)}
-            />
+            wrapCitable(
+              entry,
+              <AssistantRow
+                entry={entry}
+                character={active}
+                stickerLib={stickers}
+                online={ready}
+                canSpeak={canSpeak}
+                speaking={voiceBusy === entry.id}
+                onSpeak={() => void speak(entry.id, entry.content)}
+              />
+            )
           );
         })}
         {pending && (
@@ -1194,6 +1313,23 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       </div>
 
       <div className="glass-nav border-t border-white/50 px-3 py-2.5">
+        {/* 引用条：待发引用显示在输入框上方，微信式浅灰小块 + 关闭按钮 */}
+        {quoteDraft && (
+          <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-1.5">
+            <Quote className="size-3.5 shrink-0 text-primary/70" />
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+              {quoteDraft.name}：{quoteDraft.content}
+            </span>
+            <button
+              type="button"
+              onClick={() => setQuoteDraft(null)}
+              aria-label="取消引用"
+              className="jelly-icon flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         {showGenerate && (hasDraft || awaitingReply) && !pending && ready && (
           <Button
             size="sm"
@@ -1631,7 +1767,18 @@ function AssistantRow({
   onSpeak: () => void;
 }) {
   const lines = splitBubbles(entry.content);
-  const parts = lines.flatMap((line) => parseReplyToMessages(line, stickerLib));
+  // entry.quote（AI 引用历史消息）只挂在第一个文字气泡上方，微信式 reply 小块
+  let quoteUsed = false;
+  type RenderPart = { type: "text"; content: string; quote?: { name: string; content: string } } | { type: "sticker"; sticker: Sticker };
+  const parts: RenderPart[] = lines.flatMap((line) =>
+    parseReplyToMessages(line, stickerLib).map((p): RenderPart => {
+      if (p.type === "text" && p.content && !quoteUsed && entry.quote) {
+        quoteUsed = true;
+        return { type: "text", content: p.content, quote: entry.quote };
+      }
+      return p;
+    })
+  );
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-start gap-2">
@@ -1648,6 +1795,12 @@ function AssistantRow({
             <div key={i} data-reveal-delay={String(i * 60)} className="reveal reveal-up">
               {p.type === "sticker" ? (
                 <img src={p.sticker.url} alt={p.sticker.name} className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
+              ) : p.quote ? (
+                // 引用小块 + 回应文本：微信式嵌在同一气泡上方
+                <div className="flex flex-col gap-1">
+                  <QuoteBlock quote={p.quote} side="left" />
+                  <Bubble side="left">{p.content}</Bubble>
+                </div>
               ) : (
                 <Bubble side="left">{p.content}</Bubble>
               )}
@@ -1681,6 +1834,101 @@ function Bubble({ side, children }: { side: "left" | "right"; children: React.Re
       }`}
     >
       {children}
+    </div>
+  );
+}
+
+/** 气泡内嵌的引用小块（微信式 reply）：左侧竖线 + 名字：内容，随所属气泡同侧收窄对齐 */
+function QuoteBlock({ quote, side }: { quote: { name: string; content: string }; side: "left" | "right" }) {
+  return (
+    <div
+      className={`max-w-full rounded-lg border-l-2 border-primary/50 bg-black/[0.05] px-2.5 py-1 text-[10.5px] leading-snug text-muted-foreground ${
+        side === "right" ? "self-end" : "self-start"
+      }`}
+    >
+      <span className="line-clamp-2 break-words">
+        {quote.name}：{quote.content}
+      </span>
+    </div>
+  );
+}
+
+/** 消息长按/右键操作条（紧耦合父子组件内联本文件）：pointer 序列判定长按（移动>10px 或 >600ms 即放弃），桌面右键直开 */
+function MessageActions({
+  open,
+  onOpenChange,
+  onCite,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCite: () => void;
+  children: React.ReactNode;
+}) {
+  const timer = useRef<number | null>(null);
+  const start = useRef<{ x: number; y: number } | null>(null);
+
+  const cancel = () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    start.current = null;
+  };
+
+  return (
+    <div
+      className="relative"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        cancel();
+        onOpenChange(true);
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        start.current = { x: e.clientX, y: e.clientY };
+        cancel();
+        timer.current = window.setTimeout(() => {
+          timer.current = null;
+          start.current = null;
+          onOpenChange(true);
+        }, 480);
+      }}
+      onPointerMove={(e) => {
+        if (!start.current) return;
+        if (Math.abs(e.clientX - start.current.x) > 10 || Math.abs(e.clientY - start.current.y) > 10) cancel();
+      }}
+      onPointerUp={cancel}
+      onPointerLeave={cancel}
+      onPointerCancel={cancel}
+    >
+      {children}
+      {open && (
+        <div
+          className="drawer-panel absolute right-1/2 top-1 z-30 flex -translate-y-1/2 translate-x-1/2 gap-1 rounded-xl bg-neutral-800/95 p-1 shadow-lg backdrop-blur-sm"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              console.log("[quote] action → 引用");
+              onCite();
+            }}
+            className="jelly-btn flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-white hover:bg-white/10"
+          >
+            <Quote className="size-3" />
+            引用
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            aria-label="关闭"
+            className="jelly-icon flex size-6 items-center justify-center rounded-lg text-white/60 hover:text-white"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

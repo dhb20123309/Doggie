@@ -1,0 +1,30 @@
+[
+  {
+    "content": "chat-types.ts：ChatEntry 加 quote 字段 + QUOTE_PROTOCOL/extractQuote",
+    "id": "q1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "RoleChatApp：长按操作条+引用条+用户消息带引用发出",
+    "id": "q2",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "RoleChatApp：AI 引用链路（编号表注入 system、回复解析渲染 QuoteBlock）",
+    "id": "q3",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "双门禁 + extractQuote 冒烟测试 + 截图验收 + AGENTS.md",
+    "id": "q4",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  }
+]

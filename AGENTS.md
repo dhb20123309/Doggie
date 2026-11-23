@@ -48,6 +48,8 @@
 
 - **世界书一键导入 + 插入深度（第45轮）**：`worldbook.ts` WorldBook 加 depth(0常驻/1触发默认/2深层，旧存档缺省=1)与 keywords[]；autoKeywords 只统计 `[\p{Script=Han}]{2,}` 纯汉字滑窗高频片段（❌ 全字符滑窗会把中英混排文本切成 user/use/er 碎片），短条目无重复词时兜底取正文首个汉字段前缀；buildWorldSectionV2(books, recentText, requestedNames) 三段拼接=常驻全文+触发命中全文（子串或≥2字公共片段双向匹配 shares()）+深层目录（≤20条带 [查设定:名字] 申请指令）；extractIntroRequests 消化标记。parseDocxBuffer 用 jszip 浏览器端解 word/document.xml（pStyle Heading*/Title、整段加粗≤30字、"第X章/数字序号"行视为标题分节）。WorldBookApp 顶栏 FileUp 导入按钮→ImportPanel（文件选择/预览勾选/统一深度三档/重名加序号、上限50条）；列表卡显示深度徽章+触发词；BookEditor 深度三档+触发词 Input(onBlur 手改)。RoleChatApp：buildSys 第四参 recentText（最近3条消息 join），toHistory/requestReply/fireOne 均传入；unlockedIntroRef 内存解锁表，digestIntroRequests 在 settleReply 落库前与主动消息 line 处理处调用（渲染层零改动）。日志 [worldbook] section resident/triggered/unlocked/catalog、deep request、import parsed/count。
 
+- **消息引用功能（第46轮，微信式 reply）**：`chat-types.ts` ChatEntry 加 quote{name,content}；QUOTE_PROTOCOL+extractQuote（行首 [引用:N] 标记解析，仿 [表情:] 协议）。`RoleChatApp.tsx`：MessageActions 内联组件长按（pointerdown 480ms 计时、移动>10px 取消）/右键浮出「引用」操作条；quoteDraft 引用条挂输入框上方（X 取消），flushDraft/generate 随用户消息落库；AI 侧 buildSys 第五参 quoteTable（buildQuoteTable 编号表=最近20条非失败非story非blockedTip，与 digestQuote 同口径）、私聊注入 QUOTE_PROTOCOL+表、剧情/storyMode 传空串不启用；digestQuote 消化回复行首 [引用:N]（含"引用：xxx"纯文本按内容模糊匹配兜底、越界删标记），settleReply 第5参带 quote 持久化；渲染层 QuoteBlock（border-l-2 竖线浅灰小块）挂 user 气泡上方/AssistantRow 第一个文字气泡上方。日志 [quote] cite/ai cited/index 越界。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

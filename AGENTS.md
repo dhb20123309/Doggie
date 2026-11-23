@@ -78,6 +78,8 @@
 
 - **重复消息 + 桌面表情包修复（第60轮）**：①bug"角色消息重复两条"根因＝流式输出首 chunk 即 setPending(false)，倒计时兜底 effect 见 pending=false 且末条仍是 user 会再次 generate → 同一请求双发、settleReply 落库两遍。三层修复（RoleChatApp）：a) `inflightRef = useRef<Set<string>>` 并发闸门，requestReply 开头命中即 return（日志 [reply] skip duplicate request），finally 释放；b) settleReply 幂等——userMsgId 之后已存在 assistant 则丢弃追加（日志 [reply] settle dedupe）；c) settleReply 写库前自愈去重 prev 中相邻同内容 assistant 重复条目（历史脏数据清理，日志 [reply] settle heal dedupe removed=N）。兜底 timer 回调内补发前先查 inflightRef（日志 [reply] fallback skipped/fire）。②桌面宫格缺表情包：HomeCarousel APPS 无 sticker 入口（PhoneShell 路由 screen==="sticker" 一直存在），在 EXTRA_APP（外卖）与「手机能力」之间补粉紫渐变 SmilePlus 图标按钮 onOpen("sticker")，网格注释改 8 App。
 
+- **进会话滚底 + 世界书诊断 + 多选删除（第61轮）**：①RoleChatApp 新增 effect（依赖 [view, active?.id]）：view==="chat" 时 requestAnimationFrame 瞬时 scrollTo(behavior:"auto")（smooth 会被开场白卡/图片撑高截断，这是此前"每次要手动下滑"根因——全文 11 处 scrollBottom 全在发消息动作里，没有进入会话时机）+ 300ms 二次校正，日志 [chat] enter scroll bottom。②worldbook.ts buildWorldSectionV2 加 missed（depth=1 未命中触发词条目）诊断日志 `[worldbook] miss 名字(关键词:…) → 未注入 system`——用户"世界书没体现"三大真实原因：触发式未命中关键词/local 未绑定角色/协议禁止复述设定导致无痕迹，链路本身确认已拼入 sysPrompt（buildSys L809 worldText，私聊 L855 与剧情 L828 均拼接，messages[0].system）。③WorldBookApp 管理工具条加 rose「删除(N)」按钮→AlertDialog 二次确认（取消/删除）→deleteSelected() setBooks filter sel，日志 [worldbook] batch delete count=N。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

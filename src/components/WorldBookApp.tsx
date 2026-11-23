@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import type { WorldBook } from "@/lib/worldbook";
 import { effectiveKeywords, autoKeywords, parseDocxBuffer } from "@/lib/worldbook";
 import { useWorldBooks, usePersisted } from "@/lib/chat-store";
@@ -55,6 +56,8 @@ export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
   // 管理模式：条目卡显示勾选框，支持全选/多选后一键改为全局或局部
   const [managing, setManaging] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  /** 一键删除二次确认弹层（不可恢复） */
+  const [confirmDel, setConfirmDel] = useState(false);
 
   const save = (wb: WorldBook & { __del?: boolean }) => {
     setBooks((prev) => (wb.__del ? prev.filter((b) => b.id !== wb.id) : upsert(prev, wb)));
@@ -77,6 +80,15 @@ export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
     setBooks((prev) => prev.map((b) => (sel.has(b.id) ? { ...b, scope } : b)));
     console.log(`[worldbook] batch scope=${scope} count=${sel.size}`);
     setSel(new Set());
+  };
+  /** 一键删除选中条目（不可恢复，工具条按钮先弹 AlertDialog 确认后才调用） */
+  const deleteSelected = () => {
+    const n = sel.size;
+    if (!n) return;
+    setBooks((prev) => prev.filter((b) => !sel.has(b.id)));
+    console.log(`[worldbook] batch delete count=${n}`);
+    setSel(new Set());
+    setConfirmDel(false);
   };
 
   if (onPick && boundIds) {
@@ -190,6 +202,14 @@ export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
           >
             <Lock className="size-3.5" /> 改为局部
           </button>
+          <button
+            type="button"
+            onClick={() => setConfirmDel(true)}
+            disabled={!sel.size}
+            className="jelly-btn flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-3 py-1 text-[11.5px] font-medium text-destructive disabled:opacity-40"
+          >
+            <Trash2 className="size-3.5" /> 删除{sel.size ? `(${sel.size})` : ""}
+          </button>
           {!!sel.size && (
             <button type="button" onClick={() => setSel(new Set())} className="jelly-icon ml-auto flex size-6 items-center justify-center rounded-full text-muted-foreground" aria-label="清空选择">
               <X className="size-3.5" />
@@ -197,6 +217,28 @@ export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
           )}
         </div>
       )}
+
+      {/* 一键删除二次确认（不可恢复） */}
+      <AlertDialog open={confirmDel} onOpenChange={setConfirmDel}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除选中的 {sel.size} 条世界书？</AlertDialogTitle>
+            <AlertDialogDescription>删除后这些设定不再喂给 AI，且不可恢复。热梗世界书的 300 条预置不受影响。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                deleteSelected();
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
         {/* 热梗世界书入口：300 条网络流行梗，按触发词命中注入让角色接话更有活人感 */}

@@ -120,6 +120,8 @@ export function buildWorldSectionV2(
   const catalog = deep.filter((b) => !unlocked.includes(b)).slice(0, 20);
 
   const full = [...resident, ...triggered, ...unlocked];
+  // 诊断：触发式(depth=1)未命中条目不会进 system——列出名单与关键词，便于核对"为什么这条没体现"
+  const missed = books.filter((b) => (b.depth ?? 1) === 1 && !hit(b));
   let out = "";
   if (full.length) {
     out +=
@@ -134,6 +136,9 @@ export function buildWorldSectionV2(
   }
   if (!out) return "";
   console.log(`[worldbook] section resident=${resident.length} triggered=${triggered.length} unlocked=${unlocked.length} catalog=${catalog.length}`);
+  if (missed.length) {
+    console.log(`[worldbook] miss ${missed.map((b) => `${b.name}(关键词:${effectiveKeywords(b).slice(0, 4).join("/") || "无"})`).join("、")} → 本轮消息未命中触发词，未注入 system`);
+  }
   return out;
 }
 

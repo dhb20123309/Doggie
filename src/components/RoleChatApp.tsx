@@ -372,6 +372,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, active?.id, openerShown, openerCollapsed]);
 
+  // 进入会话默认停在最新消息处：瞬时滚到底（smooth 会被开场白卡/图片渲染撑高截断），300ms 后内容稳定再校正一次
+  useEffect(() => {
+    if (view !== "chat") return;
+    const snap = () => listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "auto" });
+    requestAnimationFrame(snap);
+    const t = window.setTimeout(() => {
+      snap();
+      console.log(`[chat] enter scroll bottom char=${active?.id} len=${stateRef.current.log.length}`);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, active?.id]);
+
   /** 开局引子一键加载到互动剧情模式：作为首条剧情内容写入会话（记忆互通、完整保留），并开启该角色 storyMode */
   const loadIntroToStory = () => {
     if (!active || !profile?.intro) return;

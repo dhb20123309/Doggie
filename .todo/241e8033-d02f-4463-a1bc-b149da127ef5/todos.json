@@ -1,35 +1,28 @@
 [
   {
-    "content": "ai-api.ts 新增 chatStream SSE + content 类型放宽",
-    "id": "s1",
+    "content": "RoleChatApp 进入会话自动滚到底",
+    "id": "w1",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "chat-types.ts ChatEntry.imageUrl + SendPrefs.streamingEnabled",
-    "id": "s2",
-    "priority": "high",
-    "skills": [],
-    "status": "completed"
-  },
-  {
-    "content": "RoleChatApp toHist vision / requestReply 流式 / 输入栏图片按钮 / 渲染",
-    "id": "s3",
-    "priority": "high",
-    "skills": [],
-    "status": "completed"
-  },
-  {
-    "content": "发送习惯页流式开关（PrefsEditor）+ 旧存档浅合并",
-    "id": "s4",
+    "content": "worldbook.ts 注入诊断日志 miss 明细",
+    "id": "w2",
     "priority": "medium",
     "skills": [],
     "status": "completed"
   },
   {
+    "content": "WorldBookApp 多选一键删除 + AlertDialog 确认",
+    "id": "w3",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
     "content": "双门禁验证 + AGENTS.md + 交付",
-    "id": "s5",
+    "id": "w4",
     "priority": "medium",
     "skills": [],
     "status": "completed"

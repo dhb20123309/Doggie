@@ -1,0 +1,59 @@
+# 当前流程：根布局与认证路由
+
+首次接入或修改路由时使用本文件核对公共结构，不要求展开恢复/MFA 等未来流程。具体业务表单按本轮需要读取 [密码登录](auth-password-login-example.md)、[注册收尾](auth-registration-navigation.md)、[普通退出](auth-signout-example.md)。普通接口按 [密码公共合同](password-api.md) 接线；跨流程故障再从 [接线索引](auth-entry-example.md) 选择对应链路。
+
+## 按页面访问语义选择守卫
+
+先确认页面和操作是否需要身份，再选择守卫；`/app` 只是业务路径，不代表全部内容需要登录。AuthProvider 提供共享身份状态，本身不限制页面访问。
+
+| 页面用途 | 接线方式 | 身份变化后的表现 |
+| --- | --- | --- |
+| 公开内容，或游客可浏览、登录后增加能力的混合访问页 | 页面及共享布局不套 AuthGate；需要个性化内容时读取 useAuth | 登录、退出均可留在该页，按状态更新内容，不因 Session 变化强制导航 |
+| 只有登录后才能访问的页面 | 在该页放 AuthGate；仅当某布局全部子页都需登录时，才在布局统一放置 | 匿名时返回登录，保留原地址；loading/error 分别处理 |
+| 登录、注册、找回密码入口 | 使用对应 mode 的 AuthEntryGate | 按下文导航职责推进，注册／恢复不因 Session 先到而离开 |
+
+混合访问页只对需要身份的操作（如收藏、提交）在触发时引导登录，保留安全的 returnTo；浏览公开内容不触发登录跳转。不要把会自动导航的 AuthGate 直接包在可选侧栏或按钮外，否则仍会把整页带走。私有内容组件仅在 authenticated 时挂载并查询；公开内容在身份 loading/error 时继续可用，依赖身份的区域单独显示等待或错误，不把未知状态当成游客执行操作。退出或切换账号时清空旧用户私有数据并隔离旧请求；实际读写权限仍由 API/RLS 校验。
+
+## Web 认证路由的最小接入顺序
+
+适用于新建 Web 认证入口或调整认证布局；已有结构的局部修复只核对受影响链路。文件名与 URL 的对应关系、无路径布局、index 冲突及生成路由树的规则统一见 [react-design 的路由章节](../../react-design/SKILL.md#路由)，此处负责认证页面与业务页面如何组合。Expo 沿用 [Expo 适配](expo-auth.md)，不套用 Web 文件路由结构。
+
+1. **先确定路由关系。** 在当前任务中列出所需页面的「文件路径 → 实际 URL → 父布局 → 登录要求 → 导航负责人」，同时确定根路径用途和登录后的默认目标。已有路由及公开首页按需求保留，不为认证接入统一改成某个路径前缀；不要求新增规划文件。
+2. **接通最小链路再扩展。** 先接入唯一 AuthProvider、登录入口和一个符合需求的最小业务页面，仅在需要登录的边界接入 AuthGate；本轮涉及注册／恢复时，同时确定其独立入口及祖先布局。运行项目已有的 `pnpm run build`，核对生成路由树的实际 URL 与父子关系，通过后再批量填充其余业务页面。跳转职责按下节落实，不能在表单、页面和祖先布局重复处理同一次跳转。
+3. **验证项目实际入口。** 按工程规范启动最新预览，确认登录表单可见；需求包含混合访问页时，验证游客可浏览且只有受限操作引导登录；包含受保护页时，验证匿名访问返回登录。有可用测试身份时验证登录后返回原业务地址、目标页面实际出现及刷新恢复；缺少身份或验证码时记录未验证项，继续可完成的工作，不重搭路由或伪造登录态。注册／恢复的 Session 先到场景按文末验收表检查，构建通过不代表流程已验证。
+4. **保留已验证结构。** 记录已核对的路由关系、验证结果及下一步。仅需求变化或具体错误证据支持调整；修改前定位冲突 URL、父布局或跳转调用方，优先修路由声明、文件名与导航引用，复用业务页面正文。不因尚未验证或缺少登录态就删除重建整组页面，不把「换个思路」当作迁移路由的依据。
+
+下表示意公开首页、混合访问业务区与受保护账号页共存；路径与文件名按产品需求替换，只生成已确认功能需要的入口。根路径可以直接展示首页，不要求跳到 `/app`。
+
+| 示例文件 | 实际 URL | 父布局与访问控制 | 导航负责人 |
+| --- | --- | --- | --- |
+| `routes/__root.tsx` | 根布局，无独立页面 | 挂唯一 AuthProvider 与 Outlet，不统一要求登录 | 不按 Session 跳转 |
+| `routes/index.tsx` | `/` | 根布局，游客与登录用户均可访问 | 展示首页，不按 Session 跳转 |
+| `routes/login.tsx` | `/login` | 根布局，`AuthEntryGate(mode="login")` | Gate 返回安全的 returnTo，默认 `/app` |
+| `routes/register.tsx` | `/register` | 根布局，`AuthEntryGate(mode="register")` | 注册成功步骤 |
+| `routes/reset-password.tsx` | `/reset-password` | 根布局，`AuthEntryGate(mode="recovery")` | 恢复流程退出成功后的 onExit |
+| `routes/app.tsx` | `/app` 布局 | 根布局，仅放共享业务外壳与 Outlet，不统一套 AuthGate | 不按 Session 跳转 |
+| `routes/app.index.tsx` | `/app/` | app 布局，游客可浏览，登录后按需增强 | 仅在触发需要身份的操作时引导登录 |
+| `routes/app.account.tsx` | `/app/account` | app 布局，本页 AuthGate 内挂载私有账号内容 | 匿名时由本页 AuthGate 返回登录 |
+
+只有需求明确 `/app` 下所有页面均需登录时，才将 AuthGate 提升到 `app.tsx`，子页面不再重复守卫。认证入口不挂在要求登录的业务布局下。普通退出行为按页面访问要求处理，见下文。
+
+## 路由类型报错先核对生成结果
+
+`createFileRoute` 全部只能接受 `"/"` 时，先读构建日志的首个路由错误。若有 `Conflicting configuration paths`，按日志列出的两个文件修正同一 URL 冲突：`_app` 是无路径布局，`_app.index.tsx` 仍对应 `/`，不能与 `index.tsx` 同时占用首页；需要 `/app` 就用 `app.tsx` / `app.index.tsx` 并同步页面路径和导航。不能仅重复 build 等待冲突自行消失。
+
+没有冲突且 `src/routeTree.gen.ts` 未更新时，运行一次项目现有 `pnpm run build` 后核对生成树。再执行项目 typecheck（无脚本用 `pnpm exec tsc --noEmit -p tsconfig.json`）。Vite exitCode=0 仍须检查路由生成错误和内嵌 tsc；不手改生成树，不用 `as never` 压错。
+
+`useAuth()` 提供 `status`；判断 `status === 'authenticated'`，不要假设 Router context 有 `authenticated`。仅当根 Router 的 context 类型和传值确实声明该字段时才访问它。
+
+## 先确定谁负责导航
+
+**`AuthEntryGate.mode` 表示当前正在进行的业务流程，不是路由文件名。** 页面在 `/login` 内展示找回密码，也必须从进入找回时使用 recovery 模式。当前模板不会根据子组件或恢复 Hook 自动纠正外层 mode，不能只接入 RecoveryFlow 就认为跳转已受保护。
+
+| 当前流程 | 入口 Gate 的 mode | 收到有效 Session 后 |
+| --- | --- | --- |
+| 普通登录 | `login` | 自动进入安全的 returnTo |
+| 注册及确认／资料收尾 | `register` | 保留当前步骤，业务成功后才导航 |
+| 找回密码：发码到改密／退出完成 | `recovery` | 保留当前步骤，退出恢复会话成功后才返回登录 |
+
+短信 `verifyOtp(type: 'sms')` 成功可先触发 `SIGNED_IN`，邮箱恢复可先触发 `PASSWORD_RECOVERY`；此时 Provider 已有 Session，但验证码请求或后续 `getUser()` 可能尚未返回。若外层仍为 login，Gate 会先跳走并卸载表单，后续新密码步骤无法展示。不能等验证成功才切 mode，也不能提前调用 `enterPasswordRecovery()` 代替入口模式切换：保留页面不等于获得改密资格。

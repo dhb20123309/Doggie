@@ -87,6 +87,7 @@ import { loadVoiceConfig, voiceReady, synthesizeSpeech } from "@/lib/tts";
 import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
+import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
 import { PRESET_MEME_BOOK } from "@/lib/meme-book-data";
 import { type MemeEntry, type MemePrefs, DEFAULT_MEME_PREFS, buildMemeSection } from "@/lib/meme-worldbook";
 import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
@@ -611,12 +612,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const usable = stickers.filter((s) => s.isGlobal);
       const worldText = buildWorldSectionV2(activeBooks, recentText, unlockedIntroRef.current[ch.id] ?? []);
       if (story) {
-        // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单
+        // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单；
+        // 人设保真协议（哈基米4.0+反机械关怀世界书）剧情同样适用，聊天经济性不注入（保持叙事文体）
         return (
           `你正在以小说叙事者视角演绎一段互动剧情，男主角为「${ch.name || "无名角色"}」。\n男主设定：${
             ch.persona || "无额外设定"
           }\n` +
           STORY_PROTOCOL(ch.name || "他") +
+          CHARACTER_FIDELITY +
           worldText +
           memeText
         );
@@ -633,6 +636,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         }\n\n${ch.persona || "无额外设定"}\n` +
         CHAT_LIVENESS +
         HUMAN_TYPING_PROTOCOL +
+        CHARACTER_FIDELITY +
+        ONLINE_CHAT_ECONOMY +
         buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
@@ -998,6 +1003,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         (ch.name || "TA") +
         "）主动想找对方说话。" +
         PROACTIVE_PROTOCOL.replace("{{char}}", ch.name || "TA") +
+        // 《Ai恋人主动报备指令》by你闻起来像小猫：内容随机池八类+情绪过滤（她近期低落时屏蔽吐槽/炫耀/求助类）
+        PROACTIVE_REPORT_POOL +
         "\n\n" +
         pickTopicSeeds() +
         "\n请像日常手机聊天一样主动找对方说话（真人打字习惯协议照常执行）：每条最多 10 个字，超过就拆行发；条数参考上面【你的发送节奏】换着来，别总是同一个条数；只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";

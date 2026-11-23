@@ -1,0 +1,72 @@
+# WebSearch 完整正文
+# query: galatea.abysllumina.com MCP 接入 token 使用方法
+# index: 4
+
+概述
+MCP（Model Context Protocol）是一种开源协议，旨在实现大语言模型与外部数据源和工具的集成，用来在大模型和数据源之间建立安全双向的连接。本文将详细阐述MCP服务的配置与使用方法。
+前置条件
+已创建AI网关实例，具体操作，请参见创建网关实例。
+AI网关实例与MCP服务网络已打通。如MCP服务为公网服务，需为AI网关实例所在VPC创建公网NAT网关，请参考 NAT网关 文档。
+创建MCP服务
+打开AI网关控制台实例页面，在顶部菜单栏选择目标实例所在地域，并单击目标实例ID。
+在左侧导航栏，单击MCP管理-MCP服务，然后单击创建MCP服务。
+配置MCP服务基本信息。
+参数
+说明
+示例
+名称 自定义MCP服务名称 mcp-demo
+协议 选择创建的服务协议 MCP服务直接代理
+描述 创建的服务详细描述
+后端服务
+服务名称 选择后端目标服务，该服务需通过服务页面创建 mcp-service
+MCP Transport MCP传输协议，选择SSE或Streamable HTTP Streamable HTTP
+路径 后端目标服务的路径
+MCP接入点
+域名 访问MCP服务使用的域名，支持选择多个域名 www.testmcp.com
+路径 MCP服务接入点的路径，会根据MCP Transport和服务名称生成 /mcp-servers/mcp-demo/sse
+配置完成后单击确定，完成创建。
+通过MCP Inspector访问MCP服务
+说明 MCP Inspector 是专为MCP服务器设计的交互式调试工具，支持开发者通过多种方式快速测试与优化服务端功能。
+打开AI网关控制台实例页面，在顶部菜单栏选择目标实例所在地域，并单击目标实例ID。
+在左侧导航栏，单击概览，然后单击接入点，获取AI网关入口地址。
+安装Node.js环境。
+安装MCP Inspector，安装命令：npx kargnas-mcp-inspector@latest。
+通过浏览器登录MCP Inspector界面，如：http://localhost:6274/?MCP_PROXY_AUTH_TOKEN={token}。
+配置连接信息，填写Transport Type、URL等信息。
+点击Connect进行连接，连接成功后可以获取MCP服务的所有工具。
+本章节介绍如何访问MCP服务
+概述
+MCP（Model Context Protocol）是一种开源协议，旨在实现大语言模型与外部数据源和工具的集成，用来在大模型和数据源之间建立安全双向的连接。本文将详细阐述MCP服务的配置与使用方法。
+前置条件
+已创建AI网关实例，具体操作，请参见创建网关实例。
+AI网关实例与MCP服务网络已打通。如MCP服务为公网服务，需为AI网关实例所在VPC创建公网NAT网关，请参考 NAT网关 文档。
+创建MCP服务
+打开AI网关控制台实例页面，在顶部菜单栏选择目标实例所在地域，并单击目标实例ID。
+在左侧导航栏，单击MCP管理-MCP服务，然后单击创建MCP服务。
+配置MCP服务基本信息。
+参数
+说明
+示例
+名称 自定义MCP服务名称 mcp-demo
+协议 选择创建的服务协议 MCP服务直接代理
+描述 创建的服务详细描述
+后端服务
+服务名称 选择后端目标服务，该服务需通过服务页面创建 mcp-service
+MCP Transport MCP传输协议，选择SSE或Streamable HTTP Streamable HTTP
+路径 后端目标服务的路径
+MCP接入点
+域名 访问MCP服务使用的域名，支持选择多个域名 www.testmcp.com
+路径 MCP服务接入点的路径，会根据MCP Transport和服务名称生成 /mcp-servers/mcp-demo/sse
+参数
+说明
+示例
+配置完成后单击确定，完成创建。
+通过MCP Inspector访问MCP服务
+说明 MCP Inspector 是专为MCP服务器设计的交互式调试工具，支持开发者通过多种方式快速测试与优化服务端功能。
+打开AI网关控制台实例页面，在顶部菜单栏选择目标实例所在地域，并单击目标实例ID。
+在左侧导航栏，单击概览，然后单击接入点，获取AI网关入口地址。
+安装Node.js环境。
+安装MCP Inspector，安装命令：npx kargnas-mcp-inspector@latest。
+通过浏览器登录MCP Inspector界面，如：http://localhost:6274/?MCP_PROXY_AUTH_TOKEN={token}。
+配置连接信息，填写Transport Type、URL等信息。
+点击Connect进行连接，连接成功后可以获取MCP服务的所有工具。

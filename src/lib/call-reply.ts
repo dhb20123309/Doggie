@@ -27,8 +27,9 @@ export const CALL_SCENARIO =
   "4. 绝对禁止输出 [转账:]、[定位:]、[外卖:]、[礼物:]、[引用:]、[表情:]、[查设定:] 等任何方括号标记——电话里不存在这些功能，想用就口头说出来。\n" +
   "5. 你的回复稍后会被合成语音念给 TA 听：不要包含动作描写、旁白、星号或引号包裹的内心戏，只写会念出来的内容。";
 
-/** 现算通话 system：人设 + 精简活人协议 + 世界书 + 通话场景说明（纯函数，可单测） */
-export function buildCallSys(ch: Character, books: WorldBook[], recentText = ""): string {
+/** 现算通话 system：人设 + 精简活人协议 + 世界书 + 通话场景说明（纯函数，可单测）；
+ *  observationText：通话观察摘要（call-observe.summarizeObservation 产出），空串=不注入 */
+export function buildCallSys(ch: Character, books: WorldBook[], recentText = "", observationText = ""): string {
   const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
   const worldText = buildWorldSectionV2(activeBooks, recentText, []);
   return (
@@ -40,6 +41,7 @@ export function buildCallSys(ch: Character, books: WorldBook[], recentText = "")
     LIVING_PERSON_PROTOCOL +
     worldText +
     CALL_SCENARIO +
+    observationText +
     `\n【最近对话（对方是"${displayName(ch)}"正在和你通话）】\n`
   );
 }
@@ -55,10 +57,11 @@ function toBubbles(reply: string): ChatEntry[] {
   return items.map((content, i) => ({ id: `c${t}${i}`, role: "assistant" as const, content, at: t + i }));
 }
 
-/** 请求角色对转写文本的通话回复：OOC 过滤 + 复读拦截重生成一次；失败抛错由界面展示人话原因 */
-export async function requestCallReply(cfg: AiConfig, ch: Character, books: WorldBook[], text: string): Promise<string> {
+/** 请求角色对转写文本的通话回复：OOC 过滤 + 复读拦截重生成一次；失败抛错由界面展示人话原因。
+ *  observationText：本轮通话观察（可选），拼入 system 供 TA 隐约感知停顿/语气，禁断言协议在文本内自带 */
+export async function requestCallReply(cfg: AiConfig, ch: Character, books: WorldBook[], text: string, observationText = ""): Promise<string> {
   const history = readLastEntries(ch.id, 20).filter((e) => !e.failed && !e.transfer && !e.location && !e.order);
-  const sys = buildCallSys(ch, books, text);
+  const sys = buildCallSys(ch, books, text, observationText);
   const msgs: ChatMessage[] = [
     { role: "system", content: sys },
     ...history.map((e) => ({ role: e.role, content: e.content })),

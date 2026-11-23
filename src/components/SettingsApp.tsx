@@ -1,6 +1,6 @@
 // 手机内「设置」应用：接口地址 / API Key / 模型名 / 连接测试 + 锁屏密码与壁纸自定义
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X, BellRing, Sparkles, ChevronRight } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X, BellRing, Sparkles, ChevronRight, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -13,6 +13,8 @@ import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, fetchMiniMaxVoices, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
 import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, GPT_IMAGE_MODELS, type ImageConfig } from "@/lib/media";
 import { loadMcpPrefs } from "@/lib/reality-mcp";
+import { usePersisted } from "@/lib/chat-store";
+import { listCachedTakes, clearAllCachedAudio } from "@/lib/call-observe";
 import { CloudAccountSection } from "@/components/CloudAccountSection";
 
 interface Props {
@@ -251,6 +253,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp,
         <WallpaperSection wallpapers={wallpapers} />
         <ImageSection />
         <VoiceSection config={config} />
+        <CallObserveSection />
         <MusicSourceSection />
 
         <div className="pt-1">
@@ -336,6 +339,85 @@ function McpEntryCard({ onOpen }: { onOpen: () => void }) {
       </span>
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
     </button>
+  );
+}
+
+/** 通话观察层：本地声学观察开关、可选情绪接口、音频缓存删除 */
+function CallObserveSection() {
+  const [observeOn, setObserveOn] = usePersisted<boolean>("vp-phone:call-observe:v1", true);
+  const [emotionOn, setEmotionOn] = usePersisted<boolean>("vp-phone:call-emotion:v1", false);
+  const [vc, setVc] = useState<VoiceConfig>(() => loadVoiceConfig());
+  const [cacheCount, setCacheCount] = useState<number | null>(null);
+  const [delMsg, setDelMsg] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  useEffect(() => {
+    void listCachedTakes().then((l) => setCacheCount(l.length)).catch(() => setCacheCount(0));
+  }, []);
+
+  const saveVc = (patch: Partial<VoiceConfig>) => {
+    const next = { ...vc, ...patch };
+    setVc(next);
+    saveVoiceConfig(next);
+  };
+
+  const doDelete = async () => {
+    const n = await clearAllCachedAudio();
+    setCacheCount(0);
+    setConfirmDel(false);
+    setDelMsg(`已删除 ${n} 段保留的录音`);
+    console.log(`[call-observe] cache cleared n=${n}`);
+    setTimeout(() => setDelMsg(""), 4000);
+  };
+
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <Activity className="size-4 text-primary" />
+          通话观察
+        </div>
+        <Switch checked={observeOn} onCheckedChange={setObserveOn} aria-label="本地通话观察" />
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        语音电话里记录停顿、时长与音量变化。这些指标全部在本机计算，从不上传；观察只以「可能、推测」的口吻给 TA 参考，不是事实判断，也不做任何医疗诊断。关闭后通话完全不受影响。
+      </p>
+      <div className="flex items-center justify-between gap-3 border-t border-white/60 pt-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium">音频情绪分析（可选）</div>
+          <div className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">默认关闭。开启后本段录音会发送到你填写的情绪接口，返回标签与置信度；置信度低于 55% 不会告诉 TA。</div>
+        </div>
+        <Switch checked={emotionOn} onCheckedChange={setEmotionOn} aria-label="情绪分析" />
+      </div>
+      {emotionOn && (
+        <div className="space-y-2 rounded-xl bg-white/60 p-2.5">
+          <Input value={vc.emotionUrl ?? ""} onChange={(e) => saveVc({ emotionUrl: e.target.value })} placeholder="情绪接口地址（如 https://…/emotion）" className="glass-input h-9 text-[12px]" />
+          <Input value={vc.emotionKey ?? ""} onChange={(e) => saveVc({ emotionKey: e.target.value })} placeholder="接口 Key（可留空）" className="glass-input h-9 text-[12px]" />
+          <p className="text-[10px] leading-relaxed text-muted-foreground">接口失败或超时会自动静默跳过，只保留本地指标，通话不中断。</p>
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-3 border-t border-white/60 pt-2.5">
+        <div className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground">
+          本机保留的录音：{cacheCount === null ? "读取中…" : `${cacheCount} 段`}
+          {delMsg && <span className="ml-1.5 text-emerald-600">{delMsg}</span>}
+        </div>
+        {cacheCount ? (
+          confirmDel ? (
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="destructive" className="h-8 px-3 text-[11px]" onClick={() => void doDelete()}>确认删除</Button>
+              <Button size="sm" variant="ghost" className="h-8 px-3 text-[11px]" onClick={() => setConfirmDel(false)}>取消</Button>
+            </div>
+          ) : (
+            <Button size="sm" variant="outline" className="h-8 gap-1 px-3 text-[11px]" onClick={() => setConfirmDel(true)}>
+              <Trash2 className="size-3" />删除缓存
+            </Button>
+          )
+        ) : null}
+      </div>
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        只有你在通话页手动开启「保留本通电话的录音」才会存进这台手机浏览器的本地存储（最多 10 段，超出自动滚掉最旧）；未保留的录音退出页面即消失。数据离开设备仅有两个场景：送 MiniMax 转写的音频，以及开启后的情绪接口请求。
+      </p>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
-// 语音通话 App（步骤A+B+C+D）：按键启停录音 → MiniMax STT 转文字 → 角色生成通话回复 → MiniMax TTS 播放（角色绑定音色）
+// 语音通话 App（步骤A+B+C+D+观察层）：按键启停录音 → STT 转文字 → 角色回复 → TTS 播报；本地声学观察（停顿/音量）可选注入
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, Download, Loader2, Mic, PhoneOff, Play, RotateCcw, Square, Volume2, VolumeX } from "lucide-react";
+import { ChevronDown, ChevronLeft, Download, Eye, Loader2, Mic, PhoneOff, Play, RotateCcw, Square, Volume2, VolumeX } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { isConfigured } from "@/lib/types";
 import { displayName, splitBubbles, type Character } from "@/lib/chat-types";
@@ -8,6 +8,7 @@ import { useActiveCharId, useCharacters, useWorldBooks, usePersisted } from "@/l
 import { createRecorder, MAX_RECORD_SEC, micErrorMessage, type RecordedAudio } from "@/lib/recorder";
 import { transcribeRecording, type SttResult } from "@/lib/stt";
 import { requestCallReply, commitCallExchange } from "@/lib/call-reply";
+import { analyzeTake, summarizeObservation, detectEmotion, cacheTake, listCachedTakes, EMOTION_INJECT_MIN, type TakeMetrics, type EmotionGuess } from "@/lib/call-observe";
 import { loadVoiceConfig, synthesizeSpeech, voiceReady } from "@/lib/tts";
 
 interface Props {
@@ -22,6 +23,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
   const books = useWorldBooks()[0];
 
   const recRef = useRef<ReturnType<typeof createRecorder> | null>(null);
+  const sessionStartRef = useRef(0);
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
@@ -42,6 +44,16 @@ export function VoiceCallApp({ config, onBack }: Props) {
   const [autoSpeak, setAutoSpeak] = usePersisted<boolean>("vp-phone:call-autospeak:v1", true);
   const speakUrlRef = useRef<string | null>(null);
   const speakGenRef = useRef(0);
+  // ===== 观察层：本地声学指标（100% 本机计算）+ 可选情绪猜测（外部接口，失败静默跳过）=====
+  const [observeOn] = usePersisted<boolean>("vp-phone:call-observe:v1", true);
+  const [emotionOn] = usePersisted<boolean>("vp-phone:call-emotion:v1", false);
+  const [takeMetrics, setTakeMetrics] = useState<TakeMetrics | null>(null);
+  const [sessionMetrics, setSessionMetrics] = useState<TakeMetrics[]>([]);
+  const [emotionGuess, setEmotionGuess] = useState<EmotionGuess | null>(null);
+  const [emotionState, setEmotionState] = useState<"off" | "running" | "ok" | "fail">("off");
+  const [obsOpen, setObsOpen] = useState(false);
+  const [keepAudio, setKeepAudio] = useState(false);
+  const [cacheMsg, setCacheMsg] = useState("");
 
   // 秒表（仅录音中走字）
   useEffect(() => {
@@ -75,6 +87,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
       );
       setRecording(true);
       setElapsed(0);
+      if (!sessionStartRef.current) sessionStartRef.current = Date.now();
     } catch (e) {
       rec.cancel();
       recRef.current = null;
@@ -97,6 +110,34 @@ export function VoiceCallApp({ config, onBack }: Props) {
     }
     setTake(result);
     console.log(`[call-rec] take ready ${result.durationSec}s ${(result.blob.size / 1024).toFixed(0)}KB`);
+    // 观察层：本地声学指标（纯本机计算，不发任何请求）
+    if (observeOn) {
+      const m = analyzeTake(result.samples, result.durationSec);
+      setTakeMetrics(m);
+      setSessionMetrics((prev) => [...prev.slice(-9), m]);
+      setObsOpen(false);
+    } else {
+      setTakeMetrics(null);
+    }
+    // 手动保留本段录音到本机 IndexedDB（默认不存，退出页面内存即失）
+    if (keepAudio && ch) {
+      void cacheTake({ id: `t${Date.now()}`, charId: ch.id, at: Date.now(), durationSec: result.durationSec, blob: result.blob })
+        .then(() => setCacheMsg("已保留到本机浏览器"))
+        .catch(() => setCacheMsg("本机存储不可用（隐私模式？），这段没存下"));
+    }
+    // 可选情绪接口：并行发起，绝不阻断转写/回复链路
+    if (observeOn && emotionOn) {
+      setEmotionState("running");
+      setEmotionGuess(null);
+      void detectEmotion(loadVoiceConfig(), result.blob).then((g) => {
+        if (g) {
+          setEmotionGuess(g);
+          setEmotionState("ok");
+        } else {
+          setEmotionState("fail");
+        }
+      });
+    }
     void runStt(result);
   };
   const autoFinish = () => void finishRec();
@@ -127,8 +168,10 @@ export function VoiceCallApp({ config, onBack }: Props) {
     const turn = { you: text, reply: null as string[] | null, pending: true };
     setCallTurns((prev) => [...prev.slice(-4), turn]);
     apiRetryRef.current = false;
+    // 观察文本注入：本轮全部会话指标 + 最新情绪猜测；低置信度情绪不会出现在文本里
+    const obsText = observeOn ? summarizeObservation(sessionMetrics.length ? sessionMetrics : takeMetrics ? [takeMetrics] : [], emotionState === "ok" ? emotionGuess : null) : "";
     try {
-      const reply = await requestCallReply(config, ch, books, text);
+      const reply = await requestCallReply(config, ch, books, text, obsText);
       commitCallExchange(ch.id, text, reply);
       setCallTurns((prev) => prev.map((t) => (t === turn ? { ...t, reply: splitBubbles(reply), pending: false } : t)));
       // 步骤D：自动播报（开关可关）——多条气泡拼成一段连续口语再合成
@@ -235,6 +278,18 @@ export function VoiceCallApp({ config, onBack }: Props) {
     a.download = `通话录音_${take.durationSec}s.wav`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
+
+  /** 挂断：释放资源；若本通保留过录音，日志提示可在设置删除 */
+  const hangup = () => {
+    recRef.current?.cancel();
+    stopSpeakRef.current();
+    if (keepAudio) {
+      void listCachedTakes().then((l) => {
+        if (l.length) console.log(`[call-observe] hangup with ${l.length} cached takes（可在设置→通话观察删除）`);
+      }).catch(() => undefined);
+    }
+    onBack();
   };
 
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -412,6 +467,38 @@ export function VoiceCallApp({ config, onBack }: Props) {
             <span className="ml-auto rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-medium text-emerald-600">格式合规</span>
           </div>
           <p className="mt-1 text-[10px] leading-relaxed text-[oklch(0.5_0.03_80)]">完整链路已接通：录音 → STT 转文字 → TA 生成通话回复 → MiniMax TTS 语音播报（音色跟随角色绑定）。</p>
+          {/* 观察层折叠条：本地声学指标 + 可选情绪猜测（默认收起，不抢戏） */}
+          {observeOn && takeMetrics && (
+            <div className="mt-2 rounded-xl bg-white/60">
+              <button type="button" onClick={() => setObsOpen((v) => !v)} className="jelly-btn flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left">
+                <Eye className="size-3.5 shrink-0 text-[oklch(0.5_0.05_75)]" />
+                <span className="text-[10.5px] font-medium text-[oklch(0.38_0.04_80)]">
+                  通话观察：{takeMetrics.pauseCount ? `${takeMetrics.pauseCount} 次停顿` : "无明显停顿"} · {takeMetrics.volumeTrend === "falling" ? "声音渐轻" : takeMetrics.volumeTrend === "rising" ? "声音渐强" : "音量平稳"}
+                  {emotionState === "running" && " · 情绪分析中…"}
+                  {emotionState === "ok" && emotionGuess && ` · 接口粗判「${emotionGuess.label}」${emotionGuess.confidence}%`}
+                </span>
+                <ChevronDown className={`ml-auto size-3.5 shrink-0 text-[oklch(0.55_0.03_80)] transition-transform ${obsOpen ? "rotate-180" : ""}`} />
+              </button>
+              {obsOpen && (
+                <div className="border-t border-white/70 px-2.5 py-2 text-[10px] leading-relaxed text-[oklch(0.4_0.04_80)]">
+                  <ul className="space-y-0.5">
+                    <li>本通累计说话 {(sessionMetrics.reduce((n, m) => n + m.durationSec, 0)).toFixed(1)} 秒 · 共 {sessionMetrics.reduce((n, m) => n + m.pauseCount, 0)} 次停顿 · 最长停顿 {Math.max(0, ...sessionMetrics.map((m) => m.longestPauseSec))} 秒</li>
+                    <li>本段：语音占比 {(takeMetrics.speechRatio * 100).toFixed(0)}% · 平均响度 {(takeMetrics.meanVolume * 100).toFixed(1)}</li>
+                    {emotionState === "ok" && emotionGuess && (
+                      <li className={emotionGuess.confidence >= EMOTION_INJECT_MIN ? "text-violet-600" : "text-[oklch(0.55_0.03_80)]"}>
+                        情绪猜测「{emotionGuess.label}」置信度 {emotionGuess.confidence}%{emotionGuess.confidence < EMOTION_INJECT_MIN ? "（低于 55%，不会告诉 TA）" : "（已以推测口吻给到 TA）"}
+                      </li>
+                    )}
+                    {emotionState === "fail" && <li className="text-amber-600">情绪接口没返回结果——已静默跳过，只保留本地指标，通话不受影响</li>}
+                    {emotionState === "off" && <li className="text-[oklch(0.55_0.03_80)]">情绪分析未开启（设置→通话观察），当前只有 100% 本地计算的声学指标</li>}
+                  </ul>
+                  <p className="mt-1.5 border-t border-dashed border-[oklch(0.85_0.02_80)] pt-1.5 text-[9px] text-[oklch(0.55_0.03_80)]">
+                    隐私说明：停顿/时长/音量全部在本机计算、从不上传；录音默认只在内存，退出页面即消失。会离开设备的只有两样——送 MiniMax 转写的音频（B 步既有行为）和开启后的情绪接口请求。观察只是粗略推测，不准是常态。
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="mt-2.5 flex gap-2">
             <button type="button" onClick={playingUrl ? stopPlayback : playTake} className="jelly-btn flex flex-1 items-center justify-center gap-1.5 rounded-full bg-white/85 py-2 text-[11.5px] font-medium text-[oklch(0.34_0.05_80)] shadow-sm">
               {playingUrl ? <Square className="size-3.5" /> : <Play className="size-3.5" />}
@@ -422,6 +509,20 @@ export function VoiceCallApp({ config, onBack }: Props) {
               下载 .wav
             </button>
           </div>
+          {/* 保留录音开关：手动才落本机 IndexedDB，设置页一键删除 */}
+          {observeOn && (
+            <div className="mt-2 flex items-center gap-2 border-t border-white/60 pt-2">
+              <button
+                type="button"
+                onClick={() => setKeepAudio((v) => !v)}
+                className={`jelly-btn flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium ${keepAudio ? "bg-violet-100 text-violet-600" : "bg-white/70 text-[oklch(0.45_0.04_80)]"}`}
+              >
+                {keepAudio ? "✓ 每段录音保留到本机" : "保留本通电话的录音"}
+              </button>
+              <span className="text-[9px] leading-snug text-[oklch(0.55_0.03_80)]">{keepAudio ? "存在这台手机的浏览器里，设置→通话观察可删" : "默认不保存，挂断退出后内存即清空"}</span>
+              {cacheMsg && <span className="ml-auto shrink-0 text-[9.5px] text-emerald-600">{cacheMsg}</span>}
+            </div>
+          )}
         </div>
       )}
 
@@ -429,7 +530,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
       <footer className="mt-auto flex items-end justify-center gap-8 pb-14">
         <button
           type="button"
-          onClick={onBack}
+          onClick={hangup}
           className="jelly-btn flex size-14 flex-col items-center justify-center gap-0.5 rounded-full bg-[oklch(0.9_0.02_80/0.8)] text-[oklch(0.4_0.05_80)] shadow-md"
           aria-label="挂断返回"
         >

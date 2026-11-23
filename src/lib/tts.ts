@@ -24,6 +24,10 @@ export interface VoiceConfig {
   minimaxVoice: string;
   /** MiniMax 语音识别（ASR）模型名，官方当前仅 asr-1.0 */
   minimaxSttModel?: string;
+  /** 可选：音频情绪分析接口地址（multipart 上传音频、返回 {label/emotion, confidence}）；留空=不调用 */
+  emotionUrl?: string;
+  /** 情绪接口 Key（Bearer，可空=免鉴权网关） */
+  emotionKey?: string;
 }
 
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {

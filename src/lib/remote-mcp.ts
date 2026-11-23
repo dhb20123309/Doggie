@@ -320,14 +320,20 @@ async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortS
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
   if (bearer) headers.Authorization = `Bearer ${bearer}`;
   const post = async (method: string, params: unknown, id: number) => {
+    // MCP 规范要求 initialize 之后的请求声明协议版本头；initialize 本身不带
+    const reqHeaders = { ...headers };
+    if (protocolAgreed) reqHeaders["MCP-Protocol-Version"] = PROTOCOL_VERSION;
+    console.log(`[mcp-remote] rpc → ${method} protocolHeader=${protocolAgreed ? "yes" : "no"}`);
     const res = await fetch(endpoint, {
       method: "POST",
-      headers,
+      headers: reqHeaders,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
       signal,
     });
+    console.log(`[mcp-remote] rpc ← ${method} HTTP ${res.status} ct=${res.headers.get("content-type")?.slice(0, 40) ?? "?"}`);
     return res;
   };
+  let protocolAgreed = false;
   /** 响应体可能是 JSON，也可能是 SSE 帧（data: {...}），统一解析出 JSON-RPC message */
   const parseBody = async (res: Response): Promise<{ result?: unknown; error?: { message?: string; code?: number } } | null> => {
     const text = await res.text();
@@ -359,9 +365,12 @@ async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortS
     }
     const initMsg = await parseBody(res);
     if (!res.ok || !initMsg || initMsg.error) {
-      return { ok: false, reason: `握手失败：${initMsg?.error?.message ?? `HTTP ${res.status}`}` };
+      // 握手被拒时把响应正文片段带进日志，便于判断是协议版本、CORS 还是网关拦截
+      console.warn(`[mcp-remote] rpc initialize rejected status=${res.status}`);
+      return { ok: false, reason: `握手失败：${initMsg?.error?.message ?? `HTTP ${res.status}${res.status === 0 ? "（浏览器无法直连该服务，可能被跨域限制拦截）" : ""}`}` };
     }
     const init = initMsg.result as RpcInit;
+    protocolAgreed = true;
     // notifications/initialized 尽力通知（失败不阻断）
     await post("notifications/initialized", {}, 2).catch(() => undefined);
     const listRes = await post("tools/list", {}, 3);
@@ -474,6 +483,7 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
   // 直接粘贴 MCP 端点（非仓库、非清单 URL）：先走标准 initialize/tools/list 握手，失败再退回 mcp.json
   if (cand.kind === "url") {
     const direct = await inspectByRpc(input, signal);
+    console.log(`[mcp-remote] inspect rpc path ok=${Boolean(direct?.ok)} reason=${direct?.reason ?? "-"}`);
     if (direct?.ok) return direct;
   }
   let lastErr = "未找到约定的 mcp.json 配置清单";

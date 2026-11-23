@@ -57,6 +57,18 @@ export interface ChatEntry {
   };
   /** 用户连发模式中的暂存消息：只上屏不触发回复，点「发送全部」或到期自动发出后才请求角色回复 */
   queued?: boolean;
+  /** 定位共享卡片（微信式地图卡）：from 标记谁发的；place 地点名、addr 地址描述 */
+  location?: { place: string; addr: string; from: "user" | "char" };
+  /** 外卖/礼物订单卡：kind=delivery 外卖 | gift 礼物；status=pending 待收可点开收下，received 已完成 */
+  order?: {
+    kind: "delivery" | "gift";
+    shop: string;
+    items: { name: string; qty: number; price: number }[];
+    amount: number;
+    note?: string;
+    from: "user" | "char";
+    status?: "pending" | "received";
+  };
 }
 
 /** 连发等待模式的兜底自动发出时长：最后一条暂存消息超过 20 秒没动静就视为发完 */
@@ -92,6 +104,70 @@ export function extractTransfer(text: string): { amount: number; note: string; c
 const RECEIVE_WORDS = /(收下|收了|领了|已收|到账|转入.{0,4}(成功|我)|打到我|转给我?了?\s*(我)?就收)/;
 export function looksLikeReceive(text: string): boolean {
   return RECEIVE_WORDS.test(text);
+}
+
+/** AI 定位共享协议：拼入私聊链路 system。标记 [定位:地点名] 由 settleReply 拆成 location 卡片。 */
+export const LOCATION_PROTOCOL =
+  "\n【位置共享】你们可以互发实时位置。想告诉对方你在哪时，单独一行输出 [定位:地点名]（如 [定位:健身房]，地点名不超过10字），系统会渲染成地图位置卡片。" +
+  "她发位置给你时你要有反应：关心她怎么在那、要不要去找她、叮嘱安全等，贴合人设；报备日常时（在吃饭、下班路上）可以自然地附带一个定位。不要每句都发位置。";
+
+const LOCATION_RE = /\[定位[:：]\s*([^\]]{1,24})\]/;
+
+/** 从 assistant 回复里拆出第一枚 [定位:地点名] 标记 → 地点名 + 去掉全部标记的干净文本 */
+export function extractLocation(text: string): { place: string; clean: string } | null {
+  const m = text.match(LOCATION_RE);
+  if (!m) return null;
+  const place = m[1].trim();
+  if (!place) return null;
+  const clean = text.replace(new RegExp(LOCATION_RE.source, "g"), "").replace(/\n{2,}/g, "\n").trim();
+  return { place, clean };
+}
+
+/** AI 外卖/礼物协议：拼入私聊与剧情链路 system。标记语法见下，落库前由 extractOrder 消化为 order 卡片。 */
+export const ORDER_PROTOCOL =
+  "\n【外卖与礼物】你们会为彼此点外卖、送礼物。想给对方点吃的时，单独一行输出 [外卖:店名:品名x数量:金额]（金额只写数字如 32.00，可多品用+连接，如 [外卖:一点点:珍珠奶茶x1+布丁x1:26]）；" +
+  "想送礼时输出 [礼物:礼品名:留言]（留言不超过15字）。系统会渲染成订单卡片，对方可以点开收下。" +
+  "她给你点了外卖/送了礼物你必须有真实反应：开心道谢、吐槽她乱花钱、关心她有没有吃饭、立刻说要回请——按人设来，别假装没看见，也别只用文字描述\"我收到了\"而不针对卡片内容说话。" +
+  "你可以主动给她点夜宵、奶茶、生理期热饮，也可以在她没好好吃饭时直接下单；但不要每条消息都送，频率像真人恋人一样克制。";
+
+const DELIVERY_RE = /\[外卖[:：]\s*([^\]]{1,80})\]/;
+const GIFT_RE = /\[礼物[:：]\s*([^\]]{1,60})\]/;
+
+/** 拆出 assistant 回复里的第一枚外卖/礼物标记 → 结构化订单 + 干净文本。
+ *  外卖格式 店名:品名x数量+品名x数量:金额（金额缺省时按单价估算兜底 30 元）；礼物格式 礼品名:留言。 */
+export function extractOrder(text: string): { order: NonNullable<ChatEntry["order"]>; clean: string } | null {
+  const dm = text.match(DELIVERY_RE);
+  if (dm) {
+    const parts = dm[1].split(/[:：]/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length < 2) return null;
+    const shop = parts[0];
+    const itemsStr = parts[1] ?? "";
+    const amount = Number(parts[2]) || 0;
+    const items = itemsStr
+      .split("+")
+      .map((seg) => {
+        const mm = seg.trim().match(/^(.+?)[x×*]\s*(\d+)$/) || [null, seg.trim(), "1"];
+        return { name: (mm[1] || "").trim().slice(0, 16), qty: Math.max(1, Number(mm[2]) || 1), price: 0 };
+      })
+      .filter((i) => i.name)
+      .slice(0, 6);
+    if (!shop || items.length === 0) return null;
+    const total = amount > 0 && amount <= 52000 ? Math.round(amount * 100) / 100 : 30;
+    const unit = Math.round((total / items.reduce((n, i) => n + i.qty, 0)) * 100) / 100;
+    items.forEach((i) => (i.price = unit));
+    const clean = text.replace(new RegExp(DELIVERY_RE.source, "g"), "").replace(/\n{2,}/g, "\n").trim();
+    return { order: { kind: "delivery", shop, items, amount: total, from: "char", status: "pending" }, clean };
+  }
+  const gm = text.match(GIFT_RE);
+  if (gm) {
+    const parts = gm[1].split(/[:：]/).map((s) => s.trim()).filter(Boolean);
+    const name = parts[0];
+    if (!name) return null;
+    const note = (parts[1] || "").slice(0, 20);
+    const clean = text.replace(new RegExp(GIFT_RE.source, "g"), "").replace(/\n{2,}/g, "\n").trim();
+    return { order: { kind: "gift", shop: name, items: [{ name, qty: 1, price: 0 }], amount: 0, note, from: "char", status: "pending" }, clean };
+  }
+  return null;
 }
 
 /** AI 引用历史消息协议：拼入私聊链路 system（编号表由调用方现算追加）。

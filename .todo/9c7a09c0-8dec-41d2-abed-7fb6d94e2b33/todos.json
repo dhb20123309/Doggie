@@ -1,0 +1,30 @@
+[
+  {
+    "content": "chat-types 扩展：location/order 字段+协议+解析函数",
+    "id": "d1",
+    "priority": "high",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "delivery-store + DeliveryApp 外卖应用与 ScreenId/桌面接线",
+    "id": "d2",
+    "priority": "high",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "RoleChatApp 卡片渲染/发送/协议注入/上下文",
+    "id": "d3",
+    "priority": "high",
+    "status": "completed",
+    "skills": []
+  },
+  {
+    "content": "双门禁验证 + AGENTS.md + 交付",
+    "id": "d4",
+    "priority": "medium",
+    "status": "completed",
+    "skills": []
+  }
+]

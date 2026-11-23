@@ -22,6 +22,9 @@ import {
   Quote,
   Banknote,
   Coins,
+  MapPin,
+  UtensilsCrossed,
+  Gift,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,9 +50,14 @@ import {
   TRANSFER_PROTOCOL,
   extractTransfer,
   looksLikeReceive,
+  LOCATION_PROTOCOL,
+  extractLocation,
+  ORDER_PROTOCOL,
+  extractOrder,
   QUEUE_AUTO_FLUSH_MS,
   QUEUE_MAX,
 } from "@/lib/chat-types";
+import { PLACE_PRESETS } from "@/lib/delivery-store";
 import {
   useWallet,
   readWallet,
@@ -490,7 +498,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       open={actionFor === entry.id}
       onOpenChange={(v) => setActionFor(v ? entry.id : null)}
       onCite={() => citeEntry(entry)}
-      {...(entry.role === "assistant" && !entry.failed && !entry.proactive && !entry.transfer ? { onRegen: () => regenReply(entry.id) } : {})}
+      {...(entry.role === "assistant" && !entry.failed && !entry.proactive && !entry.transfer && !entry.location && !entry.order ? { onRegen: () => regenReply(entry.id) } : {})}
     >
       {node}
     </MessageActions>
@@ -531,8 +539,12 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const [wallet, setWallet] = useWallet();
   /** 转账编辑面板（输入框上方弹层） */
   const [transferOpen, setTransferOpen] = useState(false);
+  /** 定位选择面板（输入框上方弹层） */
+  const [locationOpen, setLocationOpen] = useState(false);
   /** 点开详情的转账单 id */
   const [transferSheet, setTransferSheet] = useState<string | null>(null);
+  /** 点开详情/收下的订单卡 id */
+  const [orderSheet, setOrderSheet] = useState<string | null>(null);
 
   /** 用户发起转账：即时扣款入账 + 发一张 outgoing 卡片，随后请求角色回复（TA 会按协议对收钱作出反应） */
   const sendTransfer = (amount: number, note: string) => {
@@ -600,8 +612,88 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     console.log(`[transfer] user refunded ¥${entry.transfer.amount} back to ${active.id}`);
   };
 
+  /** AI 回复里的定位/外卖/礼物标记 → 结构化卡片（TA 送出的外卖挂账扣 TA 余额，等用户点收） */
+  const digestRichCards = (reply: string): { text: string; location?: ChatEntry["location"]; order?: ChatEntry["order"] } => {
+    const loc = extractLocation(reply);
+    if (loc) {
+      console.log(`[location] char offered 「${loc.place}」`);
+      return { text: loc.clean, location: { place: loc.place, addr: `${loc.place}附近 · 实时位置`, from: "char" } };
+    }
+    const ord = extractOrder(reply);
+    if (ord) {
+      if (ord.order.kind === "delivery" && active) walletCharSend(active.id, ord.order.amount, `外卖·${ord.order.shop}`);
+      console.log(`[order] char offered ${ord.order.kind} 「${ord.order.shop}」¥${ord.order.amount}`);
+      return { text: ord.clean, order: ord.order };
+    }
+    return { text: reply };
+  };
+
+  /** 用户发定位卡片：即时上屏并请求 TA 回复 */
+  const sendLocation = (place: string, addr: string) => {
+    if (!active || pending) return;
+    const story = Boolean(active.storyMode);
+    const userMsg: ChatEntry = {
+      id: `l${Date.now()}`,
+      role: "user",
+      content: `📍${place}`,
+      at: Date.now(),
+      location: { place, addr, from: "user" },
+      ...(story ? { story: true } : {}),
+    };
+    setLog((prev) => [...prev, userMsg]);
+    writeLogNow(active.id, (prev) => [...prev, userMsg]);
+    setLocationOpen(false);
+    scrollBottom();
+    console.log(`[location] user → ${active.id} 「${place}」`);
+    void requestReply([...stateRef.current.log, userMsg], userMsg.id, story);
+  };
+
+  /** 收下 TA 送来的外卖/礼物：置 received；外卖同时用户入账（TA 侧已在 digestRichCards 挂账扣过） */
+  const receiveOrder = (entry: ChatEntry) => {
+    if (!entry.order || entry.order.status === "received" || !active) return;
+    const o = entry.order;
+    if (o.kind === "delivery" && o.amount > 0) walletUserReceive(active.id, o.amount, `外卖·${o.shop}`, displayName(active));
+    setWallet(readWallet());
+    const mark = (prev: ChatEntry[]) => prev.map((e) => (e.id === entry.id ? { ...e, order: { ...e.order!, status: "received" as const } } : e));
+    writeLogNow(active.id, mark);
+    setLog(mark);
+    console.log(`[order] user received ${o.kind} 「${o.shop}」from ${active.id}`);
+  };
+
+  /** 消化外卖 App 投递表：进入会话时把 outbox 订单变成聊天里的 outgoing 卡片并触发 TA 回复 */
+  const drainDeliveryOutbox = () => {
+    if (!active) return;
+    const key = "vp-phone:delivery-outbox:v1";
+    try {
+      const all = JSON.parse(localStorage.getItem(key) || "[]") as { id: string; charId: string; at: number; order: NonNullable<ChatEntry["order"]> }[];
+      const mine = all.filter((x) => x.charId === active.id);
+      if (!mine.length) return;
+      localStorage.setItem(key, JSON.stringify(all.filter((x) => x.charId !== active.id)));
+      const msgs: ChatEntry[] = mine.map((x, i) => ({
+        id: `d${x.id}${i}`,
+        role: "user" as const,
+        content: `${x.order.kind === "gift" ? "🎁" : "🛵"}${x.order.shop}`,
+        at: x.at + i,
+        order: { ...x.order, from: "user" as const, status: "pending" as const },
+      }));
+      console.log(`[delivery] outbox drained → char=${active.id} n=${msgs.length}`);
+      setLog((prev) => [...prev, ...msgs]);
+      writeLogNow(active.id, (prev) => [...prev, ...msgs]);
+      setWallet(readWallet());
+      scrollBottom();
+      if (ready && !pending) void requestReply([...stateRef.current.log, ...msgs], msgs[msgs.length - 1].id, Boolean(active.storyMode));
+    } catch {
+      /* ignore */
+    }
+  };
+
   // ===== 连发模式：暂存多条、全部发出后角色才回复一次 =====
   const queuedEntries = log.filter((e) => e.queued);
+  // 外卖 App 投递表：进入聊天视图/切换会话时消化，把订单变成会话里的卡片并触发 TA 回复
+  useEffect(() => {
+    if (view === "chat" && active?.id) drainDeliveryOutbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, active?.id]);
   const queueTimer = useRef<number | null>(null);
   /** 真正发出暂存连发条：去 queued 标记落库，以最后一条为锚点请求回复 */
   const flushQueue = () => {
@@ -675,6 +767,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           PROGRESSIVE_BOND_PROTOCOL +
           EMOTION_RESTRAINT_PROTOCOL +
           NARRATIVE_NO_AI_FLAVOR +
+          ORDER_PROTOCOL +
           worldText +
           memeText
         );
@@ -705,6 +798,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         worldText +
         memeText +
         TRANSFER_PROTOCOL +
+        LOCATION_PROTOCOL +
+        ORDER_PROTOCOL +
         QUOTE_PROTOCOL +
         quoteTable +
         "\n\n" +
@@ -753,14 +848,45 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       });
       return "\n【转账往来】\n" + lines.join("\n") + "\n（只有带标记的卡片才是真实转账；你说收钱必须用 [转账:金额:备注] 标记转出，收钱则对最近一笔待收做出反应）";
     })();
+    // 定位/外卖上下文：让模型看得见最近的位置卡与订单卡状态
+    const richCtx = (() => {
+      const lines: string[] = [];
+      const locs = entries.filter((e) => e.location && !e.failed).slice(-2);
+      if (locs.length) {
+        lines.push("【位置共享】");
+        for (const e of locs) {
+          const l = e.location!;
+          lines.push(`- ${l.from === "user" ? `对方发来定位：${l.place}（${l.addr}）` : `${ch.name || "TA"}分享的位置：${l.place}`} —— 请对地点本身作出符合人设的反应`);
+        }
+      }
+      const ords = entries.filter((e) => e.order && !e.failed).slice(-3);
+      if (ords.length) {
+        lines.push("【外卖与礼物】");
+        for (const e of ords) {
+          const o = e.order!;
+          const its = o.items.map((i) => `${i.name}x${i.qty}`).join("+");
+          const state = o.status === "received" ? "已收下/已完成" : o.from === "user" ? "待 TA（角色）点卡片收下" : "你送出后 TA 口头表示收到即算完成";
+          lines.push(`- ${o.kind === "gift" ? "礼物" : "外卖"}「${o.shop}${its ? `：${its}` : ""}」¥${o.amount.toFixed(2)}${o.note ? `（留言：${o.note}）` : ""} —— ${state}`);
+        }
+        lines.push("（回赠请用 [外卖:店名:品名x数量:金额] 或 [礼物:礼品名:留言] 标记，系统才渲染成真卡片；口头说送但不写标记不算送达）");
+      }
+      return lines.length ? "\n" + lines.join("\n") : "";
+    })();
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
-      const fmt = (e: ChatEntry) => (e.transfer ? `[转账卡片 ¥${e.transfer.amount.toFixed(2)} 备注:${e.transfer.note}${e.transfer.settled ? ` ${e.transfer.settled === "received" ? "已收" : "已退"}` : e.transfer.type === "incoming" ? " 待收" : ""}]` : e.content);
+      const fmt = (e: ChatEntry) =>
+        e.transfer
+          ? `[转账卡片 ¥${e.transfer.amount.toFixed(2)} 备注:${e.transfer.note}${e.transfer.settled ? ` ${e.transfer.settled === "received" ? "已收" : "已退"}` : e.transfer.type === "incoming" ? " 待收" : ""}]`
+          : e.location
+            ? `[定位卡片 ${e.location.place}（${e.location.addr}）]`
+            : e.order
+              ? `[${e.order.kind === "gift" ? "礼物" : "外卖"}卡片 ${e.order.shop}${e.order.items.map((i) => `${i.name}x${i.qty}`).join("+") ? "：" + e.order.items.map((i) => `${i.name}x${i.qty}`).join("+") : ""} ¥${e.order.amount.toFixed(2)}${e.order.note ? ` 留言:${e.order.note}` : ""}${e.order.status === "received" ? " 已收" : e.order.from === "user" ? " 待收" : ""}]`
+              : e.content;
       // 重新回复：上一条不满意已被截掉，但模型需要知道要换个说法——追加一条系统指令再请求
       const regenDirective = regenHintRef.current
         ? { role: "user" as const, content: storyMode ? "（系统提示：刚才那段剧情被删掉了。这次换全新的叙述角度、意象和措辞重写这一段——不许复用被删版本的句子，情节走向可以不同但必须承接更早的前文）" : "（系统提示：你上一句回复被撤回了。这次用完全不同的说法和角度接她的话——不许复用刚才的句子和口头禅，可以换个反应、换个话题切入点；保持口语化短消息）" }
         : null;
-      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) })), ...(regenDirective ? [regenDirective] : [])];
+      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx + richCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) })), ...(regenDirective ? [regenDirective] : [])];
       // 剧情链路：玩家消息带人称锚点包装（前文叙述转"你"），assistant 历史原样保留——记忆完整互通
       const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt }];
       let lastStoryNarration = "";
@@ -838,8 +964,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         // 转账标记拆卡：[转账:金额:备注] → incoming 卡片（挂账待用户点收），正文只留 TA 说的话
         const trans = clean && !storyMode ? digestTransfer(clean) : { text: clean };
         clean = trans.text;
+        // 定位/外卖标记拆卡：[定位:地点] / [外卖:…] / [礼物:…] → 结构化卡片
+        const rich = clean && !storyMode ? digestRichCards(clean) : { text: clean };
+        clean = rich.text;
         // 自然语言收款兜底：TA 没写标记但话说"收下啦"——最近一笔用户转账卡片自动置为已收
-        if (!trans.transfer && clean) settleIncomingByWords(clean, entries);
+        if (!trans.transfer && !rich.order && clean) settleIncomingByWords(clean, entries);
         let rep = false;
         if (clean && isRepetitiveReply(clean, recentAssistants)) {
           rep = true;
@@ -860,15 +989,16 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             console.log(`[reply] regen ok char=${ch.id}`);
             const againDigest = digestQuote(digestIntroRequests(ch.id, again), entries);
             const againTrans = !storyMode ? digestTransfer(againDigest.text) : { text: againDigest.text, transfer: undefined };
-            settleReply(ch.id, userMsgId, againTrans.text, storyMode, againDigest.quote, againTrans.transfer);
+            const againRich = !storyMode ? digestRichCards(againTrans.text) : { text: againTrans.text };
+            settleReply(ch.id, userMsgId, againRich.text, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
           }
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
-          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}`);
-          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer);
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}`);
+          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
@@ -882,13 +1012,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
-  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"]) => {
+  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"], location?: ChatEntry["location"], order?: ChatEntry["order"]) => {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
       // 只标记本次新产出的回复为剧情内容：历史消息的 story 标记原样保留（记忆互通）
       const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
-      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}) }] : kept;
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
     } catch {
@@ -1507,6 +1637,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
                 {entry.quote && <QuoteBlock quote={entry.quote} side="right" />}
                 {entry.transfer ? (
                   <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />
+                ) : entry.location ? (
+                  <LocationCard entry={entry} />
+                ) : entry.order ? (
+                  <OrderCard entry={entry} charName={displayName(active)} onOpen={() => setOrderSheet(entry.id)} />
                 ) : entry.stickerUrl ? (
                   <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
                 ) : (
@@ -1543,6 +1677,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
                   onSpeak={() => void speak(entry.id, entry.content)}
                 />
                 {entry.transfer && <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />}
+                {entry.location && <LocationCard entry={entry} />}
+                {entry.order && <OrderCard entry={entry} charName={displayName(active)} onOpen={() => setOrderSheet(entry.id)} />}
               </div>
             )
           );
@@ -1587,6 +1723,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             onClose={() => setTransferOpen(false)}
           />
         )}
+        {/* 定位选择面板：常用地点 + 自定义 */}
+        {locationOpen && (
+          <LocationPanel disabled={!ready || pending} onPick={(p, a) => sendLocation(p, a)} onClose={() => setLocationOpen(false)} />
+        )}
         {/* 引用条：待发引用显示在输入框上方，微信式浅灰小块 + 关闭按钮 */}
         {quoteDraft && (
           <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-1.5">
@@ -1628,6 +1768,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             className={`jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full ${transferOpen ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-primary"}`}
           >
             <Banknote className="size-4.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              console.log(`[location] open panel char=${active.id}`);
+              setLocationOpen((v) => !v);
+            }}
+            aria-label="发送定位"
+            className={`jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full ${locationOpen ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-primary"}`}
+          >
+            <MapPin className="size-[18px]" />
           </button>
           <Input
             placeholder={
@@ -1684,6 +1835,34 @@ export function RoleChatApp({ config, background, onBack }: Props) {
                 <button type="button" onClick={() => setTransferSheet(null)} className="jelly-btn mt-4 h-9 w-full rounded-xl bg-neutral-100 text-[12.5px] font-semibold text-neutral-600">
                   关闭
                 </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+      {/* 订单详情弹层：TA 送来的外卖/礼物待收时提供「收下」 */}
+      {orderSheet && (() => {
+        const e = log.find((x) => x.id === orderSheet);
+        if (!e?.order) return null;
+        const o = e.order;
+        return (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 p-8" onClick={() => setOrderSheet(null)}>
+            <div className="drawer-panel w-full max-w-[290px] rounded-2xl bg-white p-5 shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
+              <p className="text-center text-[11px] text-muted-foreground">{o.from === "char" ? `${displayName(active)} 送给你的${o.kind === "gift" ? "礼物" : "外卖"}` : `你下单的${o.kind === "gift" ? "礼物" : "外卖"}`}</p>
+              <p className="mt-2 text-center text-[34px]">{o.kind === "gift" ? "🎁" : "🛵"}</p>
+              <p className="mt-1 text-center text-[15px] font-bold text-neutral-800">{o.shop}</p>
+              <p className="mt-1 text-center text-[11.5px] text-muted-foreground">{o.items.map((i) => `${i.name} x${i.qty}`).join(" + ")}</p>
+              {o.amount > 0 && <p className="mt-1 text-center text-[13px] font-bold text-orange-500">¥{o.amount.toFixed(2)}</p>}
+              {o.note && <p className="mt-2 rounded-lg bg-pink-50 px-3 py-2 text-center text-[11px] text-pink-500">留言：{o.note}</p>}
+              <p className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-center text-[11px] text-orange-600">
+                {o.status === "received" ? "已完成 · 已送达 TA 手中" : o.from === "char" ? "待签收 · 骑手正在路上" : "已支付 · 等待对方收取"}
+              </p>
+              {o.from === "char" && o.status !== "received" ? (
+                <button type="button" onClick={() => { receiveOrder(e); setOrderSheet(null); }} className="jelly-btn mt-4 h-9 w-full rounded-xl bg-gradient-to-br from-[#f7b267] to-[#e56b6f] text-[12.5px] font-semibold text-white">
+                  收下
+                </button>
+              ) : (
+                <button type="button" onClick={() => setOrderSheet(null)} className="jelly-btn mt-4 h-9 w-full rounded-xl bg-neutral-100 text-[12.5px] font-semibold text-neutral-600">关闭</button>
               )}
             </div>
           </div>
@@ -2293,6 +2472,54 @@ function TransferCard({ entry, charName, onOpen }: { entry: ChatEntry; charName:
   );
 }
 
+/** 定位卡片（微信式地图卡）：地点名 + 地址行 + 迷你地图占位；纯展示不可点 */
+function LocationCard({ entry }: { entry: ChatEntry }) {
+  const l = entry.location!;
+  return (
+    <div className="jelly-btn w-[210px] overflow-hidden rounded-xl border border-border/60 bg-white text-left shadow-md shadow-[var(--bubble-shadow)]">
+      {/* 迷你地图：CSS 网格 + 道路线模拟，中心定位针 */}
+      <div className="relative h-[74px] bg-[oklch(0.94_0.035_150)]">
+        <div className="absolute inset-0 opacity-40" style={{ backgroundImage: "linear-gradient(oklch(0.85_0.05_150) 1px, transparent 1px), linear-gradient(90deg, oklch(0.85_0.05_150) 1px, transparent 1px)", backgroundSize: "18px 18px" }} />
+        <span className="absolute left-0 top-[22px] h-[7px] w-full -rotate-3 bg-[oklch(0.97_0.02_90)]" />
+        <span className="absolute left-[60%] top-0 h-full w-[7px] rotate-6 bg-[oklch(0.97_0.02_90)]" />
+        <span className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-[70%] flex-col items-center">
+          <MapPin className="size-5 fill-red-500 text-white stroke-red-600" strokeWidth={1.5} />
+          <span className="mt-0.5 size-1.5 rounded-full bg-red-500/30" />
+        </span>
+      </div>
+      <div className="px-2.5 py-1.5">
+        <p className="truncate text-[12px] font-semibold text-neutral-800">{l.place}</p>
+        <p className="truncate text-[9.5px] text-muted-foreground">{l.addr}</p>
+      </div>
+    </div>
+  );
+}
+
+/** 外卖/礼物订单卡：外卖=橙色系仿外卖平台条，礼物=粉紫礼盒；待收可点开详情 */
+function OrderCard({ entry, charName, onOpen }: { entry: ChatEntry; charName: string; onOpen: () => void }) {
+  const o = entry.order!;
+  const gift = o.kind === "gift";
+  const done = o.status === "received";
+  const grad = gift ? "from-[#c8a2e8] to-[#8f7bd9]" : "from-[#f7b267] to-[#e56b6f]";
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`jelly-btn flex w-[220px] items-center gap-2.5 rounded-xl px-3 py-2.5 text-left shadow-md shadow-[var(--bubble-shadow)] transition-opacity ${done ? "bg-neutral-200 opacity-70" : `bg-gradient-to-br ${grad}`}`}
+    >
+      <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${done ? "bg-neutral-300 text-neutral-500" : "bg-white/25 text-white"}`}>
+        {gift ? <Gift className="size-4" /> : <UtensilsCrossed className="size-4" />}
+      </span>
+      <span className="min-w-0">
+        <span className={`block truncate text-[12px] font-bold ${done ? "text-neutral-500" : "text-white"}`}>{o.shop}{o.amount > 0 && !gift ? ` ¥${o.amount.toFixed(2)}` : ""}</span>
+        <span className={`block truncate text-[9.5px] ${done ? "text-neutral-400" : "text-white/85"}`}>
+          {done ? "已收下 · 完成" : o.from === "char" ? `${charName}送的${gift ? "礼物" : "外卖"} · 点按签收` : "已下单 · 骑手配送中"}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 /** 转账编辑面板：金额 + 快捷额 + 备注 + 余额显示，确认即发 */
 function TransferPanel({ charName, balance, onSend, onClose }: { charName: string; balance: number; onSend: (amount: number, note: string) => void; onClose: () => void }) {
   const [amount, setAmount] = useState("");
@@ -2337,6 +2564,52 @@ function TransferPanel({ charName, balance, onSend, onClose }: { charName: strin
       >
         转账给 TA
       </button>
+    </div>
+  );
+}
+
+/** 定位选择面板：常用地点宫格 + 自定义地点输入 */
+function LocationPanel({ disabled, onPick, onClose }: { disabled: boolean; onPick: (place: string, addr: string) => void; onClose: () => void }) {
+  const [custom, setCustom] = useState("");
+  return (
+    <div className="fade-up mb-2 rounded-2xl border border-border bg-white p-3 shadow-lg">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-[12px] font-semibold text-neutral-700">
+          <MapPin className="size-3.5 text-primary" /> 发送位置
+        </span>
+        <button type="button" onClick={onClose} aria-label="关闭定位面板" className="jelly-icon flex size-5 items-center justify-center rounded-full text-muted-foreground">
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <ul className="mt-2 grid max-h-[168px] grid-cols-2 gap-1.5 overflow-y-auto">
+        {PLACE_PRESETS.map((p) => (
+          <li key={p.place}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onPick(p.place, p.addr)}
+              className="jelly-btn flex w-full items-center gap-2 rounded-xl border border-border bg-secondary/40 px-2.5 py-1.5 text-left hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50"
+            >
+              <span className="text-[15px]">{p.emoji}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-[11.5px] font-medium text-neutral-700">{p.place}</span>
+                <span className="block truncate text-[9px] text-muted-foreground">{p.addr}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex gap-2">
+        <Input value={custom} onChange={(e) => setCustom(e.target.value.slice(0, 16))} maxLength={16} placeholder="或输入当前位置…" className="h-8 flex-1 rounded-lg bg-muted/40 text-[11.5px]" />
+        <button
+          type="button"
+          disabled={disabled || !custom.trim()}
+          onClick={() => onPick(custom.trim(), "自定义位置")}
+          className="jelly-btn h-8 shrink-0 rounded-lg bg-primary px-3 text-[11.5px] font-semibold text-primary-foreground disabled:opacity-40"
+        >
+          发送
+        </button>
+      </div>
     </div>
   );
 }

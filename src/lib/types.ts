@@ -29,7 +29,8 @@ export type ScreenId =
   | "bond"
   | "preference"
   | "theater"
-  | "profile";
+  | "profile"
+  | "delivery";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";
 

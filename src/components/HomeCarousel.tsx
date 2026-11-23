@@ -1,6 +1,6 @@
 // Companion OS 主屏：双屏横向轮播（屏1 陪伴主屏 / 屏2 生活 Bento）+ 常驻玻璃 Dock
 import { useEffect, useRef, useState } from "react";
-import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil } from "lucide-react";
+import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, UtensilsCrossed } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { useCharacters, unreadCount, useReadMarks } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
@@ -19,6 +19,8 @@ const APPS: { key: keyof typeof ICON_URLS; label: string; screen: ScreenId }[] =
   { key: "worldbook", label: "世界书", screen: "worldbook" },
   { key: "memory", label: "偏好记忆", screen: "preference" },
 ];
+/** 外卖 App 无抠图素材，用渐变底 + lucide 图标单独渲染，追加在网格末位 */
+const EXTRA_APP = { label: "饿了么恋人", screen: "delivery" as ScreenId };
 
 export function HomeCarousel({ config, wallpaper, onOpen }: Props) {
   const [page, setPage] = useState(0);
@@ -142,7 +144,7 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
       {/* 音乐胶囊 */}
       <MusicPill onOpen={onOpen} />
 
-      {/* 5 App 网格 */}
+      {/* 6 App 网格（5 图标素材 + 外卖） */}
       <div className="mt-auto grid grid-cols-5 gap-2 pt-4">
         {APPS.map((app, i) => (
           <button key={app.key} type="button" onClick={() => onOpen(app.screen)} className="group flex flex-col items-center gap-1">
@@ -155,6 +157,12 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
             <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{app.label}</span>
           </button>
         ))}
+        <button type="button" onClick={() => onOpen(EXTRA_APP.screen)} className="group flex flex-col items-center gap-1">
+          <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#f7b267] to-[#e56b6f] shadow-[0_4px_14px_-4px_rgba(220,120,90,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">
+            <UtensilsCrossed className="size-7 text-white" />
+          </span>
+          <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{EXTRA_APP.label}</span>
+        </button>
       </div>
     </section>
   );

@@ -11,6 +11,7 @@ import { WorldBookApp } from "./WorldBookApp";
 import { StickerApp } from "./StickerApp";
 import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
 import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
+import { DeliveryApp } from "./DeliveryApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 
 interface Props {
@@ -32,6 +33,19 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const [chatBg, setChatBg] = useChatBackground();
 
   const goHome = () => setScreen("home");
+  /** 外卖 App 下单后：订单写入待投递表（RoleChatApp 进入会话时消化成聊天卡片），并跳进该角色会话 */
+  const sendOrderToChat = (charId: string, order: { kind: "delivery" | "gift"; shop: string; items: { name: string; qty: number; price: number }[]; amount: number; note?: string }) => {
+    try {
+      const key = "vp-phone:delivery-outbox:v1";
+      const prev = JSON.parse(localStorage.getItem(key) || "[]") as { id: string; charId: string; at: number; order: typeof order }[];
+      localStorage.setItem(key, JSON.stringify([...prev, { id: `o${Date.now()}`, charId, at: Date.now(), order }]));
+    } catch {
+      /* ignore */
+    }
+    if (charId) localStorage.setItem("vp-phone:active-character:v1", charId);
+    console.log(`[delivery] outbox → char=${charId} ${order.kind} ¥${order.amount}`);
+    setScreen("rolechat");
+  };
   const lock = () => {
     setScreen("home");
     setLocked(true);
@@ -84,6 +98,9 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "theater" && <TheaterApp onBack={goHome} />}
               {screen === "profile" && (
                 <ProfileApp onBack={goHome} onOpenChar={() => setScreen("rolechat")} onOpenSettings={() => setScreen("settings")} />
+              )}
+              {screen === "delivery" && (
+                <DeliveryApp onBack={goHome} onSend={(charId, order) => sendOrderToChat(charId, order)} />
               )}
             </div>
 

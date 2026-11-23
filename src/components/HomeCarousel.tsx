@@ -1,6 +1,6 @@
 // Companion OS 主屏：双屏横向轮播（屏1 陪伴主屏 / 屏2 生活 Bento）+ 常驻玻璃 Dock
 import { useEffect, useRef, useState } from "react";
-import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, UtensilsCrossed } from "lucide-react";
+import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, Sparkles, UtensilsCrossed } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { useCharacters, unreadCount, useReadMarks } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
@@ -144,8 +144,8 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
       {/* 音乐胶囊 */}
       <MusicPill onOpen={onOpen} />
 
-      {/* 6 App 网格（5 图标素材 + 外卖） */}
-      <div className="mt-auto grid grid-cols-5 gap-2 pt-4">
+      {/* 7 App 网格（5 图标素材 + 外卖 + 手机能力） */}
+      <div className="mt-auto grid grid-cols-4 gap-x-2 gap-y-3 pt-4 sm:grid-cols-5">
         {APPS.map((app, i) => (
           <button key={app.key} type="button" onClick={() => onOpen(app.screen)} className="group flex flex-col items-center gap-1">
             <span
@@ -162,6 +162,12 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
             <UtensilsCrossed className="size-7 text-white" />
           </span>
           <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{EXTRA_APP.label}</span>
+        </button>
+        <button type="button" onClick={() => onOpen("mcp")} className="group flex flex-col items-center gap-1">
+          <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#c7b9f5] to-[#8ea3e8] shadow-[0_4px_14px_-4px_rgba(140,130,220,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">
+            <Sparkles className="size-7 text-white" />
+          </span>
+          <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">手机能力</span>
         </button>
       </div>
     </section>

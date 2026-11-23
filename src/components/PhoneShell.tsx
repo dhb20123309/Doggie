@@ -1,6 +1,7 @@
 // 虚拟手机机身：外壳 + 锁屏流程 + 屏幕路由（桌面 / 各 App）
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { startUsageTracker } from "@/lib/reality-mcp";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
 import { LockScreen } from "./LockScreen";
@@ -13,6 +14,7 @@ import { StickerApp } from "./StickerApp";
 import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
 import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
 import { DeliveryApp } from "./DeliveryApp";
+import { McpApp } from "./McpApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 import { onNotify, onOpenChat, requestOpenChat, useNotifyOn, type NotifyPayload } from "@/lib/notification-store";
 
@@ -61,6 +63,18 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
     setBanner(null);
   };
 
+  // MCP「读取使用时长」前台计时 + 「震动手持」降级：振动接口不可用时机身抖动动画
+  useEffect(() => startUsageTracker(), []);
+  const [shaking, setShaking] = useState(false);
+  useEffect(() => {
+    const h = () => {
+      setShaking(true);
+      setTimeout(() => setShaking(false), 600);
+    };
+    window.addEventListener("vp-mcp:shake", h);
+    return () => window.removeEventListener("vp-mcp:shake", h);
+  }, []);
+
   const goHome = () => setScreen("home");
   /** 外卖 App 下单后：订单写入待投递表（RoleChatApp 进入会话时消化成聊天卡片），并跳进该角色会话 */
   const sendOrderToChat = (charId: string, order: { kind: "delivery" | "gift"; shop: string; items: { name: string; qty: number; price: number }[]; amount: number; note?: string }) => {
@@ -81,7 +95,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   };
 
   return (
-    <div className="phone-frame relative h-full w-full overflow-hidden rounded-none p-0 sm:h-auto sm:w-auto sm:overflow-visible sm:rounded-[48px] sm:p-[10px]">
+    <div className={`phone-frame relative h-full w-full overflow-hidden rounded-none p-0 sm:h-auto sm:w-auto sm:overflow-visible sm:rounded-[48px] sm:p-[10px] ${shaking ? "shake-x" : ""}`}>
       {/* 侧边按键 */}
       <span className="absolute -left-[3px] top-[90px] hidden h-8 w-[3px] rounded-l bg-frame-edge sm:block" />
       <span className="absolute -left-[3px] top-[130px] hidden h-12 w-[3px] rounded-l bg-frame-edge sm:block" />
@@ -159,6 +173,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                   onBack={goHome}
                   onLock={lock}
                   notify={{ on: notifyOn, setOn: setNotifyOn }}
+                  onOpenMcp={() => setScreen("mcp")}
                   wallpapers={{ lockWp, homeWp, chatBg, setLockWp, setHomeWp, setChatBg }}
                 />
               )}
@@ -183,6 +198,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "delivery" && (
                 <DeliveryApp onBack={goHome} onSend={(charId, order) => sendOrderToChat(charId, order)} />
               )}
+              {screen === "mcp" && <McpApp config={config} onBack={goHome} />}
             </div>
 
             {/* Home 指示条 */}

@@ -9,6 +9,7 @@ import {
   Trash2,
   Upload,
   WandSparkles,
+  Sparkles,
   SlidersHorizontal,
   BookText,
   SmilePlus,
@@ -111,6 +112,7 @@ import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } 
 import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, OpenerCard, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 import { emitNotify } from "@/lib/notification-store";
+import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, type McpAction } from "@/lib/reality-mcp";
 
 interface Props {
   config: AiConfig;
@@ -769,6 +771,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           EMOTION_RESTRAINT_PROTOCOL +
           NARRATIVE_NO_AI_FLAVOR +
           ORDER_PROTOCOL +
+          REALITY_MCP_PROTOCOL +
           worldText +
           memeText
         );
@@ -801,6 +804,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         TRANSFER_PROTOCOL +
         LOCATION_PROTOCOL +
         ORDER_PROTOCOL +
+        REALITY_MCP_PROTOCOL +
         QUOTE_PROTOCOL +
         quoteTable +
         "\n\n" +
@@ -873,6 +877,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       }
       return lines.length ? "\n" + lines.join("\n") : "";
     })();
+    // 手机能力状态清单：TA 看得见哪些能力开着、有哪些待触发提醒，才敢用 [震动:]/[播报:]/[提醒:] 标记
+    const mcpCtx = buildMcpContext(loadMcpPrefs());
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
       const fmt = (e: ChatEntry) =>
@@ -887,9 +893,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const regenDirective = regenHintRef.current
         ? { role: "user" as const, content: storyMode ? "（系统提示：刚才那段剧情被删掉了。这次换全新的叙述角度、意象和措辞重写这一段——不许复用被删版本的句子，情节走向可以不同但必须承接更早的前文）" : "（系统提示：你上一句回复被撤回了。这次用完全不同的说法和角度接她的话——不许复用刚才的句子和口头禅，可以换个反应、换个话题切入点；保持口语化短消息）" }
         : null;
-      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx + richCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) })), ...(regenDirective ? [regenDirective] : [])];
+      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx + richCtx + mcpCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) })), ...(regenDirective ? [regenDirective] : [])];
       // 剧情链路：玩家消息带人称锚点包装（前文叙述转"你"），assistant 历史原样保留——记忆完整互通
-      const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt }];
+      const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt + mcpCtx }];
       let lastStoryNarration = "";
       for (const e of msgs) {
         if (e.role === "user") {
@@ -968,6 +974,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         // 定位/外卖标记拆卡：[定位:地点] / [外卖:…] / [礼物:…] → 结构化卡片
         const rich = clean && !storyMode ? digestRichCards(clean) : { text: clean };
         clean = rich.text;
+        // 手机能力标记拆行动作：[震动:] / [播报:] / [提醒:] → 真实执行 + 执行记录（异步，剧情模式不注入碎句协议但标记仍消化）
+        const mcp = clean ? extractMcpMarks(clean) : { clean, actions: [] as McpAction[] };
+        clean = mcp.clean;
         // 自然语言收款兜底：TA 没写标记但话说"收下啦"——最近一笔用户转账卡片自动置为已收
         if (!trans.transfer && !rich.order && clean) settleIncomingByWords(clean, entries);
         let rep = false;
@@ -991,15 +1000,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             const againDigest = digestQuote(digestIntroRequests(ch.id, again), entries);
             const againTrans = !storyMode ? digestTransfer(againDigest.text) : { text: againDigest.text, transfer: undefined };
             const againRich = !storyMode ? digestRichCards(againTrans.text) : { text: againTrans.text };
-            settleReply(ch.id, userMsgId, againRich.text, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order);
+            const againMcp = extractMcpMarks(againRich.text);
+            const againNote = againMcp.actions.length ? await execMcpActions(againMcp.actions, loadMcpPrefs(), cfgSnapshot) : undefined;
+            settleReply(ch.id, userMsgId, againMcp.clean, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
           }
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
-          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}`);
-          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order);
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}${mcp.actions.length ? ` mcp=${mcp.actions.length}` : ""}`);
+          // 手机能力动作真实执行（按开关），结果串作为执行记录随消息落库
+          const mcpNote = mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : undefined;
+          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order, mcpNote);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
@@ -1013,13 +1026,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
-  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"], location?: ChatEntry["location"], order?: ChatEntry["order"]) => {
+  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"], location?: ChatEntry["location"], order?: ChatEntry["order"], mcpNote?: string) => {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
       // 只标记本次新产出的回复为剧情内容：历史消息的 story 标记原样保留（记忆互通）
       const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
-      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}) }] : kept;
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}), ...(mcpNote ? { mcpNote } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
       // 通知横幅：角色新回复且当前没有盯着这个会话（正在看该会话时消息已直接上屏，不打扰）
@@ -1212,6 +1225,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         PROACTIVE_PROTOCOL.replace("{{char}}", ch.name || "TA") +
         // 《Ai恋人主动报备指令》by你闻起来像小猫：内容随机池八类+情绪过滤（她近期低落时屏蔽吐槽/炫耀/求助类）
         PROACTIVE_REPORT_POOL +
+        REALITY_MCP_PROTOCOL +
         "\n注意：主动消息同样遵守反油腻底线与活人主体性——报备内容要像你真实生活里发生的事，条数与语气延续你当前状态。" +
         "\n\n" +
         pickTopicSeeds() +
@@ -1248,12 +1262,18 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         .slice(0, 3)
         .join("\n");
       if (!line) return;
+      // 主动消息也可能带手机能力标记（如"提醒我喝水"类）：拆出执行，结果记入 mcpNote
+      const pmcp = extractMcpMarks(line);
+      const pnote = pmcp.actions.length ? await execMcpActions(pmcp.actions, loadMcpPrefs(), config) : undefined;
+      line = pmcp.clean;
+      if (!line && !pnote) return;
       setLogForChar(ch.id, {
         id: `p${Date.now()}`,
         role: "assistant",
         content: line,
         at: Date.now(),
         proactive: true,
+        ...(pnote ? { mcpNote: pnote } : {}),
       });
       // 主动消息：不在该会话界面时弹横幅通知（正在看这个会话则消息已直接上屏）
       if (!(ch.id === activeId && view === "chat") && !ch.blocked) {
@@ -1693,6 +1713,12 @@ export function RoleChatApp({ config, background, onBack }: Props) {
                 {entry.transfer && <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />}
                 {entry.location && <LocationCard entry={entry} />}
                 {entry.order && <OrderCard entry={entry} charName={displayName(active)} onOpen={() => setOrderSheet(entry.id)} />}
+                {entry.mcpNote && (
+                  <p className="flex items-center gap-1 pl-1 text-[9.5px] leading-relaxed text-muted-foreground/80">
+                    <Sparkles className="size-2.5 shrink-0" />
+                    {entry.mcpNote}
+                  </p>
+                )}
               </div>
             )
           );

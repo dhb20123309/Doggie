@@ -57,6 +57,8 @@ export interface ChatEntry {
   };
   /** 用户连发模式中的暂存消息：只上屏不触发回复，点「发送全部」或到期自动发出后才请求角色回复 */
   queued?: boolean;
+  /** Reality MCP 手机能力执行记录（细灰字展示，如 "✓ 已震动·标准 ｜ ✓ 已创建提醒…"），仅 assistant 条目 */
+  mcpNote?: string;
   /** 定位共享卡片（微信式地图卡）：from 标记谁发的；place 地点名、addr 地址描述 */
   location?: { place: string; addr: string; from: "user" | "char" };
   /** 外卖/礼物订单卡：kind=delivery 外卖 | gift 礼物；status=pending 待收可点开收下，received 已完成 */

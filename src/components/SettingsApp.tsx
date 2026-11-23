@@ -1,6 +1,6 @@
 // 手机内「设置」应用：接口地址 / API Key / 模型名 / 连接测试 + 锁屏密码与壁纸自定义
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X, BellRing } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, CheckCircle2, XCircle, ChevronLeft, Trash2, ListChecks, ImageUp, LockKeyhole, X, BellRing, Sparkles, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -12,6 +12,7 @@ import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, fetchMiniMaxVoices, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
 import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, GPT_IMAGE_MODELS, type ImageConfig } from "@/lib/media";
+import { loadMcpPrefs } from "@/lib/reality-mcp";
 
 interface Props {
   config: AiConfig;
@@ -19,6 +20,7 @@ interface Props {
   onBack: () => void;
   onLock: () => void;
   notify: { on: boolean; setOn: (v: boolean | ((p: boolean) => boolean)) => void };
+  onOpenMcp: () => void;
   wallpapers: {
     lockWp: string;
     homeWp: string;
@@ -37,7 +39,7 @@ const PROVIDERS = [
   { name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
 ];
 
-export function SettingsApp({ config, onSave, onBack, onLock, notify, wallpapers }: Props) {
+export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp, wallpapers }: Props) {
   const [form, setForm] = useState<AiConfig>(config);
   const [showKey, setShowKey] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
@@ -241,6 +243,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, notify, wallpapers
 
         <PasscodeSection onLock={onLock} />
         <NotificationSection notify={notify} />
+        <McpEntryCard onOpen={onOpenMcp} />
         <WallpaperSection wallpapers={wallpapers} />
         <ImageSection />
         <VoiceSection config={config} />
@@ -311,6 +314,24 @@ function PasscodeSection({ onLock }: { onLock: () => void }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Reality MCP 手机能力入口卡：显示已启用项数，点击进独立能力页 */
+function McpEntryCard({ onOpen }: { onOpen: () => void }) {
+  const [prefs] = useState(loadMcpPrefs);
+  const enabled = Object.values(prefs.enabled).filter(Boolean).length;
+  return (
+    <button type="button" onClick={onOpen} className="jelly-btn glass flex w-full items-center gap-2.5 rounded-2xl p-3.5 text-left shadow-sm">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#c7b9f5]/40 to-[#8ea3e8]/40 text-primary">
+        <Sparkles className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-semibold">Reality MCP · 手机能力</span>
+        <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">震动 / 系统通知 / 语音播报 / 日历提醒等 {enabled} 项已开启，TA 可以直接操作你的手机</span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </button>
   );
 }
 

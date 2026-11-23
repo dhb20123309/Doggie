@@ -109,9 +109,11 @@ import {
   NARRATIVE_NO_AI_FLAVOR,
 } from "@/lib/liveliness-worldbook";
 import { PRESET_MEME_BOOK } from "@/lib/meme-book-data";
+import { getActiveMask, buildMaskSection, maskAnchorNote, maskPreview as maskPreviewOf } from "@/lib/mask-store";
 import { type MemeEntry, type MemePrefs, DEFAULT_MEME_PREFS, buildMemeSection } from "@/lib/meme-worldbook";
 import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
 import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, OpenerStrip, OpenerCard, InlineProfileCard, ProfileImportPanel } from "./ProfileSheet";
+import { MaskPanel } from "./MaskPanel";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 import { emitNotify } from "@/lib/notification-store";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, extractRemoteMarks, execRemoteMarks, answerRemoteConfirm, type McpAction } from "@/lib/reality-mcp";
@@ -176,7 +178,7 @@ function lastPhotoAt(charId: string): number {
   return t;
 }
 
-type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail" | "group";
+type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail" | "masks" | "group";
 
 export function RoleChatApp({ config, background, onBack }: Props) {
   const [characters, setCharacters] = useCharacters();
@@ -452,7 +454,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 
   /** 可引用候选列表：最近 20 条非失败、非剧情灰框、非拒收提示的消息（编号表与 AI 引用解析共用同一口径） */
   const quoteCandidates = (es: ChatEntry[]): ChatEntry[] =>
-    es.filter((e) => !e.failed && !e.story && !e.blockedTip).slice(-20);
+    es.filter((e) => !e.failed && !e.story && !e.blockedTip && !e.maskSwitch).slice(-20);
 
   /** 给 system 拼"可引用消息编号表"：[1] TA说：… / [2] 你说：… */
   const buildQuoteTable = (ch: Character, entries: ChatEntry[]): string => {
@@ -832,10 +834,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   /** 每次请求现算：人设 + 生效世界书（按插入深度分层） + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL。
    * memeText：热梗世界书命中片段（由调用方按"本轮用户消息"现算，剧情/私聊两条链路共用注入位） */
   const buildSys = useCallback(
-    (ch: Character, story: boolean, memeText = "", recentText = "", quoteTable = "") => {
+    (ch: Character, story: boolean, memeText = "", recentText = "", quoteTable = "", entries: ChatEntry[] = []) => {
       const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
       const usable = stickers.filter((s) => s.isGlobal);
       const worldText = buildWorldSectionV2(activeBooks, recentText, unlockedIntroRef.current[ch.id] ?? []);
+      // 面具（世界线关系包）：每次现算同步读存储——只注入当前启用的那一个，切换/修改立刻生效；
+      // 若会话里发生过切换，追加世界线锚点提醒模型旧对话属另一条世界线
+      const maskText = buildMaskSection(getActiveMask(ch.id, ch)) + maskAnchorNote(entries);
       if (story) {
         // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单；
         // 人设保真协议（哈基米4.0+反机械关怀世界书）剧情同样适用，聊天经济性不注入（保持叙事文体）
@@ -855,6 +860,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           ORDER_PROTOCOL +
           REALITY_MCP_PROTOCOL +
           worldText +
+          maskText +
           groupDigestFor(ch.id, characters) +
           memeText
         );
@@ -883,6 +889,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
+        maskText +
         memeText +
         TRANSFER_PROTOCOL +
         LOCATION_PROTOCOL +
@@ -906,8 +913,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   const toHistory = (ch: Character, entries: ChatEntry[]) => [
-    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), ch.storyMode ? "" : buildQuoteTable(ch, entries)) },
-    ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
+    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), ch.storyMode ? "" : buildQuoteTable(ch, entries), entries) },
+    ...entries.filter((e) => !e.failed && !e.maskSwitch).slice(-20).map((e) => ({ role: e.role, content: e.content })),
   ];
 
   /** 热梗世界书：按本轮最后一条用户消息现算命中片段（开关/全量模式见偏好；主动消息无用户输入即空串） */
@@ -926,7 +933,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // 快照请求上下文：回复在后台继续，退出聊天页/切换会话也不会打断（结果直写该角色存储）
     const ch = active;
     const cfgSnapshot = config;
-    const sysPrompt = buildSys(ch, storyMode, memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), storyMode ? "" : buildQuoteTable(ch, entries));
+    const sysPrompt = buildSys(ch, storyMode, memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), storyMode ? "" : buildQuoteTable(ch, entries), entries);
     // 转账单描述注入：让模型看得见"待收/已收"卡片状态，才能自然地说收下或推辞
     const transferCtx = (() => {
       const list = entries.filter((e) => e.transfer && !e.failed);
@@ -965,7 +972,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // 手机能力状态清单：TA 看得见哪些能力开着、有哪些待触发提醒，才敢用 [震动:]/[播报:]/[提醒:] 标记
     const mcpCtx = buildMcpContext(loadMcpPrefs()) + buildRemoteMcpContext(loadRemoteServers(), loadToolCache());
     const toHist = (es: ChatEntry[]) => {
-      const msgs = es.filter((e) => !e.failed).slice(-20);
+      const msgs = es.filter((e) => !e.failed && !e.maskSwitch).slice(-20);
       // 本轮触发消息（最后一条用户消息）带图时走 vision 多模态；历史图片只留文本占位省 token
       const lastUserIdx = msgs.map((e) => e.role).lastIndexOf("user");
       const fmt = (e: ChatEntry) =>
@@ -1448,7 +1455,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       // 剧情模式下角色不"不请自来"发私聊式碎句——主动 tick 跳过带 storyMode 的角色
       if (ch.storyMode) return;
       const sys =
-        buildSys(ch, false, memeFor(last ? [last] : []), last?.content ?? "") +
+        buildSys(ch, false, memeFor(last ? [last] : []), last?.content ?? "", "", readLastEntries(ch.id, 20)) +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
         (ch.name || "TA") +
         "）主动想找对方说话。" +
@@ -1780,10 +1787,37 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   if (view === "stickers") {
     return <StickerPanel stickers={stickers} onSend={sendSticker} onBack={() => setView("chat")} />;
   }
+  if (view === "masks") {
+    return (
+      <MaskPanel
+        character={active}
+        onBack={() => setView("detail")}
+        onApplied={(m) => {
+          // 切换成功：往会话里写一条居中灰字世界线锚点（界面+存储同步），system 侧 maskAnchorNote 据此提醒模型
+          const anchor: ChatEntry = {
+            id: `msk${Date.now()}`,
+            role: "assistant",
+            content: `— 世界线更替：${m.name} —`,
+            at: Date.now(),
+            maskSwitch: { name: m.name, preview: maskPreviewOf(m) },
+          };
+          setLog((prev) => [...prev, anchor]);
+          writeLogNow(active.id, (prev) => [...prev, anchor]);
+          console.log(`[mask] anchor written char=${active.id}「${m.name}」`);
+          setView("chat");
+        }}
+      />
+    );
+  }
   if (view === "detail") {
     return (
       <CharDetailPage
         character={active}
+        activeMaskName={getActiveMask(active.id, active)?.name ?? "默认关系"}
+        onMasks={() => {
+          console.log(`[mask] open panel char=${active.id}`);
+          setView("masks");
+        }}
         onAlias={(v) => {
           console.log(`[detail] alias char=${active.id} →「${v}」`);
           setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, alias: v } : x)));
@@ -1935,6 +1969,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         {log.map((entry, i) => {
           // 拉黑拒收提示：微信式居中灰字，不走气泡
           if (entry.blockedTip) {
+            return (
+              <p key={entry.id} className="fade-up text-center text-[10.5px] text-muted-foreground">
+                {entry.content}
+              </p>
+            );
+          }
+          // 面具切换标记：居中灰字（世界线变更锚点，不归属任何一方）
+          if (entry.maskSwitch) {
             return (
               <p key={entry.id} className="fade-up text-center text-[10.5px] text-muted-foreground">
                 {entry.content}
@@ -2334,17 +2376,22 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 
 function CharDetailPage({
   character,
+  activeMaskName,
   onAlias,
   onBlock,
   onEdit,
+  onMasks,
   onClearLog,
   onDelete,
   onBack,
 }: {
   character: Character;
+  /** 当前启用的面具名（入口行右侧展示） */
+  activeMaskName: string;
   onAlias: (v: string) => void;
   onBlock: () => void;
   onEdit: () => void;
+  onMasks: () => void;
   onClearLog: () => void;
   onDelete: () => void;
   onBack: () => void;
@@ -2399,6 +2446,16 @@ function CharDetailPage({
               编辑角色设定
             </span>
             <ChevronLeft className="size-4 -rotate-90 text-muted-foreground" />
+          </button>
+          <button type="button" onClick={onMasks} className="jelly-btn flex w-full items-center justify-between border-b border-border/50 px-4 py-3 text-left text-[13px]">
+            <span className="flex items-center gap-2">
+              <Sparkles className="size-4 text-violet-500" />
+              面具 · 世界线关系包
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-[10.5px] text-muted-foreground">{activeMaskName}</span>
+              <ChevronLeft className="size-4 -rotate-90 text-muted-foreground" />
+            </span>
           </button>
           <button type="button" onClick={onClearLog} className="jelly-btn flex w-full items-center justify-between border-b border-border/50 px-4 py-3 text-left text-[13px]">
             <span className="flex items-center gap-2">

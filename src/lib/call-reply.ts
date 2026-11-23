@@ -17,6 +17,7 @@ import { readLastEntries } from "./chat-store";
 import { getActiveWorldBooks, buildWorldSectionV2 } from "./worldbook";
 import { CHARACTER_FIDELITY } from "./adult-worldbook";
 import { LANGUAGE_PROTOCOL, ANTI_GREASE_BASELINE, LIVING_PERSON_PROTOCOL } from "./liveliness-worldbook";
+import { getActiveMask, buildMaskSection, maskAnchorNoteForChar } from "./mask-store";
 
 const CALL_LOG_PREFIX = "vp-phone:calllog:";
 const CALL_LOG_MAX = 40;
@@ -36,6 +37,8 @@ export const CALL_SCENARIO =
 export function buildCallSys(ch: Character, books: WorldBook[], recentText = "", observationText = ""): string {
   const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
   const worldText = buildWorldSectionV2(activeBooks, recentText, []);
+  // 面具（世界线关系包）：通话与私聊共用同一份"当前启用面具"，每次现算同步读存储
+  const maskText = buildMaskSection(getActiveMask(ch.id, ch)) + maskAnchorNoteForChar(ch.id);
   return (
     `你现在扮演以下角色，请始终以该身份回复，不要跳出角色。\n名字：${ch.name || "无名角色"}\n\n${ch.persona || "无额外设定"}\n` +
     CHAT_LIVENESS +
@@ -44,6 +47,7 @@ export function buildCallSys(ch: Character, books: WorldBook[], recentText = "",
     ANTI_GREASE_BASELINE +
     LIVING_PERSON_PROTOCOL +
     worldText +
+    maskText +
     CALL_SCENARIO +
     observationText +
     `\n【最近对话（对方是"${displayName(ch)}"正在和你通话）】\n`

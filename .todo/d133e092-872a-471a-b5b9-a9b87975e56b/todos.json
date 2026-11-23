@@ -1,0 +1,23 @@
+[
+  {
+    "id": "m1",
+    "status": "completed",
+    "content": "模块1：面具数据层（mask-store.ts + buildSys 注入 + call-reply）",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "m2",
+    "status": "completed",
+    "content": "模块2：面具 UI（详情页入口 + 列表/新增/编辑/删除/应用面板）",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "m3",
+    "status": "completed",
+    "content": "模块3：双门禁+dev+自测说明+AGENTS.md",
+    "priority": "medium",
+    "skills": []
+  }
+]

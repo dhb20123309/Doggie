@@ -49,6 +49,8 @@ export interface ChatEntry {
   story?: boolean;
   /** 拉黑后的拒收系统提示（居中灰字，非角色消息） */
   blockedTip?: boolean;
+  /** 面具（世界线关系包）切换标记：渲染为居中灰字；system 里作为"旧对话属另一条世界线"的锚点 */
+  maskSwitch?: { name: string; preview: string };
   /** 引用的小消息（微信式 reply）：随本条消息一起发出并持久化；剧情灰框消息不可被引用 */
   quote?: { name: string; content: string };
   /** 转账单（微信式橙色卡片）：type=transfer 待收/可点开详情；settled=已收/已退回，金额不再变动 */

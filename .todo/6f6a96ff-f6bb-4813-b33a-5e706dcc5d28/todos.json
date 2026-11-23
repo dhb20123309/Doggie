@@ -1,29 +1,50 @@
 [
   {
-    "id": "r1",
+    "id": "t1",
     "status": "completed",
-    "content": "ai-api.ts 流式能力（复用既有 chatStream，无需新增）",
+    "content": "VoiceCallApp 中部滚动区布局修复",
     "priority": "high",
     "skills": []
   },
   {
-    "id": "r2",
+    "id": "t2",
     "status": "completed",
-    "content": "call-reply.ts 通话日志独立+streamCallReply首句先行",
+    "content": "RoleChatApp 输入栏工具箱四宫格收纳",
     "priority": "high",
     "skills": []
   },
   {
-    "id": "r3",
-    "status": "completed",
-    "content": "VoiceCallApp 队列播放器+状态机UI+打断+兜底语音",
-    "priority": "high",
+    "id": "t3",
+    "status": "in_progress",
+    "content": "自定义桌面图标（companion-store+HomeCarousel+SettingsApp）",
+    "priority": "medium",
     "skills": []
   },
   {
-    "id": "r4",
-    "status": "completed",
-    "content": "单测+双门禁+dev重启+AGENTS.md",
+    "id": "t4",
+    "status": "pending",
+    "content": "音乐改回 mp3 逐行链接（media+SettingsApp+ShellApps）",
+    "priority": "medium",
+    "skills": []
+  },
+  {
+    "id": "t5",
+    "status": "pending",
+    "content": "AI 每日自动日记（companion-store+PhoneShell）",
+    "priority": "medium",
+    "skills": []
+  },
+  {
+    "id": "t6",
+    "status": "pending",
+    "content": "小剧场角色化+AI生成剧本（companion-store+CompanionApps）",
+    "priority": "medium",
+    "skills": []
+  },
+  {
+    "id": "t7",
+    "status": "pending",
+    "content": "双门禁+dev重启+截图验收+AGENTS.md",
     "priority": "high",
     "skills": []
   }

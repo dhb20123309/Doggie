@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { startUsageTracker } from "@/lib/reality-mcp";
 import type { AiConfig, ScreenId } from "@/lib/types";
+import { isConfigured } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
 import { LockScreen } from "./LockScreen";
 import { HomeCarousel } from "./HomeCarousel";
@@ -129,6 +130,68 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
 
   // MCP「读取使用时长」前台计时 + 「震动手持」降级：振动接口不可用时机身抖动动画
   useEffect(() => startUsageTracker(), []);
+
+  // AI 每日自动日记：跨天首次进入（或页面存活过午夜）时，为最近聊过天的角色各生成一篇
+  const dailyDiaryRef = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      if (dailyDiaryRef.current) return;
+      const mod = await import("@/lib/companion-store");
+      if (mod.isDailyDiaryDone()) return;
+      dailyDiaryRef.current = true;
+      if (!isConfigured(config)) {
+        console.log("[diary] daily skip api not configured");
+        return;
+      }
+      const { readLastEntries } = await import("@/lib/chat-store");
+      const { readCallLog } = await import("@/lib/call-reply");
+      // 非 hook 场景读存储：characters 走 localStorage 直读（与 useCharacters 同 key）
+      const chars: { id: string; name?: string; persona?: string }[] = (() => {
+        try {
+          return JSON.parse(localStorage.getItem("vp-phone:characters:v2") || "[]");
+        } catch {
+          return [];
+        }
+      })();
+      const entries: import("@/lib/companion-store").DiaryEntry[] = [];
+      for (const ch of chars.slice(0, 6)) {
+        const priv = readLastEntries(ch.id, 14).filter((e) => !e.proactive && !e.transfer);
+        const calls = readCallLog(ch.id).slice(-8);
+        const material = [...priv, ...calls]
+          .sort((a, b) => a.at - b.at)
+          .filter((e) => Date.now() - e.at < 3 * 86_400_000)
+          .map((e) => `${e.role === "user" ? "我" : ch.name || "TA"}：${(e.content || "").replace(/\n/g, " ").slice(0, 60)}`)
+          .join("\n");
+        if (!material.trim()) {
+          console.log(`[diary] daily skip no-material char=${ch.id}`);
+          continue;
+        }
+        const entry = await mod.generateDailyDiary(config, { ch: ch as never, material });
+        if (entry && alive) entries.push(entry);
+      }
+      if (entries.length && alive) {
+        try {
+          const key = "vp-phone:diaries:v1";
+          const prev = JSON.parse(localStorage.getItem(key) || "[]") as import("@/lib/companion-store").DiaryEntry[];
+          localStorage.setItem(key, JSON.stringify([...entries, ...prev]));
+          window.dispatchEvent(new StorageEvent("storage", { key, newValue: localStorage.getItem(key) }));
+          console.log(`[diary] daily wrote ${entries.length} entr(y/ies)`);
+        } catch {
+          /* 隐私模式忽略 */
+        }
+      }
+      mod.markDailyDiaryDone();
+    };
+    const t = setTimeout(() => void run(), 6000);
+    const iv = setInterval(() => void run(), 3_600_000);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+      clearInterval(iv);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [shaking, setShaking] = useState(false);
   useEffect(() => {
     const h = () => {
@@ -269,7 +332,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "phonepeek" && <PhonePeekApp config={config} onBack={goHome} />}
               {screen === "bond" && <BondApp config={config} onBack={goHome} />}
               {screen === "preference" && <PreferenceApp config={config} onBack={goHome} />}
-              {screen === "theater" && <TheaterApp onBack={goHome} />}
+              {screen === "theater" && <TheaterApp config={config} onBack={goHome} />}
               {screen === "profile" && (
                 <ProfileApp onBack={goHome} onOpenChar={() => setScreen("rolechat")} onOpenSettings={() => setScreen("settings")} />
               )}

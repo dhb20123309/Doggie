@@ -23,7 +23,6 @@ import {
   Ban,
   Quote,
   Banknote,
-  ImagePlus,
   Coins,
   MapPin,
   UtensilsCrossed,
@@ -2118,19 +2117,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         )}
         <div className="flex items-center gap-2">
           <ToolboxButton open={toolboxOpen} onClick={() => setToolboxOpen((v) => !v)} />
-          {/* 发图：相册选择或相机拍照，压缩后走 vision 让 TA 看图说话 */}
-          <button
-            type="button"
-            onClick={() => {
-              if (!ready || pending) return;
-              console.log(`[photo] picker open char=${active.id}`);
-              photoInputRef.current?.click();
-            }}
-            aria-label="发送图片"
-            className="jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-primary"
-          >
-            <ImagePlus className="size-[18px]" />
-          </button>
+          {/* 发图：相册选择或相机拍照，压缩后走 vision 让 TA 看图说话（入口已收纳进工具箱，隐藏 input 保留） */}
           <input
             ref={photoInputRef}
             type="file"
@@ -2141,28 +2128,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               e.target.value = "";
             }}
           />
-          <button
-            type="button"
-            onClick={() => {
-              console.log(`[transfer] open panel char=${active.id}`);
-              setTransferOpen((v) => !v);
-            }}
-            aria-label="转账"
-            className={`jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full ${transferOpen ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-primary"}`}
-          >
-            <Banknote className="size-4.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              console.log(`[location] open panel char=${active.id}`);
-              setLocationOpen((v) => !v);
-            }}
-            aria-label="发送定位"
-            className={`jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full ${locationOpen ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-primary"}`}
-          >
-            <MapPin className="size-[18px]" />
-          </button>
           <Input
             placeholder={
               !ready
@@ -2271,10 +2236,26 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           </div>
         </div>
       )}
-      {/* 工具箱菜单：角色开场白（聊天流内展开）/ 人物档案（独立静态页） */}
+      {/* 工具箱菜单：向上展开六宫格——发图/转账/定位/角色开场白/人物档案/导入档案，输入栏恢复原宽度 */}
       {toolboxOpen && (
         <ToolboxMenu
           hasProfile={Boolean(profile)}
+          onSendPhoto={() => {
+            console.log(`[inputbar] toolbox→发图 char=${active.id}`);
+            setToolboxOpen(false);
+            if (!ready || pending) return;
+            photoInputRef.current?.click();
+          }}
+          onTransfer={() => {
+            console.log(`[inputbar] toolbox→转账 char=${active.id}`);
+            setToolboxOpen(false);
+            setTransferOpen(true);
+          }}
+          onLocation={() => {
+            console.log(`[inputbar] toolbox→定位 char=${active.id}`);
+            setToolboxOpen(false);
+            setLocationOpen(true);
+          }}
           onShowOpener={() => {
             console.log(`[profile] toolbox→opener char=${active.id} 聊天流内展开`);
             setToolboxOpen(false);

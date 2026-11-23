@@ -572,7 +572,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
       </div>
 
       {/* 头像 + 名称 + 实时状态 */}
-      <section className="flex flex-col items-center px-4 pt-4">
+      <section className="flex shrink-0 flex-col items-center px-4 pt-4">
         <div className="relative">
           {recording && (
             <span className="absolute inset-0 animate-ping rounded-full bg-rose-300/40" style={{ animationDuration: "1.6s" }} />
@@ -613,6 +613,8 @@ export function VoiceCallApp({ config, onBack }: Props) {
         </div>
       </section>
 
+      {/* 中部滚动区：结束后转写卡+录音结果卡同时展开，手机端必须可滚，否则 footer 被顶出视口 */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
       {/* 错误提示（回复失败时带重试按钮） */}
       {error && (
         <div className="mx-4 mt-3 rounded-xl bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-600 ring-1 ring-rose-200/70">
@@ -793,9 +795,10 @@ export function VoiceCallApp({ config, onBack }: Props) {
           )}
         </div>
       )}
+      </div>
 
       {/* 主操作按钮 */}
-      <footer className="mt-auto flex items-end justify-center gap-8 pb-14">
+      <footer className="mt-auto flex shrink-0 items-end justify-center gap-8 pb-14">
         <button
           type="button"
           onClick={hangup}

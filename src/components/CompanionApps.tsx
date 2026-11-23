@@ -8,7 +8,7 @@ import { isConfigured } from "@/lib/types";
 import { chatCompletion } from "@/lib/ai-api";
 import { useCharacters, readLastEntries } from "@/lib/chat-store";
 import {
-  ICON_URLS,
+  iconFor,
   useDiaries,
   useBond,
   usePreferences,
@@ -18,8 +18,13 @@ import {
   isPeekFresh,
   seedDiaries,
   SCRIPTS,
+  loadCharScripts,
+  deleteCharScript,
+  generateScriptFor,
+  fillScriptText,
   type DiaryEntry,
   type SceneNode,
+  type Script,
 } from "@/lib/companion-store";
 
 interface AppProps {
@@ -401,26 +406,118 @@ export function PreferenceApp({ config, onBack }: AppProps) {
 }
 
 /* ================= 5. 小剧场 ================= */
-export function TheaterApp({ onBack }: AppProps) {
+export function TheaterApp({ config, onBack }: AppProps) {
+  const [characters] = useCharacters();
+  const [whoIdx, setWhoIdx] = useState(0);
+  const who = characters[Math.min(whoIdx, Math.max(0, characters.length - 1))];
   const [scriptId, setScriptId] = useState<string | null>(null);
-  const [nodeId, setNodeId] = useState<string>("");
-  const script = SCRIPTS.find((s) => s.id === scriptId);
+  const [nodeId, setNodeId] = useState("");
+  const [genBusy, setGenBusy] = useState(false);
+  const [genMsg, setGenMsg] = useState("");
+  // 每次进页/切角色重读该角色的 AI 剧本
+  const [charScripts, setCharScripts] = useState(() => (who ? loadCharScripts(who.id) : []));
+  useEffect(() => {
+    if (who) setCharScripts(loadCharScripts(who.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [who?.id]);
+
+  const allScripts: Script[] = [...charScripts, ...SCRIPTS.filter((s) => !s.charIds || s.charIds.includes(who?.id ?? ""))];
+  const script = allScripts.find((s) => s.id === scriptId);
   const node: SceneNode | undefined = script?.nodes[nodeId];
+  const ready = Boolean(config && isConfigured(config));
+
+  const flash = (t: string) => {
+    setGenMsg(t);
+    setTimeout(() => setGenMsg(""), 3000);
+  };
+
+  const genScript = async () => {
+    if (!config || !who || genBusy) return;
+    if (!ready) {
+      flash("先在设置里接入 AI 接口，TA 才能写剧本");
+      return;
+    }
+    setGenBusy(true);
+    try {
+      const priv = readLastEntries(who.id, 12).map((e) => `${e.role === "user" ? "我" : who.name}：${(e.content || "").replace(/\n/g, " ").slice(0, 50)}`).join("\n");
+      const ok = await generateScriptFor(config, who, priv);
+      if (ok) {
+        setCharScripts(loadCharScripts(who.id));
+        flash(`已为「${who.name || "TA"}」写好一篇新剧场`);
+        console.log(`[theater] script generated char=${who.id}`);
+      } else {
+        flash("TA 今天卡文了，稍后再试一次");
+      }
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
+  const removeScript = (id: string) => {
+    if (!who) return;
+    deleteCharScript(who.id, id);
+    setCharScripts(loadCharScripts(who.id));
+    console.log(`[theater] deleted id=${id}`);
+  };
 
   if (!script) {
     return (
       <div className="flex h-full flex-col">
         <ShellHeader title="小剧场" onBack={onBack} />
-        <div className="flex-1 space-y-3 overflow-y-auto px-3 pb-6 pt-3">
-          {SCRIPTS.map((s) => (
-            <button key={s.id} type="button" onClick={() => { setScriptId(s.id); setNodeId(s.start); }} className="glass flex w-full items-center gap-3 rounded-2xl p-3.5 text-left">
-              <img src={ICON_URLS.theater} alt="" className="size-14 shrink-0 object-contain drop-shadow-sm" />
-              <span className="min-w-0">
-                <span className={`block text-[13.5px] font-semibold ${INK}`}>{s.title}</span>
-                <span className={`mt-0.5 block text-[11px] ${SUB}`}>{s.sub} · 分支剧情</span>
-              </span>
-            </button>
-          ))}
+        {/* 角色分段器：谁的剧场一目了然，自定义角色同样可选 */}
+        {characters.length > 1 && (
+          <div className="flex gap-1.5 overflow-x-auto px-3 pb-1 pt-2">
+            {characters.map((c, i) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setWhoIdx(i)}
+                className={`jelly-btn shrink-0 rounded-full px-3 py-1 text-[11px] font-medium ${i === whoIdx ? "bg-primary text-primary-foreground shadow-sm" : "glass text-muted-foreground"}`}
+              >
+                {c.name || "未命名"}的剧场
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex-1 space-y-3 overflow-y-auto px-3 pb-6 pt-2">
+          <button
+            type="button"
+            onClick={() => void genScript()}
+            disabled={genBusy}
+            className="jelly-btn glass flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/5 py-3 text-[12px] font-semibold text-primary disabled:opacity-50"
+          >
+            {genBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            {genBusy ? "TA 正在写剧本…" : `让 ${who?.name || "TA"} 写一篇新剧场`}
+          </button>
+          {genMsg && <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-amber-700 ring-1 ring-amber-200/60">{genMsg}</p>}
+          {allScripts.length === 0 && <EmptyTip text="还没有剧场，点上面让 TA 写一篇吧" />}
+          {allScripts.map((s) => {
+            const ownerIds = s.charIds ?? [];
+            const owners = ownerIds.length ? characters.filter((c) => ownerIds.includes(c.id)).map((c) => c.name || "TA") : ["双子"];
+            const isAi = s.id.startsWith("ai-");
+            return (
+              <div key={s.id} className="relative">
+                <button type="button" onClick={() => { setScriptId(s.id); setNodeId(s.start); }} className="glass flex w-full items-center gap-3 rounded-2xl p-3.5 text-left">
+                  <img src={iconFor("theater")} alt="" className="size-14 shrink-0 object-contain drop-shadow-sm" />
+                  <span className="min-w-0">
+                    <span className={`block text-[13.5px] font-semibold ${INK}`}>{fillScriptText(s.title, who?.name || "TA", characters)}</span>
+                    <span className={`mt-0.5 block text-[11px] ${SUB}`}>{fillScriptText(s.sub, who?.name || "TA", characters)} · 分支剧情</span>
+                    <span className="mt-1 inline-flex items-center gap-1">
+                      {owners.map((o) => (
+                        <span key={o} className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{o}的剧场</span>
+                      ))}
+                      {isAi && <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-medium text-violet-600">AI 新作</span>}
+                    </span>
+                  </span>
+                </button>
+                {isAi && (
+                  <button type="button" onClick={() => removeScript(s.id)} aria-label="删除剧本" className="jelly-icon absolute right-2.5 top-2.5 rounded-full bg-white/70 p-1.5 text-muted-foreground hover:text-destructive">
+                    <Trash2 className="size-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -428,19 +525,19 @@ export function TheaterApp({ onBack }: AppProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <ShellHeader title={script.title} onBack={() => setScriptId(null)} />
+      <ShellHeader title={fillScriptText(script.title, who?.name || "TA", characters)} onBack={() => setScriptId(null)} />
       <div className="flex-1 space-y-2.5 overflow-y-auto px-3 pb-6 pt-4">
         {node ? (
           <>
             {node.text.map((t, i) => (
               <div key={`${node.id}-${i}`} data-reveal-delay={String(i * 120)} className={`reveal reveal-up rounded-2xl glass px-3.5 py-2.5 text-[12.5px] leading-relaxed ${INK}`}>
-                {t}
+                {fillScriptText(t, who?.name || "TA", characters)}
               </div>
             ))}
             {node.ending ? (
               <div className="mt-4 rounded-2xl border-2 border-[oklch(0.75_0.12_85)] bg-[oklch(0.97_0.04_85)]/70 p-4 text-center">
                 <p className="text-[10px] tracking-widest text-[oklch(0.55_0.08_80)]">— FIN —</p>
-                <p className={`mt-1.5 text-[12.5px] font-medium leading-relaxed ${INK}`}>{node.ending}</p>
+                <p className={`mt-1.5 text-[12.5px] font-medium leading-relaxed ${INK}`}>{fillScriptText(node.ending, who?.name || "TA", characters)}</p>
                 <div className="mt-3 flex justify-center gap-2">
                   <Button size="sm" className="jelly-btn h-8 rounded-xl text-xs" onClick={() => setNodeId(script.start)}>从头再来</Button>
                   <Button size="sm" variant="outline" className="jelly-btn h-8 rounded-xl text-xs" onClick={() => setScriptId(null)}>换个剧本</Button>
@@ -450,7 +547,7 @@ export function TheaterApp({ onBack }: AppProps) {
               <div className="space-y-2 pt-2">
                 {node.choices?.map((c, i) => (
                   <button key={i} type="button" onClick={() => setNodeId(c.next)} className={`jelly-btn glass-input block w-full rounded-xl px-3.5 py-2.5 text-left text-[12px] font-medium ${INK} hover:bg-primary/10`}>
-                    <span className="mr-1.5 text-primary">◦</span>{c.label}
+                    <span className="mr-1.5 text-primary">◦</span>{fillScriptText(c.label, who?.name || "TA", characters)}
                   </button>
                 ))}
               </div>

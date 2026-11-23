@@ -15,6 +15,7 @@ import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, sa
 import { loadMcpPrefs } from "@/lib/reality-mcp";
 import { usePersisted } from "@/lib/chat-store";
 import { listCachedTakes, clearAllCachedAudio } from "@/lib/call-observe";
+import { ICON_URLS, loadCustomIcons, setCustomIcon, ICON_MAX_BYTES } from "@/lib/companion-store";
 import { CloudAccountSection } from "@/components/CloudAccountSection";
 
 interface Props {
@@ -251,6 +252,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp,
         <NotificationSection notify={notify} />
         <McpEntryCard onOpen={onOpenMcp} />
         <WallpaperSection wallpapers={wallpapers} />
+        <DesktopIconSection />
         <ImageSection />
         <VoiceSection config={config} />
         <CallObserveSection />
@@ -446,6 +448,102 @@ function WallpaperSection({ wallpapers }: { wallpapers: Props["wallpapers"] }) {
       <WallpaperPicker label="锁屏背景" value={wallpapers.lockWp} onChange={wallpapers.setLockWp} />
       <WallpaperPicker label="桌面背景" value={wallpapers.homeWp} onChange={wallpapers.setHomeWp} />
       <WallpaperPicker label="聊天背景" value={wallpapers.chatBg} onChange={wallpapers.setChatBg} />
+    </div>
+  );
+}
+
+/** 桌面图标自定义：逐 App 上传替换（canvas 压到 ≤120KB dataURL），可单个恢复默认 */
+const ICON_LABELS: { key: keyof typeof ICON_URLS; label: string }[] = [
+  { key: "theater", label: "小剧场" },
+  { key: "phone", label: "查手机" },
+  { key: "bond", label: "心动羁绊" },
+  { key: "worldbook", label: "世界书" },
+  { key: "memory", label: "偏好记忆" },
+];
+
+function DesktopIconSection() {
+  const [map, setMap] = useState(() => loadCustomIcons());
+  const [msg, setMsg] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const targetKey = useRef<keyof typeof ICON_URLS>("theater");
+
+  const flash = (t: string) => {
+    setMsg(t);
+    setTimeout(() => setMsg(""), 2500);
+  };
+
+  const pick = (key: keyof typeof ICON_URLS) => {
+    targetKey.current = key;
+    fileRef.current?.click();
+  };
+
+  const onFile = (file?: File) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const img = new Image();
+    const objUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      const size = 192;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(objUrl);
+        return;
+      }
+      // 等比缩放居中，保留透明通道
+      const scale = Math.min(size / img.width, size / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      URL.revokeObjectURL(objUrl);
+      let dataUrl = canvas.toDataURL("image/png");
+      if (dataUrl.length > ICON_MAX_BYTES) dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+      if (dataUrl.length > ICON_MAX_BYTES) {
+        flash("图片太大，换一张小点的吧");
+        console.log(`[icon] reject too large len=${dataUrl.length}`);
+        return;
+      }
+      if (setCustomIcon(targetKey.current, dataUrl)) {
+        setMap(loadCustomIcons());
+        flash(`已更换「${ICON_LABELS.find((x) => x.key === targetKey.current)?.label}」图标`);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objUrl);
+      flash("图片读不出来，换一张试试");
+    };
+    img.src = objUrl;
+  };
+
+  const reset = (key: keyof typeof ICON_URLS) => {
+    setCustomIcon(key, null);
+    setMap(loadCustomIcons());
+    console.log(`[icon] reset key=${key}`);
+  };
+
+  return (
+    <div className="glass space-y-2.5 rounded-2xl p-3.5">
+      <p className="text-[13px] font-semibold">桌面图标自定义</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">给桌面上的 App 换上你自己准备的图标（PNG 透明底最佳），只存在这台设备的浏览器里。</p>
+      <div className="grid grid-cols-5 gap-2">
+        {ICON_LABELS.map(({ key, label }) => (
+          <div key={key} className="flex flex-col items-center gap-1">
+            <button type="button" onClick={() => pick(key)} className="jelly-icon relative flex size-12 items-center justify-center overflow-hidden rounded-xl border border-white/70 bg-white/60" aria-label={`更换${label}图标`}>
+              <img src={map[key] || ICON_URLS[key]} alt="" className="size-9 object-contain" />
+              {map[key] && <span className="absolute right-0 top-0 size-2 rounded-full bg-emerald-400" />}
+            </button>
+            <span className="max-w-full truncate text-[9px] text-muted-foreground">{label}</span>
+            {map[key] && (
+              <button type="button" onClick={() => reset(key)} className="text-[8.5px] text-primary underline-offset-2 hover:underline">
+                默认
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {msg && <p className="text-[11px] text-primary">{msg}</p>}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
     </div>
   );
 }
@@ -738,38 +836,38 @@ function VoiceSection({ config }: { config: AiConfig }) {
 function MusicSourceSection() {
   const [text, setText] = useState(() => {
     const tracks = loadMusicTracks().filter((t) => t.url);
-    return tracks.length ? JSON.stringify(tracks.map(({ title, url }) => ({ title, url })), null, 2) : "";
+    return tracks.map((t) => (t.title && t.title !== "歌曲" ? `${t.title}|${t.url}` : t.url)).join("\n");
   });
   const [savedMsg, setSavedMsg] = useState("");
 
   const save = () => {
     const tracks = parseMusicSource(text);
     if (!tracks.length) {
-      setSavedMsg("没解析到任何曲目，检查一下格式");
+      setSavedMsg("没解析到任何链接，检查一下格式");
       setTimeout(() => setSavedMsg(""), 2500);
       return;
     }
     saveMusicTracks(tracks);
     console.log(`[music] source saved tracks=${tracks.length}`);
-    setSavedMsg(`已解析 ${tracks.length} 首，重开音乐 App 生效`);
+    setSavedMsg(`已保存 ${tracks.length} 首，重开音乐 App 生效`);
     setTimeout(() => setSavedMsg(""), 2500);
   };
 
   return (
     <div className="glass space-y-2.5 rounded-2xl p-3.5">
-      <p className="text-[13px] font-semibold">音乐 App 歌单源（JSON / JS）</p>
+      <p className="text-[13px] font-semibold">音乐 App 歌单（mp3 直链）</p>
       <Textarea
         rows={6}
-        placeholder={'直接粘贴歌单，支持三种格式：\n\n1. JSON 数组：[{"title":"晴天","url":"https://.../mp3"}]\n2. JS 文件内容：const list = [{"name":"晴天","src":"https://..."}];\n3. 每行一条："歌名|音频直链"'}
+        placeholder={'每行一条 mp3 直链，想标歌名就写成“歌名|链接”：\n\nhttps://example.com/song.mp3\n晴天|https://example.com/qingtian.mp3'}
         value={text}
         onChange={(e) => setText(e.target.value)}
         className="resize-none rounded-lg glass-input text-[11px] leading-relaxed font-mono"
       />
       <Button size="sm" className="jelly-btn h-8 w-full rounded-xl text-xs" onClick={save}>
-        {savedMsg || "解析并保存歌单"}
+        {savedMsg || "保存歌单"}
       </Button>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        自动识别 title/name/song 为歌名、url/src/link 为音频地址；留空则为无音源的演示界面。
+        一行一首，# 开头的行会被忽略；留空则音乐 App 回到无音源演示界面。
       </p>
     </div>
   );

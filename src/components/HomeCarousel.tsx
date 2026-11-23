@@ -4,7 +4,7 @@ import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Time
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { useCharacters, unreadCount, useReadMarks } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
-import { ICON_URLS, AVATAR_BG, useDiaries, useMemo, useBond, useProfile, HEART_LINES, seedDiaries } from "@/lib/companion-store";
+import { ICON_URLS, AVATAR_BG, iconFor, useDiaries, useMemo, useBond, useProfile, HEART_LINES, seedDiaries } from "@/lib/companion-store";
 
 interface Props {
   config: AiConfig;
@@ -152,7 +152,7 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
               className={`jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-white/60 shadow-[0_4px_14px_-4px_rgba(180,150,90,0.25)] transition-transform duration-200 group-hover:-translate-y-0.5 ${app.key === "bond" ? "group-hover:before:absolute group-hover:before:-top-1 group-hover:before:right-0 group-hover:before:size-2 group-hover:before:animate-pulse group-hover:before:rounded-full group-hover:before:bg-pink-300/80" : ""}`}
               style={{ animationDelay: `${i * 40}ms` }}
             >
-              <img src={ICON_URLS[app.key]} alt="" className="size-9 object-contain" />
+              <img src={iconFor(app.key)} alt="" className="size-9 object-contain" />
             </span>
             <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{app.label}</span>
           </button>

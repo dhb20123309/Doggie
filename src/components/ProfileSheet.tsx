@@ -2,7 +2,7 @@
 // UI 复刻用户提供的酒馆角色卡截图：居中"名字 × 你"大标题、标签胶囊横排、
 // 立绘与文字左右并置、子标题竖线锚点、板块间只用留白无分割线、警告浅红底高亮
 import { useRef, useState } from "react";
-import { X, Wrench, FileText, MessageSquareQuote, Upload, ImagePlus, Clapperboard, ChevronDown } from "lucide-react";
+import { X, Wrench, FileText, MessageSquareQuote, Upload, ImagePlus, Clapperboard, ChevronDown, Banknote, MapPin } from "lucide-react";
 import type { CharacterProfile, ProfileSection } from "@/lib/character-profile";
 import { presetProfileFor } from "@/lib/character-profile";
 import { presetPhoto } from "@/lib/chat-store";
@@ -370,35 +370,52 @@ export function ProfileBody({ profile, onLoadIntro, onUploadCover }: {
 
 /* ---------- ① 工具箱菜单（聊天页左下角弹出） ---------- */
 
-export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport, onClose }: {
+export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport, onSendPhoto, onTransfer, onLocation, onClose }: {
   hasProfile: boolean;
   onOpenProfile: () => void;
   onShowOpener: () => void;
   onImport: () => void;
+  onSendPhoto: () => void;
+  onTransfer: () => void;
+  onLocation: () => void;
   onClose: () => void;
 }) {
   return (
     <>
       <div className="absolute inset-0 z-30 bg-black/20" onClick={onClose} aria-hidden />
-      <div className="glass-strong absolute bottom-16 left-3 z-40 w-44 fade-up overflow-hidden rounded-2xl p-1.5 shadow-xl">
-        <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold tracking-wide text-muted-foreground">工具箱</p>
-        <button type="button" onClick={onShowOpener} className="jelly-btn flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[12px] font-medium text-foreground">
-          <MessageSquareQuote className="size-3.5 shrink-0 text-primary" />
-          角色开场白
-        </button>
-        <button
-          type="button"
-          onClick={onOpenProfile}
-          disabled={!hasProfile}
-          className="jelly-btn flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[12px] font-medium text-foreground disabled:opacity-40"
-        >
-          <FileText className="size-3.5 shrink-0 text-primary" />
-          人物档案
-        </button>
-        <button type="button" onClick={onImport} className="jelly-btn flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[12px] font-medium text-foreground">
-          <Upload className="size-3.5 shrink-0 text-primary" />
-          导入档案文本
-        </button>
+      <div className="glass-strong absolute bottom-16 left-3 z-40 w-56 fade-up overflow-hidden rounded-2xl p-2 shadow-xl">
+        <p className="px-1.5 pb-1.5 pt-0.5 text-[10px] font-semibold tracking-wide text-muted-foreground">工具箱</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button type="button" onClick={onSendPhoto} className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
+            <ImagePlus className="size-4 text-primary" />
+            发送图片
+          </button>
+          <button type="button" onClick={onTransfer} className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
+            <Banknote className="size-4 text-primary" />
+            转账
+          </button>
+          <button type="button" onClick={onLocation} className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
+            <MapPin className="size-4 text-primary" />
+            发送定位
+          </button>
+          <button type="button" onClick={onShowOpener} className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
+            <MessageSquareQuote className="size-4 text-primary" />
+            角色开场白
+          </button>
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            disabled={!hasProfile}
+            className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground disabled:opacity-40"
+          >
+            <FileText className="size-4 text-primary" />
+            人物档案
+          </button>
+          <button type="button" onClick={onImport} className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
+            <Upload className="size-4 text-primary" />
+            导入档案
+          </button>
+        </div>
       </div>
     </>
   );

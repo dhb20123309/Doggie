@@ -1,5 +1,6 @@
 // Companion OS 数据层：日记 / 随写便签 / 心动羁绊 / 偏好记忆 / 查手机缓存 / 个人资料 + 小剧场剧本
 import { usePersisted } from "./chat-store";
+import type { AiConfig } from "./types";
 import type { Character, ChatEntry } from "./chat-types";
 
 type Setter<T> = (next: T | ((prev: T) => T)) => void;
@@ -16,7 +17,44 @@ export const ICON_URLS = {
   weather: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/companion-icons-8.png?auth_key=94afaf8be008c6e7868d328cb7e60610752ce68b8f837d144158a750d3879482",
   music: "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/companion-icons-9.png?auth_key=b495f38abf19a485ed2c11ffb89a42e2d9467955603e1b2d4c9d93c240b616ac",
 };
-/** 头像底座梦幻背景 */
+
+/* ---------- 自定义桌面图标（设置→桌面图标上传，dataURL 存本机；缺失回落 ICON_URLS） ---------- */
+const CUSTOM_ICON_KEY = "vp-phone:custom-icons:v1";
+
+export type CustomIconMap = Partial<Record<keyof typeof ICON_URLS, string>>;
+
+export function loadCustomIcons(): CustomIconMap {
+  try {
+    return JSON.parse(localStorage.getItem(CUSTOM_ICON_KEY) || "{}") as CustomIconMap;
+  } catch {
+    return {};
+  }
+}
+
+/** 单张图标 dataURL 体积上限（localStorage 总量有限，超出即拒收并提示） */
+export const ICON_MAX_BYTES = 120_000;
+
+export function setCustomIcon(key: keyof typeof ICON_URLS, dataUrl: string | null): boolean {
+  const map = loadCustomIcons();
+  if (dataUrl) {
+    if (dataUrl.length > ICON_MAX_BYTES) return false;
+    map[key] = dataUrl;
+  } else {
+    delete map[key];
+  }
+  try {
+    localStorage.setItem(CUSTOM_ICON_KEY, JSON.stringify(map));
+    console.log(`[icon] ${dataUrl ? "custom set" : "reset"} key=${key}`);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+  return true;
+}
+
+/** 取图标：自定义优先，回落默认 CDN */
+export function iconFor(key: keyof typeof ICON_URLS): string {
+  return loadCustomIcons()[key] || ICON_URLS[key];
+}
 export const AVATAR_BG =
   "https://g.cdn.meoo.host/xn5qwuicmstz/ai-images/%E5%A4%B4%E5%83%8F%E5%BA%95%E5%BA%A7%E8%83%8C%E6%99%AF.png?auth_key=38385574f2560e0b2e4aa846fd14ab7a21d7a959c708c48b3de78a0e2344bfd3";
 
@@ -52,6 +90,69 @@ export function seedDiaries(charId: string): DiaryEntry[] {
     content: d.content,
     at: Date.now() - (i + 1) * 26 * 3600_000,
   }));
+}
+
+/* ---------- AI 每日自动日记：跨天后为聊过天的角色各生成一篇 ---------- */
+const DIARY_DAY_KEY = "vp-phone:diary:lastday:v1";
+
+/** 今天是否已跑过每日日记（纯判断，不写标记） */
+export function isDailyDiaryDone(): boolean {
+  try {
+    return localStorage.getItem(DIARY_DAY_KEY) === new Date().toDateString();
+  } catch {
+    return true;
+  }
+}
+
+export interface DailyDiaryCtx {
+  ch: Character;
+  /** 最近私聊+通话素材文本（调用方拼好；空串=没素材，跳过） */
+  material: string;
+}
+
+/**
+ * 生成一篇"昨日回忆"日记。返回 null 表示素材不足或生成失败（静默，不打扰）。
+ * 标题行 + 正文格式与 DiaryApp 手动写一致；at 用当前时间。
+ */
+export async function generateDailyDiary(
+  cfg: AiConfig,
+  ctx: DailyDiaryCtx,
+): Promise<DiaryEntry | null> {
+  if (!ctx.material.trim()) return null;
+  const { chatCompletion } = await import("./ai-api");
+  try {
+    const raw = await chatCompletion(cfg, [
+      {
+        role: "system",
+        content: `${(ctx.ch.persona || "").slice(0, 500)}\n\n你是 ${ctx.ch.name || "TA"}，正在写私人日记。以第一人称写一篇 60-120 字的日常随笔：回顾下面素材里你们最近的相处，挑一两个具体细节写感受，可以有小情绪和小心思，不要复述对话、不要出现"AI/模型/素材"字眼。先输出标题行再空一行正文，不要旁白解释。`,
+      },
+      { role: "user", content: `【最近的相处记录】\n${ctx.material.slice(0, 1800)}` },
+    ]);
+    const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    if (!lines.length) return null;
+    const entry: DiaryEntry = {
+      id: `daily-${Date.now()}-${ctx.ch.id}`,
+      charId: ctx.ch.id,
+      title: lines[0],
+      content: lines.slice(1).join("\n") || lines[0],
+      at: Date.now(),
+    };
+    console.log(`[diary] daily generated char=${ctx.ch.id} title=${lines[0].slice(0, 16)}`);
+    return entry;
+  } catch (e) {
+    console.log(`[diary] daily fail char=${ctx.ch.id} ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
+/** 标记今天已跑完每日日记 */
+export function markDailyDiaryDone(): void {
+  try {
+    localStorage.setItem(DIARY_DAY_KEY, new Date().toDateString());
+    console.log("[diary] daily marked done for today");
+  } catch {
+    /* 隐私模式忽略 */
+  }
 }
 
 /* ---------- 桌面随写便签 ---------- */
@@ -185,8 +286,8 @@ export function useProfile(): [Profile, Setter<Profile>] {
 
 /* ---------- 心事短句 ---------- */
 export const HEART_LINES: Record<string, string[]> = {
-  "zhou-chenyan": ["“别以为我不知道，你刚才在偷看别人班。”—— 寄自周晨砚", "“我赢了比赛，但你得承认你最想看的是我。”—— 寄自周晨砚"],
-  "zhou-fengyan": ["“今天的白茶有点苦，大概是因为你没在旁边。”—— 寄自周风砚", "“我不着急，反正你会走过我身边的。”—— 寄自周风砚"],
+  "zhou-chenyan": ["“别以为我不知道，你刚才在偷看别人班。”—— 寄自{哥哥}", "“我赢了比赛，但你得承认你最想看的是我。”—— 寄自{哥哥}"],
+  "zhou-fengyan": ["“今天的白茶有点苦，大概是因为你没在旁边。”—— 寄自{弟弟}", "“我不着急，反正你会走过我身边的。”—— 寄自{弟弟}"],
 };
 
 /* ---------- 小剧场剧本（纯本地分支引擎） ---------- */
@@ -203,6 +304,8 @@ export interface Script {
   sub: string;
   start: string;
   nodes: Record<string, SceneNode>;
+  /** 归属角色 id（预置剧本=双子）；台词里用 {哥哥}/{弟弟}/{TA} 占位，渲染时按当前选中角色替换 */
+  charIds?: string[];
 }
 
 export const SCRIPTS: Script[] = [
@@ -210,11 +313,12 @@ export const SCRIPTS: Script[] = [
     id: "rainy-day",
     title: "雨停之前",
     sub: "放学 · 教学楼门厅",
+    charIds: ["zhou-chenyan", "zhou-fengyan"],
     start: "s1",
     nodes: {
       s1: {
         id: "s1",
-        text: ["暴雨毫无预兆地砸下来，你站在教学楼门厅发愁。", "一把黑伞从旁边斜过来，周晨砚靠在柱子上，下巴一抬：“愣着干嘛，走啊。”", "他身后半步，周风砚抱着画板轻声说：“姐姐，我这儿也有一把哦。”"],
+        text: ["暴雨毫无预兆地砸下来，你站在教学楼门厅发愁。", "一把黑伞从旁边斜过来，{哥哥}靠在柱子上，下巴一抬：“愣着干嘛，走啊。”", "他身后半步，{弟弟}抱着画板轻声说：“姐姐，我这儿也有一把哦。”"],
         choices: [
           { label: "跟哥哥走（他没耐心等第二遍）", next: "chen" },
           { label: "接弟弟的伞（他都开口了欸）", next: "feng" },
@@ -222,7 +326,7 @@ export const SCRIPTS: Script[] = [
       },
       chen: {
         id: "chen",
-        text: ["周晨砚把伞整个压向你这边，自己半边肩膀淋透，“笨蛋，躲我伞底下很难吗”。", "走到街角他忽然停住：“下周篮球赛，来看。不是商量。”"],
+        text: ["{哥哥}把伞整个压向你这边，自己半边肩膀淋透，“笨蛋，躲我伞底下很难吗”。", "走到街角他忽然停住：“下周篮球赛，来看。不是商量。”"],
         choices: [{ label: "问他肩膀不冷吗", next: "chen2" }, { label: "答应去看比赛", next: "e1" }],
       },
       chen2: {
@@ -232,12 +336,12 @@ export const SCRIPTS: Script[] = [
       },
       e1: {
         id: "e1",
-        text: ["“这还差不多。”周晨砚难得没呛你，耳尖却红了，“……到时候坐第一排，方便我进球的时候看你。”"],
+        text: ["“这还差不多。”{哥哥}难得没呛你，耳尖却红了，“……到时候坐第一排，方便我进球的时候看你。”"],
         ending: "结局 · 第一排：他的每个进球都朝你的方向。",
       },
       feng: {
         id: "feng",
-        text: ["周风砚的伞很小，两个人的肩膀贴得很近，谁都没说挤。", "“哥哥的伞总是偏向你那边呢。”他轻声笑着，“我的伞，只偏向你一个人哦。”"],
+        text: ["{弟弟}的伞很小，两个人的肩膀贴得很近，谁都没说挤。", "“哥哥的伞总是偏向你那边呢。”他轻声笑着，“我的伞，只偏向你一个人哦。”"],
         choices: [{ label: "告诉他刚才其实想选哥哥", next: "feng2" }, { label: "安静走完这段路", next: "e3" }],
       },
       feng2: {
@@ -256,11 +360,12 @@ export const SCRIPTS: Script[] = [
     id: "music-room",
     title: "琴房十二点",
     sub: "深夜 · 学校音乐教室",
+    charIds: ["zhou-chenyan", "zhou-fengyan"],
     start: "p1",
     nodes: {
       p1: {
         id: "p1",
-        text: ["你半夜睡不着溜进琴房，里面竟然亮着一盏灯。", "周风砚坐在三角钢琴前，弹的是你听过的旋律——是你随口哼过一次的那段。", "他指尖没停：“既然来了，就别站在门口。”"],
+        text: ["你半夜睡不着溜进琴房，里面竟然亮着一盏灯。", "{弟弟}坐在三角钢琴前，弹的是你听过的旋律——是你随口哼过一次的那段。", "他指尖没停：“既然来了，就别站在门口。”"],
         choices: [
           { label: "走过去坐到他旁边", next: "p2" },
           { label: "转身想装作没看见", next: "p3" },
@@ -283,7 +388,7 @@ export const SCRIPTS: Script[] = [
       },
       p3: {
         id: "p3",
-        text: ["你刚转身，琴声停了。脚步声很轻，快得不像话。", "“看清楚再走。”周风砚的声音贴着耳边响起，“——刚才弹的每一个音，都是弹给你听的。”", "走廊的灯在他身后亮起，他的表情你第一次没读懂。"],
+        text: ["你刚转身，琴声停了。脚步声很轻，快得不像话。", "“看清楚再走。”{弟弟}的声音贴着耳边响起，“——刚才弹的每一个音，都是弹给你听的。”", "走廊的灯在他身后亮起，他的表情你第一次没读懂。"],
         choices: [{ label: "留下来听完最后一首", next: "e4" }, { label: "逃走了（他会来找你的）", next: "e6" }],
       },
       e6: {
@@ -299,6 +404,106 @@ export const SCRIPTS: Script[] = [
 export function firstUserAt(log: ChatEntry[]): number {
   const u = log.find((e) => e.role === "user");
   return u?.at ?? 0;
+}
+
+/* ---------- 小剧场：按角色归属的自定义剧本（AI 生成，存本机） ---------- */
+const CHAR_SCRIPT_KEY = (charId: string) => `vp-phone:theater:scripts:${charId}:v1`;
+const SCRIPT_MAX = 8;
+
+export function loadCharScripts(charId: string): Script[] {
+  try {
+    return JSON.parse(localStorage.getItem(CHAR_SCRIPT_KEY(charId)) || "[]") as Script[];
+  } catch {
+    return [];
+  }
+}
+
+/** 校验+落库一条 AI 剧本；结构不合返回 false（不入库不崩 UI） */
+export function saveCharScript(charId: string, raw: unknown): boolean {
+  const s = raw as Script | null;
+  if (!s || typeof s.title !== "string" || !s.start || !s.nodes || typeof s.nodes !== "object") {
+    console.log("[theater] script invalid shape, dropped");
+    return false;
+  }
+  const nodes: Record<string, SceneNode> = {};
+  for (const [k, v] of Object.entries(s.nodes)) {
+    if (!v || !Array.isArray(v.text)) return false;
+    nodes[k] = { id: k, text: v.text.map(String), choices: Array.isArray(v.choices) ? v.choices : undefined, ending: typeof v.ending === "string" ? v.ending : undefined };
+  }
+  if (!nodes[s.start]) {
+    console.log(`[theater] script start node missing: ${s.start}`);
+    return false;
+  }
+  const script: Script = { id: `ai-${Date.now()}`, title: s.title.slice(0, 24), sub: typeof s.sub === "string" ? s.sub.slice(0, 30) : "TA 的小剧场", start: s.start, nodes, charIds: [charId] };
+  const list = [script, ...loadCharScripts(charId)].slice(0, SCRIPT_MAX);
+  try {
+    localStorage.setItem(CHAR_SCRIPT_KEY(charId), JSON.stringify(list));
+    console.log(`[theater] script saved char=${charId} id=${script.id} nodes=${Object.keys(nodes).length}`);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+export function deleteCharScript(charId: string, scriptId: string): void {
+  const list = loadCharScripts(charId).filter((s) => s.id !== scriptId);
+  try {
+    localStorage.setItem(CHAR_SCRIPT_KEY(charId), JSON.stringify(list));
+    console.log(`[theater] script deleted char=${charId} id=${scriptId}`);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+}
+
+/** 从模型回复里挖出 JSON 剧本对象（容忍 ```json 围栏与前后废话） */
+export function parseScriptJson(raw: string): unknown | null {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/** 台词占位符替换：{哥哥}/{弟弟} 预置双子互指，{TA} 恒为当前选中角色 */
+export function fillScriptText(t: string, chName: string, allChars: Character[]): string {
+  const byKey = (id: string) => allChars.find((c) => c.id === id)?.name || "TA";
+  return t
+    .replaceAll("{TA}", chName)
+    .replaceAll("{哥哥}", byKey("zhou-chenyan"))
+    .replaceAll("{弟弟}", byKey("zhou-fengyan"));
+}
+
+/**
+ * 用角色人设+最近相处素材生成一篇分支小剧场。
+ * 成功且结构合法返回 true（已落库），否则 false——调用方给提示即可。
+ */
+export async function generateScriptFor(
+  cfg: AiConfig,
+  ch: Character,
+  material: string,
+): Promise<boolean> {
+  const { chatCompletion } = await import("./ai-api");
+  try {
+    const raw = await chatCompletion(cfg, [
+      {
+        role: "system",
+        content: `你是互动小说编剧。以「${ch.name || "TA"}」为主角（性格参考人设：${(ch.persona || "").slice(0, 400)}），写一个第二人称恋爱分支小剧场。只输出 JSON，不要其他文字，格式：{"title":"标题(≤12字)","sub":"场景一句话","start":"s1","nodes":{"s1":{"text":["段落1","段落2"],"choices":[{"label":"选项文案","next":"s2"}]},"s2":{"text":["..."],"ending":"结局一句话"}}}。规则：节点 4-6 个；起始节点 id 必须是 s1；每个非结局节点 2 个选项；结局节点带 ending 字段不带 choices；提到男主时用 {TA} 占位符代替名字；剧情贴合人设、有分支差异，禁止出现 AI/模型字眼。`,
+      },
+      { role: "user", content: `【你们最近的相处素材（可取材，不得照抄）】\n${material.slice(0, 1500) || "（无素材，自由发挥日常甜向）"}` },
+    ]);
+    const parsed = parseScriptJson(raw);
+    if (!parsed) {
+      console.log("[theater] script json parse fail");
+      return false;
+    }
+    return saveCharScript(ch.id, parsed);
+  } catch (e) {
+    console.log(`[theater] script gen fail ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
 }
 
 export function dayName(ch: Character): string {

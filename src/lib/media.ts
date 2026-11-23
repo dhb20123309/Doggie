@@ -109,7 +109,7 @@ export function parseMusicSource(raw: string): MusicTrack[] {
       }
     }
   }
-  // 2) 纯文本按行：每行一个 URL 或 "歌名|URL" / "歌名 - URL"
+  // 2) 纯文本按行（主通道）：每行一个 mp3 直链，或 "歌名|URL" / "歌名 - URL"
   const tracks: MusicTrack[] = [];
   for (const line of text.split(/\r?\n/)) {
     const l = line.trim();
@@ -118,7 +118,10 @@ export function parseMusicSource(raw: string): MusicTrack[] {
     if (m) tracks.push({ title: m[1].trim() || `曲目 ${tracks.length + 1}`, url: m[2] });
     else if (/^https?:\/\//.test(l)) tracks.push({ title: `曲目 ${tracks.length + 1}`, url: l });
   }
-  return tracks;
+  if (tracks.length) return tracks;
+  // 3) 单行裸链接兜底
+  if (/^https?:\/\//.test(text)) return [{ title: "曲目 1", url: text }];
+  return [];
 }
 
 export function loadMusicTracks(): MusicTrack[] {

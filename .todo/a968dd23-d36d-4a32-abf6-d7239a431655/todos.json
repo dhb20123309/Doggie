@@ -1,0 +1,23 @@
+[
+  {
+    "content": "remote-mcp.ts：手动服务数据结构/存储 + 错误文案人话化 + curl 指令生成",
+    "id": "m1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "RemoteMcpPanel.tsx：手动添加服务表单 + 工具登记 + 复制调用指令",
+    "id": "m2",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "双门禁 + dev + bundle + AGENTS.md",
+    "id": "m3",
+    "priority": "medium",
+    "skills": [],
+    "status": "in_progress"
+  }
+]

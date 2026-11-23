@@ -31,6 +31,8 @@ export interface RemoteMcpServer {
   oauth?: OAuthParams;
   /** 中风险工具首次授权记录（toolName → 授权时间） */
   mediumConsents?: Record<string, number>;
+  /** 手动登记的服务：握手/清单导入不可用时由用户填写，工具清单存 toolCache */
+  manual?: boolean;
 }
 
 export interface McpToolMeta {
@@ -386,7 +388,11 @@ async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortS
     return { ok: true, init, tools };
   } catch (e) {
     if (signal?.aborted) return { ok: false, reason: "已取消" };
-    return { ok: false, reason: e instanceof Error ? `网络握手失败：${e.message}` : "网络握手失败" };
+    // fetch 抛 TypeError＝请求根本没发出去（跨域预检被拒/DNS 解析失败），翻成人话引导手动登记
+    const msg = e instanceof Error ? e.message : "";
+    const reason = e instanceof TypeError ? `浏览器无法直连该服务（${msg || "可能被跨域限制拦截"}）。可改用「手动添加服务」登记工具清单` : `网络握手失败：${msg}`;
+    console.warn(`[mcp-remote] rpc handshake threw ${e instanceof TypeError ? "TypeError(CORS/DNS)" : msg}`);
+    return { ok: false, reason };
   }
 }
 
@@ -491,7 +497,7 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
     try {
       const res = await safeFetch(url, signal);
       if (!res.ok) {
-        lastErr = `读取配置失败（HTTP ${res.status}）`;
+        lastErr = `未能读到配置文件（服务器返回 HTTP ${res.status}${res.status === 404 ? "，该地址下没有 mcp.json" : ""}）`;
         continue;
       }
       const parsed = parseManifest(await res.text());
@@ -530,7 +536,10 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
       };
     } catch (e) {
       if (signal?.aborted) return { ok: false, reason: "已取消" };
-      lastErr = e instanceof Error ? e.message : "网络读取失败";
+      const msg = e instanceof Error ? e.message : "";
+      // TypeError 基本是浏览器层面拦下（跨域/CORS 预检失败或 DNS 不通），翻成人话
+      lastErr = e instanceof TypeError ? "浏览器无法直连该服务（可能被跨域限制拦截或服务域名无法解析）。可改用「手动添加服务」登记工具清单，或用「复制调用指令」在电脑终端验证" : msg || "网络读取失败";
+      console.warn(`[mcp-remote] inspect manifest fetch failed url=${new URL(url).pathname} err=${msg}`);
     }
   }
   return { ok: false, reason: lastErr };
@@ -615,6 +624,53 @@ export function hasServerKey(id: string): boolean {
   } catch {
     return false;
   }
+}
+
+/* ---------- 手动登记服务（握手/清单导入不可用时的兜底通道） ---------- */
+
+/**
+ * 手动添加一个 MCP 服务：只校验地址安全性，不发网络请求。
+ * 工具清单由用户按服务方文档逐个登记，存进 toolCache（与自动发现同构）。
+ */
+export function addManualServer(input: { name: string; url: string; auth: AuthKind; tools: McpToolMeta[] }): { ok: boolean; server?: RemoteMcpServer; reason?: string } {
+  const v = validateMcpUrl(input.url);
+  if (!v.ok) return { ok: false, reason: v.reason ?? "地址无效" };
+  const endpoint = stripUrlSecrets(input.url);
+  const name = (input.name.trim() || v.host!).slice(0, 30);
+  const s: RemoteMcpServer = { id: `rs${Date.now()}m`, name, url: endpoint, host: v.host as string, auth: input.auth, addedAt: Date.now(), manual: true };
+  saveServers([...loadServers(), s]);
+  const cache = loadToolCache();
+  cache[s.id] = input.tools.slice(0, 40);
+  saveToolCache(cache);
+  console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} tools=${input.tools.length}`);
+  return { ok: true, server: s };
+}
+
+/** 更新手动服务的工具清单（面板里增删改后调用） */
+export function setManualTools(serverId: string, tools: McpToolMeta[]) {
+  const cache = loadToolCache();
+  cache[serverId] = tools.slice(0, 40);
+  saveToolCache(cache);
+  console.log(`[mcp-remote] manual tools updated server=${serverId} count=${tools.length}`);
+}
+
+const CURL_ARG_RE = /^[A-Za-z0-9_\-./:@%+=,]*$/;
+
+/** 生成可在终端直接跑的 curl 调试指令（token 只进剪贴板、不落日志明文） */
+export function buildCurlCommand(server: RemoteMcpServer, toolName: string): string {
+  const key = (() => {
+    try {
+      return localStorage.getItem(`vp-phone:mcp-key:${server.id}`) || "";
+    } catch {
+      return "";
+    }
+  })();
+  const t = readToken(server.id);
+  const bearer = server.auth === "oauth" ? t?.access : key;
+  const authHeader = server.auth === "apikey" && key ? `-H "X-API-Key: ${key}"` : bearer && CURL_ARG_RE.test(bearer) ? `-H "Authorization: Bearer ${bearer}"` : `-H "Authorization: <你的令牌>"`;
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: toolName || "工具名", arguments: {} } });
+  console.log(`[mcp-remote] curl command built server=${server.name} tool=${toolName || "-"} tokenInline=${Boolean(bearer && CURL_ARG_RE.test(bearer))}`);
+  return `curl -X POST "${server.url}" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" ${authHeader} --data '${body.replace(/'/g, "'\\''")}'`;
 }
 
 /* ---------- OAuth（PKCE + state，公开客户端不存 client secret） ---------- */

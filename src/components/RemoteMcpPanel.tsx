@@ -1,12 +1,15 @@
 // 远程 MCP 安全导入面板：粘贴地址/仓库 → 只读约定配置清单 → 安装前展示域名/工具/权限/认证 →
 // 用户确认后才保存；支持 OAuth（PKCE + state，公开客户端无 secret）授权/撤销；
-// 已装服务可移除/清除授权；调用日志遮盖 token 与私人内容。
+// 握手被跨域/白名单限制拦住的第三方服务（如 Galatea）可走「手动添加服务」逐个登记工具；
+// 已装服务可移除/清除授权/复制 curl 调用指令排障；调用日志遮盖 token 与私人内容。
 import { useState } from "react";
-import { AlertTriangle, Globe2, Plug, ShieldCheck, Trash2, X } from "lucide-react";
+import { AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  addManualServer,
   addServer,
+  buildCurlCommand,
   clearLog,
   hasMediumConsent,
   hasServerKey,
@@ -20,6 +23,7 @@ import {
   revokeOAuth,
   saveServers,
   saveToolCache,
+  setManualTools,
   setServerKey,
   startOAuthForServer,
   stripUrlSecrets,
@@ -27,6 +31,7 @@ import {
   type AuthKind,
   type InstallPreview,
   type McpCallLog,
+  type McpToolMeta,
   type RemoteMcpServer,
 } from "@/lib/remote-mcp";
 
@@ -47,6 +52,14 @@ const RISK_LABEL: Record<string, string> = {
   low: "低风险·自动",
 };
 
+/** 常见工具快捷模板：一键填入再改参数，减少手敲 */
+const TOOL_TEMPLATES: { label: string; tool: McpToolMeta }[] = [
+  { label: "天气查询", tool: { name: "get_weather", description: "按城市查询当前天气与未来几天预报", risk: "low", private: false } },
+  { label: "时间地点", tool: { name: "get_time", description: "查询指定时区的当前日期时间", risk: "low", private: false } },
+  { label: "网页搜索", tool: { name: "web_search", description: "按关键词搜索公开网页资讯", risk: "low", private: false } },
+  { label: "发送消息", tool: { name: "send_message", description: "向外部账号发送消息（写操作）", risk: "high", private: true } },
+];
+
 export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,6 +73,13 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   const [logs, setLogs] = useState<McpCallLog[]>(loadLog);
   const [confirmRemove, setConfirmRemove] = useState<string>("");
   const [oauthFor, setOauthFor] = useState<string>("");
+  // 手动登记表单
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manual, setManual] = useState({ name: "", url: "", auth: "bearer" as AuthKind, key: "" });
+  const [manualTools, setManualToolsState] = useState<McpToolMeta[]>([]);
+  const [toolDraft, setToolDraft] = useState({ name: "", description: "", risk: "low" as McpToolMeta["risk"], private: false });
+  // 工具编辑弹层（针对已装的手动服务）
+  const [editToolsFor, setEditToolsFor] = useState<string>("");
 
   const refresh = () => {
     setServers(loadServers());
@@ -116,6 +136,39 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
     refresh();
   };
 
+  const doManualInstall = () => {
+    setErr("");
+    const r = addManualServer({ name: manual.name, url: manual.url, auth: manual.auth, tools: manualTools });
+    if (!r.ok || !r.server) {
+      setErr(r.reason ?? "手动添加失败");
+      return;
+    }
+    if (manual.auth !== "none" && manual.key.trim()) setServerKey(r.server.id, manual.key.trim());
+    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length}`);
+    setManualOpen(false);
+    setManual({ name: "", url: "", auth: "bearer", key: "" });
+    setManualToolsState([]);
+    setNotice(`「${r.server.name}」已手动登记。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
+    refresh();
+  };
+
+  const addDraftTool = () => {
+    const name = toolDraft.name.trim();
+    if (!name) return;
+    setManualToolsState((prev) => [...prev, { name: name.slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private }]);
+    setToolDraft({ name: "", description: "", risk: "low", private: false });
+  };
+
+  const copyCurl = async (s: RemoteMcpServer) => {
+    const cmd = buildCurlCommand(s, (loadToolCache()[s.id] ?? [])[0]?.name ?? "");
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setNotice(`已复制「${s.name}」的调用指令到剪贴板（含密钥，请勿外发），粘贴到电脑终端即可验证服务是否通。`);
+    } catch {
+      setErr("浏览器拒绝了剪贴板访问，请在 HTTPS 环境下重试");
+    }
+  };
+
   const doStartOAuth = async (s: RemoteMcpServer) => {
     setErr("");
     if (oauthFor === s.id) {
@@ -150,7 +203,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
 
   return (
     <div className="absolute inset-0 z-[72] flex flex-col bg-black/40" onClick={onClose}>
-      <div className="drawer-panel glass-strong mt-auto flex max-h-[88%] flex-col rounded-t-3xl p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="drawer-panel glass-strong mt-auto flex max-h-[88%] flex-col overflow-y-auto rounded-t-3xl p-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
           <Globe2 className="size-4 shrink-0 text-primary" />
           <h2 className="min-w-0 flex-1 truncate text-[14px] font-bold text-neutral-800">远程 MCP 导入</h2>
@@ -160,6 +213,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
         </div>
         <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
           支持直接粘贴 https MCP 服务地址（自动完成标准握手并读取工具清单），或 GitHub 仓库链接（只读约定的 mcp.json，绝不下载执行仓库代码）。
+          对方服务不允许本网页直连时（跨域限制/仅白名单客户端），用下方「手动添加服务」按它的文档登记工具。
         </p>
 
         {/* 输入 + 检查 */}
@@ -171,6 +225,66 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
         </div>
         {err && <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-rose-50 px-2.5 py-2 text-[11px] leading-relaxed text-rose-600"><AlertTriangle className="mt-0.5 size-3 shrink-0" />{err}</p>}
         {notice && <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-emerald-50 px-2.5 py-2 text-[11px] leading-relaxed text-emerald-700"><ShieldCheck className="mt-0.5 size-3 shrink-0" />{notice}</p>}
+
+        {/* 手动添加服务 */}
+        <button type="button" className="mt-2 flex items-center gap-1.5 self-start text-[11px] font-semibold text-primary hover:underline" onClick={() => { setManualOpen(!manualOpen); setErr(""); }}>
+          <PlusCircle className="size-3.5" /> {manualOpen ? "收起手动登记" : "手动添加服务（对接方不给直连时用）"}
+        </button>
+        {manualOpen && (
+          <section className="mt-2 space-y-2 rounded-2xl border border-border/60 bg-white/70 p-3">
+            <div className="flex gap-1.5">
+              <Input value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} placeholder="服务名（如 Galatea）" className="glass-input h-8 min-w-0 flex-1 text-[11px]" />
+              <select value={manual.auth} onChange={(e) => setManual({ ...manual, auth: e.target.value as AuthKind })} className="glass-input h-8 shrink-0 rounded-xl bg-white/80 px-2 text-[11px]">
+                <option value="none">无认证</option>
+                <option value="bearer">Bearer Token</option>
+                <option value="apikey">API Key</option>
+              </select>
+            </div>
+            <Input value={manual.url} onChange={(e) => setManual({ ...manual, url: e.target.value })} placeholder="MCP 端点 https://…（对照服务方文档）" className="glass-input h-8 text-[11px]" />
+            {manual.auth !== "none" && (
+              <Input value={manual.key} onChange={(e) => setManual({ ...manual, key: e.target.value })} type="password" placeholder="令牌/密钥（服务方生成，仅存本机浏览器）" className="glass-input h-8 text-[11px]" autoComplete="off" />
+            )}
+            <p className="text-[10px] font-semibold text-neutral-700">工具清单（照服务方文档逐个登记，至少一个才能被使用）</p>
+            <div className="flex flex-wrap gap-1.5">
+              {TOOL_TEMPLATES.map((tp) => (
+                <button key={tp.label} type="button" className="rounded-full bg-primary/10 px-2 py-0.5 text-[9.5px] font-semibold text-primary hover:bg-primary/20" onClick={() => setToolDraft({ ...tp.tool })}>
+                  ＋{tp.label}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-1.5 rounded-xl bg-white/70 p-2">
+              <Input value={toolDraft.name} onChange={(e) => setToolDraft({ ...toolDraft, name: e.target.value })} placeholder="工具名（如 get_weather）" className="glass-input h-7 text-[11px]" />
+              <Input value={toolDraft.description} onChange={(e) => setToolDraft({ ...toolDraft, description: e.target.value })} placeholder="用途一句话（AI 靠它决定何时调用）" className="glass-input h-7 text-[11px]" />
+              <div className="flex items-center gap-1.5">
+                <select value={toolDraft.risk} onChange={(e) => setToolDraft({ ...toolDraft, risk: e.target.value as McpToolMeta["risk"] })} className="glass-input h-7 shrink-0 rounded-lg bg-white/80 px-1.5 text-[10px]">
+                  <option value="low">低风险·自动</option>
+                  <option value="medium">涉私·首次授权</option>
+                  <option value="high">高危·每次确认</option>
+                </select>
+                <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <input type="checkbox" checked={toolDraft.private} onChange={(e) => setToolDraft({ ...toolDraft, private: e.target.checked })} /> 涉私
+                </label>
+                <Button size="sm" variant="outline" className="jelly-btn ml-auto h-7 px-2 text-[11px]" disabled={!toolDraft.name.trim()} onClick={addDraftTool}>加入</Button>
+              </div>
+            </div>
+            {manualTools.length > 0 && (
+              <ul className="max-h-28 space-y-1 overflow-y-auto">
+                {manualTools.map((t, i) => (
+                  <li key={`${t.name}-${i}`} className="flex items-center gap-1.5 text-[10.5px]">
+                    <Plug className="size-3 shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1 truncate"><b>{t.name}</b> <span className="text-muted-foreground">{t.description}</span></span>
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-semibold ${RISK_BADGE[t.risk]}`}>{RISK_LABEL[t.risk]}</span>
+                    <button type="button" className="shrink-0 text-muted-foreground hover:text-rose-500" onClick={() => setManualToolsState(manualTools.filter((_, j) => j !== i))}><Trash2 className="size-3" /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Button size="sm" className="jelly-btn h-8 w-full bg-primary text-[12px] text-primary-foreground" disabled={!manual.url.trim() || manualTools.length === 0} onClick={doManualInstall}>
+              登记服务（{manualTools.length} 个工具）
+            </Button>
+            <p className="text-[9px] leading-relaxed text-muted-foreground">手动登记只做地址安全校验、不发网络请求；真正调用发生在 AI 使用工具时，若被跨域拦截会有明确提示。</p>
+          </section>
+        )}
 
         {/* 安装前预览：域名/工具/权限/认证 */}
         {preview && (
@@ -246,10 +360,12 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
             <h3 className="text-[11px] font-bold text-neutral-700">已连接的服务（{servers.length}）</h3>
             {servers.map((s) => {
               const b = authBadge(s);
+              const editing = editToolsFor === s.id;
+              const tools = editing ? (loadToolCache()[s.id] ?? []) : [];
               return (
                 <div key={s.id} className="rounded-xl bg-white/60 px-2.5 py-2">
                   <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-800">{s.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-800">{s.name}{s.manual && <span className="ml-1 rounded-full bg-sky-500/12 px-1.5 py-0.5 align-middle text-[8px] font-semibold text-sky-600">手动</span>}</span>
                     <span className="shrink-0 text-[9.5px] text-muted-foreground">{s.host}</span>
                     <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8.5px] font-semibold ${b.cls}`}>{b.label}</span>
                   </div>
@@ -258,6 +374,24 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
                     授权工具 {toolCount(s.id)} 个{s.auth === "oauth" ? "" : ` · ${s.auth === "none" ? "无需认证" : "密钥仅存本机"}`}
                     {mediumCount(s) > 0 ? ` · 已授权涉私工具 ${mediumCount(s)} 个` : ""}
                   </p>
+                  {editing && (
+                    <div className="mt-1.5 space-y-1 rounded-lg bg-white/70 p-2">
+                      {tools.map((t, i) => (
+                        <div key={`${t.name}-${i}`} className="flex items-center gap-1.5 text-[10px]">
+                          <span className="min-w-0 flex-1 truncate"><b>{t.name}</b> <span className="text-muted-foreground">{t.description}</span></span>
+                          <button type="button" className="text-muted-foreground hover:text-rose-500" onClick={() => setManualTools(s.id, tools.filter((_, j) => j !== i))}><Trash2 className="size-3" /></button>
+                        </div>
+                      ))}
+                      <div className="flex gap-1.5">
+                        <Input value={toolDraft.name} onChange={(e) => setToolDraft({ ...toolDraft, name: e.target.value })} placeholder="追加工具名" className="glass-input h-7 min-w-0 flex-1 text-[10.5px]" />
+                        <Button size="sm" variant="outline" className="jelly-btn h-7 shrink-0 px-2 text-[10.5px]" disabled={!toolDraft.name.trim()} onClick={() => {
+                          const t: McpToolMeta = { name: toolDraft.name.trim().slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private };
+                          setManualTools(s.id, [...tools, t]);
+                          setToolDraft({ name: "", description: "", risk: "low", private: false });
+                        }}>加</Button>
+                      </div>
+                    </div>
+                  )}
                   {oauthFor === s.id && (
                     <div className="mt-1.5 space-y-1.5 rounded-lg bg-sky-50/70 p-2">
                       <Input value={oauthForm.authorizeUrl} onChange={(e) => setOauthForm({ ...oauthForm, authorizeUrl: e.target.value })} placeholder="授权页地址 authorizeUrl（https）" className="glass-input h-7 text-[11px]" />
@@ -271,6 +405,12 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
                         {oauthFor === s.id ? "填写后再次点击发起" : hasValidToken(s.id) ? "重新授权" : "去授权"}
                       </button>
                     )}
+                    {s.manual && (
+                      <button type="button" className="text-muted-foreground hover:text-primary" onClick={() => setEditToolsFor(editing ? "" : s.id)}>{editing ? "完成编辑" : "编辑工具"}</button>
+                    )}
+                    <button type="button" className="flex items-center gap-0.5 text-muted-foreground hover:text-primary" onClick={() => void copyCurl(s)}>
+                      <ClipboardCopy className="size-3" /> 复制调用指令
+                    </button>
                     {s.auth !== "none" && (
                       <button
                         type="button"

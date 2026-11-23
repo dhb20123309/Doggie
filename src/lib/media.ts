@@ -165,6 +165,16 @@ export const DEFAULT_IMAGE_CONFIG: ImageConfig = { baseUrl: "", apiKey: "", mode
 /** gpt-image 系列快捷选项（自定义网关中转站同款命名） */
 export const GPT_IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-1.5"];
 
+/**
+ * 「gpt生图指令」by朝汐屿（用户 docx 全文收录）：第一人称俯拍日常照协议。
+ * 正面提示词作为照片 prompt 骨架，负面提示词随模型能力附带（见 tryOpenAIImages）。
+ */
+export const PHOTO_STYLE_POSITIVE =
+  "First-person POV, looking down at own body, strictly cropped shot from collarbone down, headless framing, faceless, selfie POV, the character is holding the phone themselves to take a casual photo, 3D real-world, everyday real-life atmosphere, Instagram lifestyle aesthetic, luxurious and wealthy vibe. Natural lighting, warm light or cool light, unfixed color tone. Slim and well-proportioned figure, not bulky, accurate human anatomy and correct body proportions, natural and relaxed posture. Clothing is unfixed, appropriately matching the season, unfixed colors, not always black, high-end texture. Food and scenes are unfixed, can be a pure food shot or scenery shot with no character in frame (focusing entirely on the food or view, strictly no character's body), or a lifestyle shot with the character's lower body present, but if any part of the character's body appears, it must be strictly confined to a small corner of the frame, no large-scale prominence of the character's body, the composition must focus primarily on the food and scenery. Food is not the main focus and not fixed, high-end cuisine or everyday casual food / takeout / junk food, occupying about a quarter of the frame, small and non-prominent, no close-up shots, surrounded by a natural daily-life environment. Scene is everyday-life yet elegant, unfixed setting, luxury setting or natural everyday scene. If a hand appears, it must be slender with defined knuckles, visible veins allowed, natural and not deliberately posed, no scars, no accessories unless specified. Real photographic quality, film grain, highly detailed.";
+
+export const PHOTO_STYLE_NEGATIVE =
+  "Head, face, neck, chin, mouth, nose, eyes, upper chest above collarbone, looking at camera, full body shot, third-person shooting, photographed by others, side profile, any action involving the head, mirror selfie, phone in frame, character in pure food or scenery shot, photographer visible, two hands, deliberate posing, unnatural posture, twisted body, distorted limbs, deformed anatomy, incorrect body proportions, bad anatomy, bulky body, scars, random accessories, close-up food shot, oversized food, food as main subject, smoke, AI look, anime style, plastic feel, fake feel, fake textures, over-editing, low resolution, blurry, distortion, clipping, mesh interpenetration, extra limbs, text, watermark, always black clothes, single outfit, inappropriate clothing for the season, large-scale prominent character body, character body dominating the frame, character body as main subject.";
+
 export function loadImageConfig(): ImageConfig {
   try {
     const raw = localStorage.getItem(IMG_KEY);
@@ -187,6 +197,8 @@ export function saveImageConfig(cfg: ImageConfig): void {
 async function fetchPollinations(prompt: string, width: number, height: number, model: string): Promise<string> {
   const params = new URLSearchParams({ width: String(width), height: String(height), nologo: "true", seed: String(Math.floor(Math.random() * 1e9)) });
   if (model.trim()) params.set("model", model.trim());
+  // pollinations 支持负面提示词，与协议同步带上
+  params.set("negative_prompt", PHOTO_STYLE_NEGATIVE.slice(0, 800));
   const res = await fetch(`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?${params.toString()}`);
   if (!res.ok) return "";
   const blob = await res.blob();
@@ -248,7 +260,8 @@ async function tryOpenAIImages(baseUrl: string, key: string, model: string, prom
       const res = await fetch(`${url}/images/generations`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-        body: JSON.stringify({ prompt, n: 1, size, response_format: "b64_json", ...(model.trim() ? { model: model.trim() } : {}) }),
+        // 负面提示词随请求透传：官方 gpt-image 会忽略未知字段，中转网关常支持 negative_prompt
+        body: JSON.stringify({ prompt, n: 1, size, response_format: "b64_json", negative_prompt: PHOTO_STYLE_NEGATIVE, ...(model.trim() ? { model: model.trim() } : {}) }),
       });
       if (!res.ok) continue; // 该网关可能没有图像能力，换候选或回落
       const json = await res.json().catch(() => null);
@@ -262,23 +275,27 @@ async function tryOpenAIImages(baseUrl: string, key: string, model: string, prom
   return "";
 }
 
-/** 按人设拼写实照片提示词（英文对图像模型更稳） */
+/** 按人设拼写实照片提示词：套用「gpt生图指令」by朝汐屿（第一人称俯拍、不露脸的生活照协议），场景与人设特征作为变量注入 */
 export function photoPrompt(charName: string, persona: string, scene: string): string {
-  const traits = persona.slice(0, 300).replace(/\s+/g, " ");
-  return `Candid realistic smartphone snapshot photo of ${charName}, character traits: ${traits}. Scene: ${scene}. Natural imperfect phone-camera framing, realistic lighting, no text, no watermark.`;
+  const traits = persona.slice(0, 160).replace(/\s+/g, " ");
+  // 指令原文要求构图以食物/风景为主、身体只入一角，故把话题场景写成画面主体
+  return `${PHOTO_STYLE_POSITIVE} Subject context: this photo belongs to ${charName} (${traits}); today's moment: ${scene}. Outfit and environment details should subtly reflect these traits while keeping the headless first-person composition.`;
 }
 
-/** 场景关键词 → 英文拍摄场景：让生成的照片贴合聊天话题，而不是随机发莫名其妙的图 */
+/** 负面提示词：官方 gpt-image 系列无 negative_prompt 字段，仅中转/兼容网关透传 */
+export const PHOTO_NEGATIVE_PROMPT = PHOTO_STYLE_NEGATIVE;
+
+/** 场景关键词 → 英文拍摄主体：套用「gpt生图指令」的俯拍不露脸协议，场景必须是画面主体（食物/风景为主、身体只入一角），不能出现看镜头等冲突描述 */
 const SCENE_MATCHERS: [RegExp, string][] = [
-  [/球|赛|运动|锻炼|健身|操场/, "after school on the basketball court, slightly sweaty and smiling at the camera"],
-  [/琴|钢琴|排练|音乐|歌|演奏|曲子/, "at a piano in the school music room, glancing up mid-phrase"],
-  [/奶茶|咖啡|吃|喝|饭|餐|零食|外卖|饿/, "holding a bubble tea on a tree-lined street at dusk"],
-  [/车|兜风|路|旅行|高速|自驾/, "in the passenger seat of a car on a sunny afternoon road trip"],
-  [/夜|晚|月亮|星星|灯|天台|风景/, "on the rooftop railing looking at the evening city lights"],
-  [/雨|伞|湿|阴天/, "under an umbrella on a rainy street, puddles reflecting neon lights"],
-  [/图书馆|书|作业|题|考试|学习|自习/, "at a desk in the library, textbooks open, looking up from studying"],
-  [/画|速写|美术|颜料/, "in the art room holding a sketch pad, pencil behind the ear"],
-  [/猫|狗|宠物/, "crouching on a sunny lawn playing with a small pet"],
+  [/球|赛|运动|锻炼|健身|操场/, "looking down at the basketball spinning in hand on the outdoor court, court lines and water bottle in frame"],
+  [/琴|钢琴|排练|音乐|歌|演奏|曲子/, "hands resting on piano keys mid-rehearsal, sheet music on the stand filling the frame"],
+  [/奶茶|咖啡|吃|喝|饭|餐|零食|外卖|饿/, "an overhead view of a bubble tea and small snacks on a table, one hand reaching for the cup"],
+  [/车|兜风|路|旅行|高速|自驾/, "first-person view from the passenger seat, road ahead through the windshield and a hand on the door"],
+  [/夜|晚|月亮|星星|灯|天台|风景/, "looking down over a rooftop railing at evening city lights far below"],
+  [/雨|伞|湿|阴天/, "pointing down at puddles reflecting neon lights under an umbrella tip entering the frame corner"],
+  [/图书馆|书|作业|题|考试|学习|自习/, "overhead view of open textbooks and notes on a library desk, pen held in one hand"],
+  [/画|速写|美术|颜料/, "looking down at a half-finished sketch on a drawing pad in the art room, paint tubes nearby"],
+  [/猫|狗|宠物/, "a small pet curled on a sunny lawn filling most of the frame, one hand petting it"],
 ];
 
 /**
@@ -292,11 +309,11 @@ export function matchPhotoScene(text: string): string {
   return "";
 }
 
-/** 主动分享照片时的日常场景池 */
+/** 主动分享照片时的日常场景池（与 SCENE_MATCHERS 同口径：俯拍主体、不露脸） */
 export const PHOTO_SCENES = [
-  "after school on the basketball court, slightly sweaty and smiling at the camera",
-  "in the passenger seat of a car on a sunny afternoon road trip",
-  "at a piano in the school music room, glancing up mid-phrase",
-  "holding a bubble tea on a tree-lined street at dusk",
-  "on the rooftop railing looking at the evening city lights",
+  "looking down at the basketball spinning in hand on the outdoor court, court lines and water bottle in frame",
+  "first-person view from the passenger seat, road ahead through the windshield and a hand on the door",
+  "hands resting on piano keys mid-rehearsal, sheet music on the stand filling the frame",
+  "an overhead view of a bubble tea and small snacks on a table, one hand reaching for the cup",
+  "looking down over a rooftop railing at evening city lights far below",
 ];

@@ -104,6 +104,8 @@
 
 - **远程 MCP 标准端点直连（第80轮，接 Galatea）**：remote-mcp.ts 新增 rpcDirectProbe（POST initialize→notifications/initialized→tools/list，Streamable HTTP；响应兼容 JSON 与 SSE data: 帧）+ normalizeRpcTools（annotations.destructiveHint/名称关键词→high、涉私描述→medium）+ discoverOAuthMeta（401 时按 RFC 8414 探 /.well-known/oauth-authorization-server 及路径后缀变体）。inspectSource 对 url 类输入先 inspectByRpc，失败再退回 mcp.json。401+元数据命中=按 oauth 模式安装（clientId 留空），RemoteMcpPanel「去授权」缺 clientId 时展开表单预填发现的 authorize/token 地址让用户补 client id。日志 [mcp-remote] rpc inspect / oauth meta discovered。
 
+- **MCP 握手协议头与可观测性（第81轮，"安全检查显示读取配置失败"）**：rpcDirectProbe 补 MCP-Protocol-Version 请求头（initialize 协商成功后才带，符合规范）；每步 rpc →/← 打日志（method、HTTP 状态、content-type 前缀），initialize 被拒 console.warn，inspectSource url 分支打 `[mcp-remote] inspect rpc path ok= reason=`。跨域被浏览器拦截时 fetch 抛 TypeError→reason 含"网络握手失败"；若最终仍走 mcp.json 兜底则报"读取配置失败（HTTP xxx）"——用户回报需看具体红字/控制台日志定位。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

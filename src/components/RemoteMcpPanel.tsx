@@ -54,11 +54,16 @@ const RISK_LABEL: Record<string, string> = {
 
 /** 常见工具快捷模板：一键填入再改参数，减少手敲 */
 const TOOL_TEMPLATES: { label: string; tool: McpToolMeta }[] = [
-  { label: "天气查询", tool: { name: "get_weather", description: "按城市查询当前天气与未来几天预报", risk: "low", private: false } },
-  { label: "时间地点", tool: { name: "get_time", description: "查询指定时区的当前日期时间", risk: "low", private: false } },
-  { label: "网页搜索", tool: { name: "web_search", description: "按关键词搜索公开网页资讯", risk: "low", private: false } },
-  { label: "发送消息", tool: { name: "send_message", description: "向外部账号发送消息（写操作）", risk: "high", private: true } },
+  { label: "天气查询", tool: { name: "get_weather", description: "按城市查询当前天气与未来几天预报", risk: "low", private: false, keywords: ["天气", "下雨", "降温"] } },
+  { label: "时间地点", tool: { name: "get_time", description: "查询指定时区的当前日期时间", risk: "low", private: false, keywords: ["几点", "时间"] } },
+  { label: "网页搜索", tool: { name: "web_search", description: "按关键词搜索公开网页资讯", risk: "low", private: false, keywords: ["热搜", "新闻", "查一下"] } },
+  { label: "发送消息", tool: { name: "send_message", description: "向外部账号发送消息（写操作）", risk: "high", private: true, keywords: [] } },
 ];
+
+/** 逗号分隔文本 → 关键词数组（去空、去重、每项≤12字、最多8个） */
+function parseKeywords(s: string): string[] {
+  return Array.from(new Set(s.split(/[,，、\s]+/).map((k) => k.trim().slice(0, 12)).filter(Boolean))).slice(0, 8);
+}
 
 export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   const [input, setInput] = useState("");
@@ -77,7 +82,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   const [manualOpen, setManualOpen] = useState(false);
   const [manual, setManual] = useState({ name: "", url: "", auth: "bearer" as AuthKind, key: "" });
   const [manualTools, setManualToolsState] = useState<McpToolMeta[]>([]);
-  const [toolDraft, setToolDraft] = useState({ name: "", description: "", risk: "low" as McpToolMeta["risk"], private: false });
+  const [toolDraft, setToolDraft] = useState({ name: "", description: "", risk: "low" as McpToolMeta["risk"], private: false, keywords: "" });
   // 工具编辑弹层（针对已装的手动服务）
   const [editToolsFor, setEditToolsFor] = useState<string>("");
 
@@ -155,8 +160,8 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   const addDraftTool = () => {
     const name = toolDraft.name.trim();
     if (!name) return;
-    setManualToolsState((prev) => [...prev, { name: name.slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private }]);
-    setToolDraft({ name: "", description: "", risk: "low", private: false });
+    setManualToolsState((prev) => [...prev, { name: name.slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private, keywords: parseKeywords(toolDraft.keywords) }]);
+    setToolDraft({ name: "", description: "", risk: "low", private: false, keywords: "" });
   };
 
   const copyCurl = async (s: RemoteMcpServer) => {
@@ -247,14 +252,16 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
             <p className="text-[10px] font-semibold text-neutral-700">工具清单（照服务方文档逐个登记，至少一个才能被使用）</p>
             <div className="flex flex-wrap gap-1.5">
               {TOOL_TEMPLATES.map((tp) => (
-                <button key={tp.label} type="button" className="rounded-full bg-primary/10 px-2 py-0.5 text-[9.5px] font-semibold text-primary hover:bg-primary/20" onClick={() => setToolDraft({ ...tp.tool })}>
+                <button key={tp.label} type="button" className="rounded-full bg-primary/10 px-2 py-0.5 text-[9.5px] font-semibold text-primary hover:bg-primary/20" onClick={() => setToolDraft({ name: tp.tool.name, description: tp.tool.description, risk: tp.tool.risk, private: tp.tool.private, keywords: (tp.tool.keywords ?? []).join("，") })}>
                   ＋{tp.label}
                 </button>
               ))}
             </div>
             <div className="space-y-1.5 rounded-xl bg-white/70 p-2">
-              <Input value={toolDraft.name} onChange={(e) => setToolDraft({ ...toolDraft, name: e.target.value })} placeholder="工具名（如 get_weather）" className="glass-input h-7 text-[11px]" />
-              <Input value={toolDraft.description} onChange={(e) => setToolDraft({ ...toolDraft, description: e.target.value })} placeholder="用途一句话（AI 靠它决定何时调用）" className="glass-input h-7 text-[11px]" />
+              <Input value={toolDraft.name} onChange={(e) => setToolDraft({ ...toolDraft, name: e.target.value })} placeholder="工具名称（如 天气查询 / get_weather）" className="glass-input h-7 text-[11px]" />
+              <Input value={toolDraft.description} onChange={(e) => setToolDraft({ ...toolDraft, description: e.target.value })} placeholder="功能简介：一句话描述这个工具能做什么" className="glass-input h-7 text-[11px]" />
+              <Input value={toolDraft.keywords} onChange={(e) => setToolDraft({ ...toolDraft, keywords: e.target.value })} placeholder="聊天关键词（可选，逗号分隔，如：热搜，新闻，吃瓜）" className="glass-input h-7 text-[11px]" />
+              <p className="text-[9px] leading-relaxed text-muted-foreground">聊天中提到任意关键词即激活此工具；留空则仅当 TA 判断明显需要时调用。</p>
               <div className="flex items-center gap-1.5">
                 <select value={toolDraft.risk} onChange={(e) => setToolDraft({ ...toolDraft, risk: e.target.value as McpToolMeta["risk"] })} className="glass-input h-7 shrink-0 rounded-lg bg-white/80 px-1.5 text-[10px]">
                   <option value="low">低风险·自动</option>
@@ -384,10 +391,11 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
                       ))}
                       <div className="flex gap-1.5">
                         <Input value={toolDraft.name} onChange={(e) => setToolDraft({ ...toolDraft, name: e.target.value })} placeholder="追加工具名" className="glass-input h-7 min-w-0 flex-1 text-[10.5px]" />
+                        <Input value={toolDraft.keywords} onChange={(e) => setToolDraft({ ...toolDraft, keywords: e.target.value })} placeholder="关键词(逗号)" className="glass-input h-7 min-w-0 flex-1 text-[10.5px]" />
                         <Button size="sm" variant="outline" className="jelly-btn h-7 shrink-0 px-2 text-[10.5px]" disabled={!toolDraft.name.trim()} onClick={() => {
-                          const t: McpToolMeta = { name: toolDraft.name.trim().slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private };
+                          const t: McpToolMeta = { name: toolDraft.name.trim().slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private, keywords: parseKeywords(toolDraft.keywords) };
                           setManualTools(s.id, [...tools, t]);
-                          setToolDraft({ name: "", description: "", risk: "low", private: false });
+                          setToolDraft({ name: "", description: "", risk: "low", private: false, keywords: "" });
                         }}>加</Button>
                       </div>
                     </div>

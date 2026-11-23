@@ -970,7 +970,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       return lines.length ? "\n" + lines.join("\n") : "";
     })();
     // 手机能力状态清单：TA 看得见哪些能力开着、有哪些待触发提醒，才敢用 [震动:]/[播报:]/[提醒:] 标记
-    const mcpCtx = buildMcpContext(loadMcpPrefs()) + buildRemoteMcpContext(loadRemoteServers(), loadToolCache());
+    // 远程 MCP 传最近消息文本：工具登记的聊天关键词命中时提醒 TA 优先调用对应工具
+    const mcpRecent = entries
+      .filter((e) => e.role === "user" && !e.failed)
+      .slice(-3)
+      .map((e) => e.content)
+      .join(" ");
+    const mcpCtx = buildMcpContext(loadMcpPrefs()) + buildRemoteMcpContext(loadRemoteServers(), loadToolCache(), mcpRecent);
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed && !e.maskSwitch).slice(-20);
       // 本轮触发消息（最后一条用户消息）带图时走 vision 多模态；历史图片只留文本占位省 token

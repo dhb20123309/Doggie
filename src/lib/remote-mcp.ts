@@ -42,6 +42,8 @@ export interface McpToolMeta {
   risk: "low" | "medium" | "high";
   /** 是否涉及私人内容（消息、文件、账号数据等） */
   private: boolean;
+  /** 聊天关键词：用户消息提到任一词即提醒模型该用此工具（对标常见 MCP 工具箱的触发词设计） */
+  keywords?: string[];
 }
 
 /** 约定配置清单（GitHub 仓库或服务器根路径下的 mcp.json） */
@@ -1019,16 +1021,30 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
 /* ---------- AI 侧协议与标记解析 ---------- */
 
 /** 拼进 system 的远程能力清单（无服务时返回空串） */
-export function buildRemoteMcpContext(servers: RemoteMcpServer[], toolCache: Record<string, McpToolMeta[]>): string {
+export function buildRemoteMcpContext(servers: RemoteMcpServer[], toolCache: Record<string, McpToolMeta[]>, recentText = ""): string {
   if (!servers.length) return "";
   const lines = ["\n【远程 MCP 服务】以下是你已获授权连接的第三方服务，可在对方要求时使用："];
   for (const s of servers) {
     const tools = toolCache[s.id] ?? [];
     lines.push(`- ${s.name}（${s.host}）：${tools.length ? tools.map((t) => `${t.name}${t.risk === "high" ? "〔高危〕" : t.risk === "medium" ? "〔中危〕" : ""}${t.private ? "〔涉私〕" : ""}`).join("、") : "未声明工具"}${s.auth === "oauth" && !hasValidToken(s.id) ? "〔OAuth 未授权〕" : ""}`);
   }
+  // 聊天关键词命中：用户最近消息里出现某工具登记的触发词，主动提醒模型该用这个工具
+  const hit = recentText.trim();
+  if (hit) {
+    const hits: string[] = [];
+    for (const s of servers) {
+      for (const t of toolCache[s.id] ?? []) {
+        if ((t.keywords ?? []).some((k) => k.length >= 2 && hit.includes(k))) hits.push(`${s.name}:${t.name}`);
+      }
+    }
+    if (hits.length) {
+      lines.push(`【关键词命中】对方刚提到的话题对应这些工具，优先使用：${hits.slice(0, 6).join("、")}。`);
+      console.log(`[mcp-remote] keyword hits=${hits.slice(0, 6).join(",")}`);
+    }
+  }
   lines.push(
     "使用方式：单独一行输出 [远程MCP:服务名:工具名:参数JSON]（参数为 JSON 对象，可省略则写 {}）。",
-    "规则：只在对方明确要求或明显需要时调用；标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
+    "规则：只在对方明确要求、提到工具关键词或明显需要时调用；标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
   );
   return lines.join("\n");
 }

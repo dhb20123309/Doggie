@@ -65,8 +65,6 @@ export interface ChatEntry {
   senderId?: string;
   /** 群系统提示行（居中灰字，如"你创建了群聊「…」"/"XX 加入了群聊"），非角色消息 */
   groupTip?: boolean;
-  /** 私聊镜像条目来源群 id：群里发生的事同步进私聊记忆；有此标记的条目不再二次镜像（幂等防循环） */
-  mirroredFrom?: string;
   /** 定位共享卡片（微信式地图卡）：from 标记谁发的；place 地点名、addr 地址描述 */
   location?: { place: string; addr: string; from: "user" | "char" };
   /** 外卖/礼物订单卡：kind=delivery 外卖 | gift 礼物；status=pending 待收可点开收下，received 已完成 */

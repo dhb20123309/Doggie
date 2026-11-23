@@ -32,7 +32,7 @@ import { extractMcpMarks, execMcpActions, loadMcpPrefs, buildMcpContext } from "
 import { walletCharSend } from "@/lib/wallet-store";
 import { emitNotify } from "@/lib/notification-store";
 import { readLastEntries } from "@/lib/chat-store";
-import { type GroupChat, useGroupLog, groupLogKey, mirrorToMembers, privateDigestFor, GROUP_PROTOCOL } from "@/lib/group-chat-store";
+import { type GroupChat, useGroupLog, groupLogKey, privateDigestFor, GROUP_PROTOCOL } from "@/lib/group-chat-store";
 
 interface Props {
   config: AiConfig;
@@ -137,7 +137,7 @@ export function GroupChatView({ config, group, characters, books, background, is
     return () => clearTimeout(t);
   }, [group.id, scrollBottom]);
 
-  /** 追加一条群消息（界面+存储同步）并镜像进各成员私聊记忆 */
+  /** 追加一条群消息（界面+存储同步；群内容只留在群里，记忆互通靠摘要桥） */
   const append = useCallback(
     (entry: ChatEntry) => {
       const next = [...logRef.current, entry];
@@ -148,10 +148,9 @@ export function GroupChatView({ config, group, characters, books, background, is
       } catch {
         /* 隐私模式忽略 */
       }
-      if (!entry.groupTip) mirrorToMembers(group, entry, members);
       scrollBottom();
     },
-    [group, members, setLog, scrollBottom]
+    [group.id, setLog, scrollBottom]
   );
 
   /** 让某位成员就当前群上下文生成一条回复文本 */

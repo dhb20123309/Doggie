@@ -117,7 +117,7 @@ import { emitNotify } from "@/lib/notification-store";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, type McpAction } from "@/lib/reality-mcp";
 import { GroupChatView } from "@/components/GroupChatView";
 import { Avatar } from "@/components/Avatar";
-import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog } from "@/lib/group-chat-store";
+import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog, groupDigestFor } from "@/lib/group-chat-store";
 
 interface Props {
   config: AiConfig;
@@ -848,6 +848,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           ORDER_PROTOCOL +
           REALITY_MCP_PROTOCOL +
           worldText +
+          groupDigestFor(ch.id, characters) +
           memeText
         );
       }
@@ -882,11 +883,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         REALITY_MCP_PROTOCOL +
         QUOTE_PROTOCOL +
         quoteTable +
+        // 历史记忆互通：群消息不写入私聊记录，但模型通过这段摘要"记得"群里发生过什么
+        groupDigestFor(ch.id, characters) +
         "\n\n" +
         buildStickerHint(usable)
       );
     },
-    [books, stickers]
+    [books, stickers, characters]
   );
 
   const scrollBottom = () => {
@@ -1916,11 +1919,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             wrapCitable(
               entry,
               <div className="flex flex-col items-end gap-1">
-                {entry.mirroredFrom && (
-                  <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[9px] text-muted-foreground">
-                    来自群聊「{groups.find((g) => g.id === entry.mirroredFrom)?.name ?? "群聊"}」
-                  </span>
-                )}
                 {entry.quote && <QuoteBlock quote={entry.quote} side="right" />}
                 {entry.transfer ? (
                   <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />
@@ -1956,11 +1954,6 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             wrapCitable(
               entry,
               <div className="flex flex-col items-start gap-1">
-                {entry.mirroredFrom && (
-                  <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[9px] text-muted-foreground">
-                    来自群聊「{groups.find((g) => g.id === entry.mirroredFrom)?.name ?? "群聊"}」
-                  </span>
-                )}
                 <AssistantRow
                   entry={entry}
                   character={active}

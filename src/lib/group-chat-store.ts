@@ -1,4 +1,4 @@
-// 群聊数据层：群列表持久化 + 群聊天记录 + 私聊记忆双向同步（群→私镜像双写、私→群摘要读取）
+// 群聊数据层：群列表持久化 + 群聊天记录 + 历史记忆互通（群消息不写入私聊界面，靠摘要桥互相记得）
 import type { ChatEntry, Character } from "./chat-types";
 import { displayName } from "./chat-types";
 import { usePersisted } from "./chat-store";
@@ -77,61 +77,40 @@ export const GROUP_PROTOCOL =
   "保持你自己的说话习惯和条数节奏，不同人风格必须明显不同。";
 
 /**
- * 群消息 → 各成员私聊记忆镜像（方案A双写）：
- * - 某角色在群里说的话 → 原样进她的私聊 log（她记得自己说过什么）
- * - 用户在群里说的话 → 「[群聊] 你在「群名」说：…」进每位在场成员私聊
- * - 其他角色在群里说的话 → 「[群聊] ${名字}说：…」第三人称旁白进该成员之外的人的私聊？不——
- *   统一策略：每位成员的私聊里，自己的话第一人称原样、用户的话带前缀、别的角色话写成旁白。
- * 幂等：同一 entry.id 在某成员私聊已存在镜像则跳过；镜像条目自身不再二次镜像。
+ * 历史记忆互通·群侧摘要：把该成员所在群的最近消息压成摘要（喂私聊 system）。
+ * 群消息只存在群 log 里，绝不写入私聊记录；私聊时模型靠这段摘要"记得"群里发生过什么。
+ * characters 用于把 senderId 映射成名字/备注。
  */
-export function mirrorToMembers(group: GroupChat, entry: ChatEntry, members: Character[]): void {
-  for (const ch of members) {
-    if (!ch || ch.blocked) continue;
-    const key = `${LOG_PREFIX}${ch.id}`;
-    let prev: ChatEntry[];
-    try {
-      prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
-    } catch {
-      continue;
+export function groupDigestFor(charId: string, characters?: Character[], n = 8): string {
+  try {
+    const groups = readGroups().filter((g) => g.memberIds.includes(charId));
+    if (!groups.length) return "";
+    const names = new Map((characters ?? []).map((c) => [c.id, displayName(c)]));
+    const parts: string[] = [];
+    for (const g of groups) {
+      // 发言人名字优先用当前角色数据里的备注（displayName），查不到回落 id
+      const log = (readGroupLog(g.id) as ChatEntry[])
+        .filter((e) => !e.failed && !e.groupTip)
+        .slice(-n);
+      if (!log.length) continue;
+      const lines = log.map((e) => {
+        const t = e.content.replace(/\s+/g, " ").slice(0, 40);
+        if (e.role === "user") return `- 你在群里说：${t}`;
+        const who = e.senderId ? names.get(e.senderId) ?? e.senderId : "";
+        return `- ${who ? `${who}在群里说` : "群里"}：${t}`;
+      });
+      parts.push(`【群「${g.name}」】\n${lines.join("\n")}`);
     }
-    // 幂等：同 id 镜像已存在则跳过
-    if (prev.some((e) => e.mirroredFrom === group.id && e.id === entry.id)) continue;
-    const who = entry.senderId ? members.find((m) => m.id === entry.senderId) : null;
-    const speakerName = who ? displayName(who) : "";
-    let mirrored: ChatEntry | null = null;
-    if (entry.role === "assistant" && entry.senderId === ch.id) {
-      // 她自己说的：第一人称原样进她的私聊
-      mirrored = { ...entry, senderId: undefined, mirroredFrom: group.id };
-    } else if (entry.role === "user") {
-      const text = entry.transfer
-        ? `[群聊] 你在「${group.name}」给${speakerName || "大家"}转了账 ¥${entry.transfer.amount.toFixed(2)}（备注：${entry.transfer.note}）`
-        : entry.order
-          ? `[群聊] 你在「${group.name}」点了${entry.order.kind === "gift" ? "礼物" : "外卖"}：${entry.order.shop}`
-          : entry.location
-            ? `[群聊] 你在「${group.name}」分享了位置：${entry.location.place}`
-            : `[群聊] 你在「${group.name}」说：${entry.content}`;
-      mirrored = { id: entry.id, role: "user", content: text, at: entry.at, mirroredFrom: group.id };
-    } else if (entry.role === "assistant" && entry.senderId && entry.senderId !== ch.id) {
-      // 别家角色说的：第三人称旁白，让她知道群里发生过
-      mirrored = {
-        id: entry.id,
-        role: "user",
-        content: `[群聊] ${group.name}里 ${speakerName}说：${entry.content}`,
-        at: entry.at,
-        mirroredFrom: group.id,
-      };
-    }
-    if (!mirrored) continue;
-    try {
-      localStorage.setItem(key, JSON.stringify([...prev, mirrored]));
-      console.log(`[group] mirror → char=${ch.id} entry=${entry.id} kind=${entry.role}`);
-    } catch {
-      /* 配额满忽略 */
-    }
+    if (!parts.length) return "";
+    return "\n【你们最近的群聊记录（私聊时可以自然提起，但别逐句复述，也不要在私聊里假装这些消息发在这里）】\n" + parts.join("\n");
+  } catch {
+    return "";
   }
 }
 
-/** 私→群记忆桥：某成员与该用户的私聊最近 n 条摘要（喂群聊 system，让群里接得住私聊话题） */
+/**
+ * 历史记忆互通·私聊摘要：某成员与该用户的私聊最近 n 条（喂群聊 system，让群里接得住私聊话题）。
+ */
 export function privateDigestFor(charId: string, n = 6): string {
   try {
     const log = (JSON.parse(localStorage.getItem(`${LOG_PREFIX}${charId}`) || "[]") as ChatEntry[])
@@ -140,7 +119,6 @@ export function privateDigestFor(charId: string, n = 6): string {
     if (!log.length) return "";
     const lines = log.map((e) => {
       const t = e.content.replace(/\s+/g, " ").slice(0, 40);
-      if (e.mirroredFrom) return `- ${t}`;
       return e.role === "user" ? `- 你说：${t}` : `- 我说：${t}`;
     });
     return "\n【你和对方最近的私聊（群里可以自然提起，但别逐句复述）】\n" + lines.join("\n");

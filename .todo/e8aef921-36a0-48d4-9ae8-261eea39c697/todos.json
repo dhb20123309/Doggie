@@ -1,0 +1,37 @@
+[
+  {
+    "content": "chat-types.ts 契约扩展（senderId/groupTip/mirroredFrom）",
+    "id": "g1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "group-chat-store.ts 群数据层 + 镜像双写",
+    "id": "g2",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "GroupChatView.tsx 群聊天页/建群/群管理",
+    "id": "g3",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "RoleChatApp 接线：view=group、列表混排、镜像角标",
+    "id": "g4",
+    "priority": "high",
+    "skills": [],
+    "status": "in_progress"
+  },
+  {
+    "content": "双门禁验证 + AGENTS.md + 交付",
+    "id": "g5",
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
+  }
+]

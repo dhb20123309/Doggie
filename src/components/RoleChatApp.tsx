@@ -15,6 +15,7 @@ import {
   SmilePlus,
   Check,
   Plus,
+  Users,
   FileInput,
   Volume2,
   X,
@@ -114,6 +115,9 @@ import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, Opene
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 import { emitNotify } from "@/lib/notification-store";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, type McpAction } from "@/lib/reality-mcp";
+import { GroupChatView } from "@/components/GroupChatView";
+import { Avatar } from "@/components/Avatar";
+import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog } from "@/lib/group-chat-store";
 
 interface Props {
   config: AiConfig;
@@ -165,7 +169,7 @@ function lastPhotoAt(charId: string): number {
   return t;
 }
 
-type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail";
+type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail" | "group";
 
 export function RoleChatApp({ config, background, onBack }: Props) {
   const [characters, setCharacters] = useCharacters();
@@ -222,6 +226,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     return "list";
   });
   const [input, setInput] = useState("");
+  // ===== 群聊（第62轮）：groups 列表 + 当前打开的群 id + 建群弹层开关 =====
+  const [groups, setGroups] = useGroups();
+  const [activeGroupId, setActiveGroupId] = useState<string>("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const activeGroup = groups.find((g) => g.id === activeGroupId);
   const [pending, setPending] = useState(false);
   /** 并发闸门：charId → 是否有回复请求在飞（含流式输出中）。pending 在流式首 chunk 即释放，不能作为唯一闸门 */
   const inflightRef = useRef<Set<string>>(new Set());
@@ -1581,38 +1590,94 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     );
   }
 
+  if (view === "group") {
+    if (!activeGroup) {
+      setView("list");
+      return null;
+    }
+    return (
+      <GroupChatView
+        config={config}
+        group={activeGroup}
+        characters={characters}
+        books={books}
+        background={background}
+        isOpen
+        onBack={() => setView("list")}
+        onUpdate={(g) => setGroups((prev) => prev.map((x) => (x.id === g.id ? g : x)))}
+        onDissolve={(gid) => {
+          clearGroupLog(gid);
+          setGroups((prev) => prev.filter((x) => x.id !== gid));
+          setActiveGroupId("");
+          console.log(`[group] dissolved ${gid}（群记录清空，私聊镜像保留）`);
+          setView("list");
+        }}
+      />
+    );
+  }
+
   if (view === "list") {
     return (
-      <ConversationList
-        characters={characters}
-        activeId={activeId}
-        marks={marks}
-        generating={proactiveBusy}
-        onSelect={(id) => {
-          setActiveId(id);
-          setMarks((m) => ({ ...m, [id]: Date.now() }));
-          setView("chat");
-        }}
-        onNew={() => {
-          const ch: Character = {
-            id: `c-new-${Date.now().toString(36)}`,
-            name: "",
-            avatar: "🎭",
-            persona: "",
-            boundWorldBookIds: [],
-            proactiveEnabled: true,
-          };
-          setCharacters((prev) => [...prev, ch]);
-          setActiveId(ch.id);
-          setView("edit");
-        }}
-        onImport={() => setView("import")}
-        onDelete={(id) => {
-          setCharacters((prev) => prev.filter((c) => c.id !== id));
-          clearChatLog(id);
-        }}
-        onBack={onBack}
-      />
+      <>
+        <ConversationList
+          characters={characters}
+          groups={groups}
+          activeId={activeId}
+          marks={marks}
+          generating={proactiveBusy}
+          onSelect={(id) => {
+            setActiveId(id);
+            setMarks((m) => ({ ...m, [id]: Date.now() }));
+            setView("chat");
+          }}
+          onSelectGroup={(gid) => {
+            setActiveGroupId(gid);
+            const g = groups.find((x) => x.id === gid);
+            if (g) setMarks((m) => ({ ...m, [`g:${gid}`]: Date.now() }));
+            setView("group");
+          }}
+          onNewGroup={() => setCreateOpen(true)}
+          onNew={() => {
+            const ch: Character = {
+              id: `c-new-${Date.now().toString(36)}`,
+              name: "",
+              avatar: "🎭",
+              persona: "",
+              boundWorldBookIds: [],
+              proactiveEnabled: true,
+            };
+            setCharacters((prev) => [...prev, ch]);
+            setActiveId(ch.id);
+            setView("edit");
+          }}
+          onImport={() => setView("import")}
+          onDelete={(id) => {
+            setCharacters((prev) => prev.filter((c) => c.id !== id));
+            clearChatLog(id);
+            // 该角色退出所有群；只剩一人/零人的群自动解散
+            setGroups((prev) =>
+              prev
+                .map((g) => ({ ...g, memberIds: g.memberIds.filter((m) => m !== id) }))
+                .filter((g) => g.memberIds.length > 0)
+            );
+          }}
+          onBack={onBack}
+        />
+        {createOpen && (
+          <CreateGroupSheet
+            characters={characters}
+            onClose={() => setCreateOpen(false)}
+            onCreate={(name, ids) => {
+              const g: GroupChat = { id: newGroupId(), name: name.trim() || "我们的群", memberIds: ids, createdAt: Date.now() };
+              setGroups((prev) => [g, ...prev]);
+              setActiveGroupId(g.id);
+              setCreateOpen(false);
+              console.log(`[group] created ${g.id}「${g.name}」members=${ids.join(",")}`);
+              setView("group");
+            }}
+          />
+        )}
+      </>
     );
   }
 
@@ -1851,6 +1916,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             wrapCitable(
               entry,
               <div className="flex flex-col items-end gap-1">
+                {entry.mirroredFrom && (
+                  <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[9px] text-muted-foreground">
+                    来自群聊「{groups.find((g) => g.id === entry.mirroredFrom)?.name ?? "群聊"}」
+                  </span>
+                )}
                 {entry.quote && <QuoteBlock quote={entry.quote} side="right" />}
                 {entry.transfer ? (
                   <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />
@@ -1886,6 +1956,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             wrapCitable(
               entry,
               <div className="flex flex-col items-start gap-1">
+                {entry.mirroredFrom && (
+                  <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[9px] text-muted-foreground">
+                    来自群聊「{groups.find((g) => g.id === entry.mirroredFrom)?.name ?? "群聊"}」
+                  </span>
+                )}
                 <AssistantRow
                   entry={entry}
                   character={active}
@@ -2296,24 +2371,85 @@ function CharDetailPage({
   );
 }
 
+/* ================= 建群弹层（紧耦合子组件内联本文件） ================= */
+
+function CreateGroupSheet({ characters, onClose, onCreate }: { characters: Character[]; onClose: () => void; onCreate: (name: string, ids: string[]) => void }) {
+  const [sel, setSel] = useState<Set<string>>(() => new Set());
+  const [name, setName] = useState("");
+  const toggle = (id: string) =>
+    setSel((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  return (
+    <div className="absolute inset-0 z-[70] flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="glass-strong drawer-panel relative max-h-[80%] overflow-y-auto rounded-t-3xl p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-semibold">发起群聊</span>
+          <button type="button" onClick={onClose} aria-label="关闭" className="jelly-icon flex size-7 items-center justify-center rounded-full text-muted-foreground">
+            <X className="size-4" />
+          </button>
+        </div>
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="群名称（如：周氏双子争宠现场）" className="mb-3 h-9 rounded-xl border-0 bg-white/60 text-[12.5px]" />
+        <p className="mb-2 text-[10.5px] leading-relaxed text-muted-foreground">勾选 2 位以上角色拉进群；群里她们各自保持人设，还会记得和你私聊发生过的事。</p>
+        <div className="space-y-1.5">
+          {characters.map((c) => {
+            const on = sel.has(c.id);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => toggle(c.id)}
+                disabled={c.blocked}
+                className={`jelly-btn flex w-full items-center gap-2.5 rounded-2xl px-2.5 py-2 text-left transition-colors ${on ? "bg-primary/10" : "hover:bg-primary/5"} ${c.blocked ? "opacity-40" : ""}`}
+              >
+                <Avatar character={c} size={30} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">{displayName(c)}</span>
+                  <span className="block truncate text-[10.5px] text-muted-foreground">{c.blocked ? "已拉黑，不能进群" : (c.persona || "").slice(0, 24) || "未填人设"}</span>
+                </span>
+                <span className={`flex size-5 items-center justify-center rounded-full border ${on ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40"}`}>
+                  {on && <Check className="size-3" />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <Button className="jelly-btn mt-4 h-10 w-full rounded-full" onClick={() => onCreate(name, [...sel])} disabled={sel.size < 2}>
+          {sel.size >= 2 ? `创建群聊（${sel.size} 人）` : "至少选择 2 位角色"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /* ================= 会话列表（微信式） ================= */
 
 function ConversationList({
   characters,
+  groups,
   activeId,
   marks,
   generating,
   onSelect,
+  onSelectGroup,
+  onNewGroup,
   onNew,
   onImport,
   onDelete,
   onBack,
 }: {
   characters: Character[];
+  groups: GroupChat[];
   activeId: string;
   marks: ReadMarks;
   generating: boolean;
   onSelect: (id: string) => void;
+  onSelectGroup: (groupId: string) => void;
+  onNewGroup: () => void;
   onNew: () => void;
   onImport: () => void;
   onDelete: (id: string) => void;
@@ -2332,6 +2468,23 @@ function ConversationList({
     })
     .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
 
+  // 群条目混排：与私聊统一按最后一条消息时间排序；预览带"[群名] 发言人："前缀
+  type Row =
+    | { kind: "char"; at: number; c: Character; last: ChatEntry | null }
+    | { kind: "group"; at: number; g: GroupChat; last: ChatEntry | null };
+  const mixed: Row[] = [
+    ...rows.map(({ c, last }): Row => ({ kind: "char", at: last?.at ?? 0, c, last })),
+    ...groups.map((g): Row => {
+      const last = readGroupLast(g.id);
+      return { kind: "group", at: last?.at ?? 0, g, last };
+    }),
+  ].sort((a, b) => b.at - a.at);
+
+  const groupUnread = (g: GroupChat) => {
+    const seen = marks[`g:${g.id}`] ?? 0;
+    return readGroupLog(g.id).filter((e) => e.role === "assistant" && !e.groupTip && e.at > seen).length;
+  };
+
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="glass-nav flex items-center justify-between px-2 py-2">
@@ -2346,6 +2499,9 @@ function ConversationList({
               TA 们正在酝酿消息…
             </span>
           )}
+          <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onNewGroup} aria-label="发起群聊">
+            <Users className="size-4" />
+          </Button>
           <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onImport} aria-label="导入角色卡">
             <FileInput className="size-4" />
           </Button>
@@ -2355,43 +2511,90 @@ function ConversationList({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
-        {rows.length === 0 && (
+        {mixed.length === 0 && (
           <p className="pt-16 text-center text-xs text-muted-foreground">还没有会话，点右上角 + 新建或导入角色卡</p>
         )}
-        {rows.map(({ c, last }, i) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => onSelect(c.id)}
-            data-reveal-delay={String(i * 40)}
-            className={`reveal reveal-up jelly-btn group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-primary/5 ${
-              c.id === activeId ? "bg-primary/8" : ""
-            }`}
-          >
-            <Avatar character={c} size={44} status={c.proactiveEnabled ? "online" : "offline"} badge={unreadCount(c.id, marks)} />
-            <span className="min-w-0 flex-1">
-              <span className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-[13.5px] font-semibold">{displayName(c)}</span>
-                {last && <span className="shrink-0 text-[10px] text-muted-foreground">{fmtTime(last.at)}</span>}
-              </span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                {last ? last.content.replace(/\[表情:[^\]]*\]/g, "[表情]").split("\n")[0] : "开始和 TA 聊天吧"}
-              </span>
-            </span>
-            <span
-              role="button"
-              tabIndex={-1}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(c.id);
-              }}
-              className="hidden size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
-              aria-label={`删除 ${c.name}`}
+        {mixed.map((row, i) =>
+          row.kind === "char" ? (
+            <button
+              key={`c-${row.c.id}`}
+              type="button"
+              onClick={() => onSelect(row.c.id)}
+              data-reveal-delay={String(i * 40)}
+              className={`reveal reveal-up jelly-btn group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-primary/5 ${
+                row.c.id === activeId ? "bg-primary/8" : ""
+              }`}
             >
-              <X className="size-3.5" />
-            </span>
-          </button>
-        ))}
+              <Avatar character={row.c} size={44} status={row.c.proactiveEnabled ? "online" : "offline"} badge={unreadCount(row.c.id, marks)} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-[13.5px] font-semibold">{displayName(row.c)}</span>
+                  {row.last && <span className="shrink-0 text-[10px] text-muted-foreground">{fmtTime(row.last.at)}</span>}
+                </span>
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                  {row.last ? row.last.content.replace(/\[表情:[^\]]*\]/g, "[表情]").split("\n")[0] : "开始和 TA 聊天吧"}
+                </span>
+              </span>
+              <span
+                role="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(row.c.id);
+                }}
+                className="hidden size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
+                aria-label={`删除 ${row.c.name}`}
+              >
+                <X className="size-3.5" />
+              </span>
+            </button>
+          ) : (
+            <button
+              key={`g-${row.g.id}`}
+              type="button"
+              onClick={() => onSelectGroup(row.g.id)}
+              data-reveal-delay={String(i * 40)}
+              className="reveal reveal-up jelly-btn group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-primary/5"
+            >
+              {/* 群头像：前 3 位成员错位堆叠 */}
+              <span className="relative flex size-11 shrink-0 items-center justify-center">
+                {row.g.memberIds.slice(0, 3).map((mid, mi) => {
+                  const c = characters.find((x) => x.id === mid);
+                  if (!c) return null;
+                  const pos = [
+                    { left: 0, top: 1 },
+                    { left: 16, top: 1 },
+                    { left: 8, top: 17 },
+                  ][mi];
+                  return (
+                    <span key={mid} className="absolute" style={{ left: pos.left, top: pos.top }}>
+                      <Avatar character={c} size={22} />
+                    </span>
+                  );
+                })}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1">
+                    <Users className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="truncate text-[13.5px] font-semibold">{row.g.name}</span>
+                  </span>
+                  {row.last && <span className="shrink-0 text-[10px] text-muted-foreground">{fmtTime(row.last.at)}</span>}
+                </span>
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                  {row.last
+                    ? `${row.last.role === "assistant" && row.last.senderId ? `${displayName(characters.find((x) => x.id === row.last!.senderId) ?? ({ name: "TA" } as Character))}：` : ""}${row.last.content.replace(/\[表情:[^\]]*\]/g, "[表情]").split("\n")[0]}`
+                    : "拉上几个人一起聊吧"}
+                </span>
+              </span>
+              {groupUnread(row.g) > 0 && (
+                <span className="flex min-w-[16px] shrink-0 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold leading-4 text-white">
+                  {groupUnread(row.g) > 99 ? "99+" : groupUnread(row.g)}
+                </span>
+              )}
+            </button>
+          )
+        )}
       </div>
     </div>
   );
@@ -2859,39 +3062,6 @@ function LocationPanel({ disabled, onPick, onClose }: { disabled: boolean; onPic
         </button>
       </div>
     </div>
-  );
-}
-
-type DotStatus = "online" | "typing" | "offline";
-
-function Avatar({ character, size, status, badge }: { character: Character; size: number; status?: DotStatus; badge?: number }) {
-  const isImg = character.avatar.startsWith("data:") || character.avatar.startsWith("http");
-  return (
-    <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
-      <span
-        className="flex size-full items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-wallpaper-from to-wallpaper-to ring-1 ring-white/40"
-        style={{ fontSize: size * 0.55 }}
-      >
-        {isImg ? <img src={character.avatar} alt="角色头像" className="size-full object-cover" /> : character.avatar || "👤"}
-      </span>
-      {status && !badge && (
-        <span
-          className={`absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-white/80 ${
-            status === "online" ? "bg-success" : status === "typing" ? "bg-warning pulse-dot" : "bg-muted-foreground/50"
-          }`}
-          style={{ width: Math.max(7, size * 0.28), height: Math.max(7, size * 0.28) }}
-          aria-label={status === "online" ? "在线" : status === "typing" ? "正在输入" : "离线"}
-        />
-      )}
-      {!!badge && (
-        <span
-          className="absolute -right-1.5 -top-1.5 flex min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold leading-4 text-white shadow-sm"
-          aria-label={`${badge} 条未读`}
-        >
-          {badge > 99 ? "99+" : badge}
-        </span>
-      )}
-    </span>
   );
 }
 

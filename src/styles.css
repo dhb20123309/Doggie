@@ -153,6 +153,11 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* flex column 内容超高时禁止收缩（头像底座被压缩裁切=真机"人不见了"的根因） */
+.no-shrink {
+  flex-shrink: 0;
+}
+
 /* ===== 舞台 ===== */
 .stage-bg {
   background:

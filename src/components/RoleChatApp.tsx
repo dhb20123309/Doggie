@@ -867,11 +867,18 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           setView("chat");
         }}
         onImportWorld={(md, fileName) => {
-          const items = parseWorldBookMd(md, fileName.replace(/\.md$/i, "")).map((w) => ({
-            ...w,
-            id: `wb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-          }));
+          // 与世界书 App 导入同规则：重名加序号；depth 缺省即触发档，聊天时按关键词命中注入
+          const parsed = parseWorldBookMd(md, fileName.replace(/\.md$/i, ""));
+          const used = new Set(books.map((b) => b.name));
+          const items = parsed.map((w) => {
+            let name = w.name;
+            let n = 2;
+            while (used.has(name)) name = `${w.name} ${n++}`;
+            used.add(name);
+            return { ...w, name, id: `wb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}` };
+          });
           setBooks((prev) => [...prev, ...items]);
+          console.log(`[worldbook] import(count-view) count=${items.length}`);
           setView("list");
         }}
       />

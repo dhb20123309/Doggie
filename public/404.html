@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>虚拟手机模拟器</title>
+    <script>
+      // GitHub Pages 对未知路径返回 404 状态码但仍渲染本文件。
+      // 应用已改为 hash 路由（index.html#/...），这里只需把用户送回子应用根目录；
+      // 旧版本浏览器里残留的 path 型链接（如 /Doggie/?vpApp=chat）也能被救回。
+      (function () {
+        var l = window.location;
+        var i = l.pathname.indexOf("/Doggie");
+        var root = i >= 0 ? l.pathname.slice(0, i + 7) + "/" : "/";
+        // 保留查询参数（vpApp/vpDesk 等直达参数在 hash 前，仍会被应用读取）
+        l.replace(root + l.search + l.hash);
+      })();
+    </script>
+  </head>
+  <body>
+    正在返回应用…
+  </body>
+</html>

@@ -116,6 +116,7 @@ import { ToolboxButton, ToolboxMenu, ProfileDrawer, ProfileStandalonePage, Opene
 import { MaskPanel } from "./MaskPanel";
 import { parseCharacterCard, cardToCharacter, parseWorldBookMd } from "@/lib/import-parse";
 import { emitNotify } from "@/lib/notification-store";
+import { readVpParam } from "@/lib/vp-params";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, extractRemoteMarks, execRemoteMarks, answerRemoteConfirm, type McpAction } from "@/lib/reality-mcp";
 import { loadServers as loadRemoteServers, loadToolCache, callTool, buildRemoteMcpContext, hasMediumConsent, grantMediumConsent, type RemoteMcpServer } from "@/lib/remote-mcp";
 import { GroupChatView } from "@/components/GroupChatView";
@@ -227,7 +228,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const [view, setView] = useState<View>(() => {
     // 截图验收直达指定会话：?vpApp=rolechat&vpChar=<charId>（activeId 在 effect 里校正，见下）
     try {
-      const cid = new URLSearchParams(window.location.search).get("vpChar");
+      const cid = readVpParam("vpChar");
       if (cid) return "chat";
     } catch {
       /* ignore */
@@ -368,7 +369,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     if (view !== "chat" || characters.length === 0) return;
     let cid: string | null = null;
     try {
-      cid = new URLSearchParams(window.location.search).get("vpChar");
+      cid = readVpParam("vpChar");
     } catch {
       /* ignore */
     }

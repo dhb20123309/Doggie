@@ -34,8 +34,20 @@ interface Props {
   onSaveConfig: (cfg: AiConfig) => void;
 }
 
-/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App */
-const vpParams = new URLSearchParams(window.location.search);
+/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App
+ *  hash 路由后参数可能挂在 #/ 之后（#/Doggie/?vpApp=...），两处都取一次 */
+const vpParams = (() => {
+  const sp = new URLSearchParams(window.location.search);
+  const h = window.location.hash;
+  const q = h.indexOf("?");
+  if (q >= 0) {
+    new URLSearchParams(h.slice(q + 1)).forEach((v, k) => {
+      if (!sp.has(k)) sp.set(k, v);
+    });
+  }
+  console.log(`[vp-params] search=${window.location.search} hash=${h} merged=${sp.toString()}`);
+  return sp;
+})();
 
 export function PhoneShell({ config, onSaveConfig }: Props) {
   // 真机沉浸模式：隐藏自绘状态栏/灵动岛，顶部留白改走 safe-top

@@ -1,6 +1,6 @@
 // 手机内「世界书」应用：全局/局部设定条目 + 插入深度 + 文档一键导入 + 热梗世界书（300条预置）
 import { useRef, useState } from "react";
-import { ChevronLeft, Plus, Trash2, Globe, Lock, Check, Flame, FileUp } from "lucide-react";
+import { ChevronLeft, Clock, FileUp, Flame, Globe, Lock, Pin, Plus, Trash2, Waves, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,15 +31,52 @@ export const DEPTH_META: Record<0 | 1 | 2, { icon: string; label: string; tip: s
   2: { icon: "🌊", label: "深层", tip: "平时只以名字出现在目录里，AI 觉得需要时会主动申请查看全文" },
 };
 
+/** emoji 在部分浏览器缺字体渲染成豆腐块，徽章/按钮统一用 lucide 图标 */
+const DEPTH_ICON: Record<0 | 1 | 2, React.ComponentType<{ className?: string }>> = {
+  0: Pin,
+  1: Clock,
+  2: Waves,
+};
+function DepthBadge({ d, className }: { d: 0 | 1 | 2; className?: string }) {
+  const Icon = DEPTH_ICON[d];
+  return (
+    <span className={className}>
+      <Icon className="mr-1 inline size-2.5 align-[-1px]" />
+      {DEPTH_META[d].label}
+    </span>
+  );
+}
+
 export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
   const [books, setBooks] = useWorldBooks();
   const [editing, setEditing] = useState<WorldBook | null>(null);
   const [memeOpen, setMemeOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  // 管理模式：条目卡显示勾选框，支持全选/多选后一键改为全局或局部
+  const [managing, setManaging] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
 
   const save = (wb: WorldBook & { __del?: boolean }) => {
     setBooks((prev) => (wb.__del ? prev.filter((b) => b.id !== wb.id) : upsert(prev, wb)));
     setEditing(null);
+  };
+
+  const toggleManage = () => {
+    setManaging((v) => !v);
+    setSel(new Set());
+  };
+  const toggleSel = (id: string) =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const allSelected = books.length > 0 && sel.size === books.length;
+  const applyScope = (scope: "global" | "local") => {
+    setBooks((prev) => prev.map((b) => (sel.has(b.id) ? { ...b, scope } : b)));
+    console.log(`[worldbook] batch scope=${scope} count=${sel.size}`);
+    setSel(new Set());
   };
 
   if (onPick && boundIds) {
@@ -82,28 +119,84 @@ export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
         <Button variant="ghost" size="icon" className="jelly-icon size-8" onClick={onBack} aria-label="返回">
           <ChevronLeft className="size-5" />
         </Button>
-        <span className="text-sm font-semibold">世界书</span>
+        <span className="text-sm font-semibold">{managing ? `管理（已选 ${sel.size}）` : "世界书"}</span>
         <div className="flex">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="jelly-icon size-8 text-primary"
-            onClick={() => setImporting(true)}
-            aria-label="导入文档"
-          >
-            <FileUp className="size-5" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="jelly-icon size-8 text-primary"
-            onClick={() => setEditing({ id: `wb_${Date.now()}`, name: "", content: "", scope: "local", depth: 1 })}
-            aria-label="新建条目"
-          >
-            <Plus className="size-5" />
-          </Button>
+          {managing ? (
+            <Button size="sm" variant="ghost" className="jelly-btn h-8 rounded-full px-3 text-xs text-muted-foreground" onClick={toggleManage}>
+              退出
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="jelly-btn h-8 rounded-full px-2.5 text-xs text-primary"
+                onClick={toggleManage}
+                disabled={!books.length}
+                aria-label="管理模式"
+              >
+                管理
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="jelly-icon size-8 text-primary"
+                onClick={() => setImporting(true)}
+                aria-label="导入文档"
+              >
+                <FileUp className="size-5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="jelly-icon size-8 text-primary"
+                onClick={() => setEditing({ id: `wb_${Date.now()}`, name: "", content: "", scope: "local", depth: 1 })}
+                aria-label="新建条目"
+              >
+                <Plus className="size-5" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
+
+      {/* 管理工具条：全选 + 一键改全局/局部 */}
+      {managing && (
+        <div className="fade-up flex items-center gap-2 border-b border-border/60 bg-card/60 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setSel(allSelected ? new Set() : new Set(books.map((b) => b.id)))}
+            disabled={!books.length}
+            className="jelly-btn flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1 text-[11.5px] font-medium disabled:opacity-40"
+          >
+            <span className={`flex size-4 items-center justify-center rounded border ${allSelected ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
+              {allSelected && <Check className="size-3" />}
+            </span>
+            全选
+          </button>
+          <button
+            type="button"
+            onClick={() => applyScope("global")}
+            disabled={!sel.size}
+            className="jelly-btn flex items-center gap-1 rounded-full border border-success/40 bg-success/10 px-3 py-1 text-[11.5px] font-medium text-success disabled:opacity-40"
+          >
+            <Globe className="size-3.5" /> 改为全局
+          </button>
+          <button
+            type="button"
+            onClick={() => applyScope("local")}
+            disabled={!sel.size}
+            className="jelly-btn flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-3 py-1 text-[11.5px] font-medium text-warning disabled:opacity-40"
+          >
+            <Lock className="size-3.5" /> 改为局部
+          </button>
+          {!!sel.size && (
+            <button type="button" onClick={() => setSel(new Set())} className="jelly-icon ml-auto flex size-6 items-center justify-center rounded-full text-muted-foreground" aria-label="清空选择">
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
         {/* 热梗世界书入口：300 条网络流行梗，按触发词命中注入让角色接话更有活人感 */}
@@ -129,20 +222,26 @@ export function WorldBookApp({ onBack, boundIds, onPick }: Props) {
         )}
         {books.map((wb) => {
           const d = wb.depth ?? 1;
+          const checked = sel.has(wb.id);
           return (
             <button
               key={wb.id}
               type="button"
-              onClick={() => setEditing(wb)}
-              className="jelly-btn block w-full rounded-xl border border-border bg-card p-3 text-left"
+              onClick={() => (managing ? toggleSel(wb.id) : setEditing(wb))}
+              className={`jelly-btn block w-full rounded-xl border p-3 text-left ${
+                managing && checked ? "border-primary bg-primary/10" : "border-border bg-card"
+              }`}
             >
               <div className="flex items-center gap-1.5">
+                {managing && (
+                  <span className={`flex size-4.5 shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white"}`}>
+                    {checked && <Check className="size-3" />}
+                  </span>
+                )}
                 {wb.scope === "global" ? <Globe className="size-3.5 text-success" /> : <Lock className="size-3.5 text-warning" />}
                 <span className="text-[13px] font-semibold">{wb.name || "未命名设定"}</span>
                 <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-                    {DEPTH_META[d].icon} {DEPTH_META[d].label}
-                  </span>
+                  <DepthBadge d={d} className="rounded-full bg-primary/10 px-1.5 py-0.5 font-medium text-primary" />
                   {wb.scope === "global" ? "全局" : "局部"}
                 </span>
               </div>
@@ -273,18 +372,21 @@ function ImportPanel({
             <div className="rounded-xl border border-border bg-card p-3">
               <p className="mb-2 text-[12px] font-semibold">默认插入深度</p>
               <div className="flex gap-1.5">
-                {([0, 1, 2] as const).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDepth(d)}
-                    className={`jelly-btn flex-1 rounded-lg border py-1.5 text-[11px] font-medium ${
-                      depth === d ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary text-secondary-foreground"
-                    }`}
-                  >
-                    {DEPTH_META[d].icon} {DEPTH_META[d].label}
-                  </button>
-                ))}
+                {([0, 1, 2] as const).map((d) => {
+                  const Icon = DEPTH_ICON[d];
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDepth(d)}
+                      className={`jelly-btn flex flex-1 items-center justify-center gap-1 rounded-lg border py-1.5 text-[11px] font-medium ${
+                        depth === d ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary text-secondary-foreground"
+                      }`}
+                    >
+                      <Icon className="size-3" /> {DEPTH_META[d].label}
+                    </button>
+                  );
+                })}
               </div>
               <p className="mt-1.5 text-[10.5px] leading-relaxed text-muted-foreground">{DEPTH_META[depth].tip}</p>
             </div>
@@ -487,11 +589,12 @@ function BookEditor({
               key={s}
               type="button"
               onClick={() => setForm((f) => ({ ...f, scope: s }))}
-              className={`jelly-btn flex-1 rounded-lg border py-2 text-xs font-medium ${
+              className={`jelly-btn flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium ${
                 form.scope === s ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary text-secondary-foreground"
               }`}
             >
-              {s === "global" ? "🌍 全局生效" : "🔒 仅绑定角色"}
+              {s === "global" ? <Globe className="size-3.5" /> : <Lock className="size-3.5" />}
+              {s === "global" ? "全局生效" : "仅绑定角色"}
             </button>
           ))}
         </div>
@@ -506,18 +609,21 @@ function BookEditor({
         <div className="rounded-xl border border-border bg-card p-3">
           <p className="mb-2 text-[12px] font-semibold">插入深度</p>
           <div className="flex gap-1.5">
-            {([0, 1, 2] as const).map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, depth: d }))}
-                className={`jelly-btn flex-1 rounded-lg border py-1.5 text-[11px] font-medium ${
-                  (form.depth ?? 1) === d ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary text-secondary-foreground"
-                }`}
-              >
-                {DEPTH_META[d].icon} {DEPTH_META[d].label}
-              </button>
-            ))}
+            {([0, 1, 2] as const).map((d) => {
+              const Icon = DEPTH_ICON[d];
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, depth: d }))}
+                  className={`jelly-btn flex flex-1 items-center justify-center gap-1 rounded-lg border py-1.5 text-[11px] font-medium ${
+                    (form.depth ?? 1) === d ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary text-secondary-foreground"
+                  }`}
+                >
+                  <Icon className="size-3" /> {DEPTH_META[d].label}
+                </button>
+              );
+            })}
           </div>
           <p className="mt-1.5 text-[10.5px] leading-relaxed text-muted-foreground">{DEPTH_META[form.depth ?? 1].tip}</p>
           {(form.depth ?? 1) === 1 && (

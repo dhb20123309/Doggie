@@ -124,11 +124,13 @@ export async function streamCallReply(
   onSentence: (sentence: string) => void,
   onAllText: (full: string) => void,
   signal?: AbortSignal,
+  onFirstSentence?: () => void,
 ): Promise<string> {
   const history = callHistoryFor(ch.id);
   const msgs = buildCallMsgs(ch, books, text, observationText, history);
   console.log(`[call-reply] stream start char=${ch.id} histLen=${history.length}`);
   let emitted = 0; // 已吐给 onSentence 的字符位置
+  let firstSent = false; // 首句是否已回调（触发 onFirstSentence 一次）
   const BOUNDARIES = ["。", "！", "？", "!", "?", "\n"];
   const nextBoundary = (s: string, from: number) => {
     let best = -1;
@@ -145,7 +147,14 @@ export async function streamCallReply(
       if (idx < 0) break;
       const sentence = stripMarks(accumulated.slice(emitted, idx + 1)).replace(/\s+/g, " ").trim();
       emitted = idx + 1;
-      if (sentence) onSentence(sentence);
+      if (sentence) {
+        onSentence(sentence);
+        if (!firstSent) {
+          firstSent = true;
+          console.log(`[call-reply] first sentence ready len=${sentence.length}`);
+          onFirstSentence?.();
+        }
+      }
     }
   };
   let full: string;

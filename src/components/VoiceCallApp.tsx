@@ -88,7 +88,6 @@ export function VoiceCallApp({ config, onBack }: Props) {
   /* ---------- 队列播放器（ref 持有，供 startRec/runReply 等更早声明处安全引用，规避 TDZ） ---------- */
   const stopAllSpeakRef = useRef<() => void>(() => {});
   const enqueueSentenceRef = useRef<(text: string) => void>(() => {});
-  const markStreamEndRef = useRef<() => void>(() => {});
   const speakOneRef = useRef<(text: string, gen: number) => void>(() => {});
 
   /** 停止一切播报与排队：代际号作废 + 清空队列 + 停播释放 URL */
@@ -156,30 +155,37 @@ export function VoiceCallApp({ config, onBack }: Props) {
     })();
   };
 
-  /** LLM 吐出一句完整口语：autoSpeak 开启时立即入队/开播（首句先行，不等全文） */
+  /** LLM 吐出一句完整口语：autoSpeak 开启时立即入队/开播（首句先行，不等全文）。
+   *  gen 在入队时刻锁定：即使流式期间用户抢话自增了代际号，已排队的句子也不会用旧 gen 复活播放。 */
   enqueueSentenceRef.current = (sentence: string) => {
     if (!autoSpeak || !sentence.trim()) return;
     const gen = genRef.current;
     if (playingRef.current) {
       queueRef.current.push(sentence);
+      console.log(`[call-realtime] sentence queued gen=${gen} len=${sentence.length}`);
     } else {
       playingRef.current = true;
       speakOneRef.current(sentence, gen);
     }
   };
 
-  /** 全文流结束：若一句都没播过（极短回复无边界符），整段补一波；标记生成完毕 */
-  markStreamEndRef.current = () => {
-    // no-op 占位由 runReply 内部处理尾句，这里只负责收尾态
-  };
-
-  /** 兜底语音：STT/回复彻底失败时让 TA 口头接一句，电话不冷场（不入记忆） */
+  /** 兜底语音：STT/回复彻底失败时让 TA 口头接一句，电话不冷场（不入记忆）。
+   *  走统一入队口：正在播则排队、空闲则直接说——不自增代际号，否则会把进行中的回应整体作废。 */
   const speakFallback = (line: string) => {
     if (!autoSpeak) return;
-    if (playingRef.current) return;
-    const gen = ++genRef.current;
-    playingRef.current = true;
-    speakOneRef.current(line, gen);
+    console.log(`[call-realtime] fallback speech queued playing=${playingRef.current}`);
+    // 上一轮若已结束但播放器未复位，这里兜底复位，保证兜底句能立刻开口
+    if (playingRef.current && !speakAudioRef.current) {
+      playingRef.current = false;
+      queueRef.current = [];
+    }
+    const gen = genRef.current;
+    if (playingRef.current) {
+      queueRef.current.push(line);
+    } else {
+      playingRef.current = true;
+      speakOneRef.current(line, gen);
+    }
   };
 
   /* ---------- 录音链路 ---------- */
@@ -314,6 +320,9 @@ export function VoiceCallApp({ config, onBack }: Props) {
           enqueueSentenceRef.current(sentence);
         },
         () => undefined,
+        undefined,
+        // 每凑满一句就回调一次"是否已有成型句子"——首句就绪立刻切"开口了…"状态
+        () => { if (gen === genRef.current) setPhase((p) => (p === "thinking" ? "opening" : p)); },
       );
       if (gen !== genRef.current) {
         // 用户中途抢话：这半句话不进记忆
@@ -323,9 +332,11 @@ export function VoiceCallApp({ config, onBack }: Props) {
       }
       commitCallExchange(ch.id, text, reply);
       setCallTurns((prev) => prev.map((t) => (t === turn ? { ...t, reply: splitBubbles(reply), pending: false } : t)));
-      // 首句都没来得及播（无标点短回复/关了自动播报后又开）：整段补播
-      if (autoSpeak && !spokenAny) enqueueSentenceRef.current(reply.replace(/\r?\n/g, "，").trim());
-      markStreamEndRef.current();
+      // 首句都没来得及播（无标点短回复/流式中途被打断）：整段补播，确保"说完必有语音回应"
+      if (autoSpeak && !spokenAny) {
+        console.log(`[call-realtime] no sentence streamed, speak whole reply gen=${gen}`);
+        enqueueSentenceRef.current(reply.replace(/\r?\n/g, "，").trim());
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!retried && gen === genRef.current) {

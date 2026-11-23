@@ -56,6 +56,29 @@ export function VoiceCallApp({ config, onBack }: Props) {
   const queueRef = useRef<string[]>([]); // 待合成句子
   const playingRef = useRef(false); // 播放器占用标记
   const genRef = useRef(0); // 本轮代际号：打断/新轮次作废旧队列
+  // iOS/Safari 自动播放策略：Audio.play() 必须在用户手势的同步调用栈里。
+  // 做法：每次点按（开始/结束录音、挂断等）解锁一次静音通道，并记录"最近手势时刻"；
+  // 异步回调里到点的播放若超出手势窗口，改为暂存句子、等下一次点按续播（绝不静默丢声）。
+  const unlockRef = useRef<HTMLAudioElement | null>(null);
+  const lastGestureAtRef = useRef(0);
+  const pendingResumeRef = useRef<{ urls: string[]; gen: number } | null>(null);
+  const markGesture = () => {
+    lastGestureAtRef.current = Date.now();
+    try {
+      if (!unlockRef.current) {
+        const u = new Audio();
+        u.preload = "auto";
+        // 1 字节有效静音 wav（44 头 + 1 采样），data URL 加载不依赖网络
+        u.src =
+          "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+        unlockRef.current = u;
+      }
+      const u = unlockRef.current;
+      void u.play().then(() => u.pause()).catch(() => undefined);
+    } catch {
+      /* 解锁失败不影响主流程 */
+    }
+  };
   // ===== 观察层 =====
   const [observeOn] = usePersisted<boolean>("vp-phone:call-observe:v1", true);
   const [emotionOn] = usePersisted<boolean>("vp-phone:call-emotion:v1", false);
@@ -89,8 +112,58 @@ export function VoiceCallApp({ config, onBack }: Props) {
   const stopAllSpeakRef = useRef<() => void>(() => {});
   const enqueueSentenceRef = useRef<(text: string) => void>(() => {});
   const speakOneRef = useRef<(text: string, gen: number) => void>(() => {});
+  const tryResumeRef = useRef<() => void>(() => {});
 
-  /** 停止一切播报与排队：代际号作废 + 清空队列 + 停播释放 URL */
+  /** 手势窗口内尝试续播被系统拦下的句子 */
+  tryResumeRef.current = () => {
+    const p = pendingResumeRef.current;
+    if (!p) return;
+    if (Date.now() - lastGestureAtRef.current > 30_000) {
+      // 超窗作废：URL 必须释放，否则内存泄漏
+      p.urls.forEach((u) => URL.revokeObjectURL(u));
+      pendingResumeRef.current = null;
+      console.log("[call-realtime] pending audio expired (>30s gesture window)");
+      return;
+    }
+    pendingResumeRef.current = null;
+    if (p.gen !== genRef.current) {
+      // 已被抢话/新一轮作废：静默丢弃，不复活旧回应
+      p.urls.forEach((u) => URL.revokeObjectURL(u));
+      console.log("[call-realtime] pending audio stale gen, dropped");
+      return;
+    }
+    console.log(`[call-realtime] resume ${p.urls.length} pending url(s) within gesture`);
+    playingRef.current = true;
+    setTtsError("");
+    p.urls.forEach((url, i) => {
+      const a = new Audio(url);
+      if (i === 0) speakAudioRef.current = a;
+      a.onended = () => {
+        URL.revokeObjectURL(url);
+        if (i === p.urls.length - 1) {
+          playingRef.current = false;
+          speakAudioRef.current = null;
+          setPhase("idle");
+        }
+      };
+      a.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (i === p.urls.length - 1) {
+          playingRef.current = false;
+          speakAudioRef.current = null;
+          setPhase("idle");
+        }
+      };
+      void a.play().then(() => setPhase("speaking")).catch(() => {
+        URL.revokeObjectURL(url);
+        playingRef.current = false;
+        speakAudioRef.current = null;
+        setPhase("idle");
+      });
+    });
+  };
+
+  /** 停止一切播报与排队：代际号作废 + 清空队列 + 停播释放 URL + 丢弃待续播暂存 */
   stopAllSpeakRef.current = () => {
     genRef.current++;
     queueRef.current = [];
@@ -100,6 +173,11 @@ export function VoiceCallApp({ config, onBack }: Props) {
     if (speakUrlRef.current) {
       URL.revokeObjectURL(speakUrlRef.current);
       speakUrlRef.current = null;
+    }
+    if (pendingResumeRef.current) {
+      pendingResumeRef.current.urls.forEach((u) => URL.revokeObjectURL(u));
+      console.log("[call-realtime] pending resume dropped by stopAll");
+      pendingResumeRef.current = null;
     }
   };
 
@@ -142,8 +220,27 @@ export function VoiceCallApp({ config, onBack }: Props) {
           }
         };
         setPhase("speaking");
-        await a.play();
-        console.log(`[call-tts] play provider=${vc.provider} voice=${voiceId ?? "(默认)"} chars=${text.length}`);
+        try {
+          await a.play();
+          console.log(`[call-tts] play provider=${vc.provider} voice=${voiceId ?? "(默认)"} chars=${text.length}`);
+        } catch (playErr) {
+          // iOS/Safari NotAllowedError：异步回调里的手势窗口已过——合成好的音频不丢，
+          // 暂存起来等下一次点按（开始录音/TA说按钮）续播，同时给出明确引导。
+          const name = playErr instanceof DOMException ? playErr.name : "";
+          console.log(`[call-tts] play blocked name=${name}（转人工续播通道）`);
+          if (name === "NotAllowedError" || name === "AbortError") {
+            const bucket = pendingResumeRef.current?.gen === gen ? pendingResumeRef.current : { urls: [] as string[], gen };
+            bucket.urls.push(url);
+            pendingResumeRef.current = bucket;
+            speakUrlRef.current = null;
+            playingRef.current = false;
+            queueRef.current = [];
+            setPhase("idle");
+            setTtsError("系统拦截了自动播放：再点一下麦克风（或下面的「TA 再说一遍」），声音就接上了");
+            return;
+          }
+          throw playErr;
+        }
       } catch (e) {
         if (gen !== genRef.current) return;
         playingRef.current = false;
@@ -191,7 +288,10 @@ export function VoiceCallApp({ config, onBack }: Props) {
   /* ---------- 录音链路 ---------- */
 
   const startRec = async () => {
+    markGesture(); // 用户手势：解锁 iOS 播放通道 + 尝试续播被拦下的句子
+    tryResumeRef.current();
     setError("");
+    setTtsError("");
     stopPlayback();
     // 一键打断：TA 正在说/正在合成/排队中 → 全部作废，立刻可插话
     if (playingRef.current || phase === "hearing" || phase === "thinking" || phase === "opening") {
@@ -220,7 +320,11 @@ export function VoiceCallApp({ config, onBack }: Props) {
   };
 
   /** 手动或 60s 上限自动结束，统一走这里 */
-  const finishRec = async () => {
+  const finishRec = async (fromGesture = true) => {
+    if (fromGesture) {
+      markGesture();
+      tryResumeRef.current();
+    }
     const rec = recRef.current;
     recRef.current = null;
     setRecording(false);
@@ -265,7 +369,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
     }
     void runStt(result);
   };
-  const autoFinish = () => void finishRec();
+  const autoFinish = () => void finishRec(false);
 
   /** STT 转写：失败自动重试一次，仍失败 → 兜底语音接话 */
   const runStt = async (audio: RecordedAudio, retried = false) => {
@@ -366,10 +470,23 @@ export function VoiceCallApp({ config, onBack }: Props) {
   /** 手动"播一次"：整段一次性合成播放 */
   const startSpeakRef = useRef<(text: string) => void>(() => {});
   startSpeakRef.current = (text: string) => {
+    markGesture();
     stopAllSpeakRef.current();
     const gen = ++genRef.current;
     playingRef.current = true;
     speakOneRef.current(text, gen);
+  };
+
+  /** 被系统拦下时的"TA 再说一遍"：优先续播已合成好的音频（零等待、走手势栈），没有暂存才重新合成 */
+  const replayPending = () => {
+    markGesture();
+    if (pendingResumeRef.current?.urls.length) {
+      tryResumeRef.current();
+      setTtsError("");
+      return;
+    }
+    const last = callTurns[callTurns.length - 1];
+    if (last?.reply) startSpeakRef.current(last.reply.join("，"));
   };
 
   const playTake = () => {
@@ -404,6 +521,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
 
   /** 挂断：释放资源；若本通保留过录音，日志提示可在设置删除 */
   const hangup = () => {
+    markGesture();
     recRef.current?.cancel();
     stopAllSpeakRef.current();
     if (keepAudio) {
@@ -582,7 +700,13 @@ export function VoiceCallApp({ config, onBack }: Props) {
                       </div>
                     ))}
                     {ttsError && (
-                      <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[10px] leading-relaxed text-amber-700 ring-1 ring-amber-200/60">语音没放出来：{ttsError}</p>
+                      <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 ring-1 ring-amber-200/60">
+                        <p className="min-w-0 flex-1 text-[10px] leading-relaxed text-amber-700">{ttsError}</p>
+                        <button type="button" onClick={replayPending} className="jelly-btn shrink-0 flex items-center gap-1 rounded-full bg-white/85 px-2.5 py-1 text-[10px] font-medium text-amber-700 shadow-sm">
+                          <Volume2 className="size-3" />
+                          TA 再说一遍
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -683,7 +807,7 @@ export function VoiceCallApp({ config, onBack }: Props) {
         </button>
         <button
           type="button"
-          onClick={recording ? finishRec : startRec}
+          onClick={recording ? () => void finishRec() : startRec}
           disabled={!ch}
           className={`jelly-btn relative flex size-[76px] items-center justify-center rounded-full text-white shadow-lg transition-transform ${recording ? "bg-gradient-to-br from-rose-500 to-rose-600 shadow-rose-300/60" : "bg-gradient-to-br from-[oklch(0.72_0.14_75)] to-[oklch(0.6_0.13_70)] shadow-[0_10px_28px_-8px_rgba(190,150,80,0.7)]"} ${!ch ? "opacity-40" : ""}`}
           aria-label={recording ? "结束录音" : phase === "speaking" ? "打断并开始说话" : "开始录音"}

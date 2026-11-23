@@ -1,0 +1,30 @@
+[
+  {
+    "id": "r1",
+    "status": "completed",
+    "content": "ai-api.ts 流式能力（复用既有 chatStream，无需新增）",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "r2",
+    "status": "completed",
+    "content": "call-reply.ts 通话日志独立+streamCallReply首句先行",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "r3",
+    "status": "completed",
+    "content": "VoiceCallApp 队列播放器+状态机UI+打断+兜底语音",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "r4",
+    "status": "completed",
+    "content": "单测+双门禁+dev重启+AGENTS.md",
+    "priority": "high",
+    "skills": []
+  }
+]

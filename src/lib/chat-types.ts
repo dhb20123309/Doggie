@@ -47,6 +47,51 @@ export interface ChatEntry {
   blockedTip?: boolean;
   /** 引用的小消息（微信式 reply）：随本条消息一起发出并持久化；剧情灰框消息不可被引用 */
   quote?: { name: string; content: string };
+  /** 转账单（微信式橙色卡片）：type=transfer 待收/可点开详情；settled=已收/已退回，金额不再变动 */
+  transfer?: {
+    amount: number;
+    note: string;
+    from: "user" | "char";
+    type?: "incoming" | "outgoing";
+    settled?: "received" | "refunded";
+  };
+  /** 用户连发模式中的暂存消息：只上屏不触发回复，点「发送全部」或到期自动发出后才请求角色回复 */
+  queued?: boolean;
+}
+
+/** 连发等待模式的兜底自动发出时长：最后一条暂存消息超过 20 秒没动静就视为发完 */
+export const QUEUE_AUTO_FLUSH_MS = 20_000;
+
+/** 连发暂存条数上限 */
+export const QUEUE_MAX = 8;
+
+/** 把暂存连发条拼成发给模型的文本：每行一条，模型能看出是连着发的碎句 */
+export function joinQueuedMessages(entries: ChatEntry[]): string {
+  return entries.map((e) => e.content).join("\n");
+}
+
+/** AI 转账协议：拼入私聊链路 system。标记 [转账:金额:备注] 由 settleReply 拆成 transfer 卡片；
+ *  模型也可用自然语言"给你转了520"表达——调用方按最近用户消息是否含"收下/收到"等词现算结算。 */
+export const TRANSFER_PROTOCOL =
+  "\n【转账功能】你们之间可以互相发红包转账。想给对方转钱时，单独一行输出 [转账:金额:备注]（金额只写数字如 52.00，备注不超过10字），系统会渲染成微信式转账卡片，对方点卡片即可收下。" +
+  "对方转给你的钱你要有反应：开心就收下（可以说谢谢宝宝、请我喝奶茶之类），撒娇推辞或嫌少都符合人设；不要假装没看见。绝对不要用文字描述\"我收到了你的转账\"来代替真实收款——只有卡片被点击才算到账。";
+
+const TRANSFER_RE = /\[转账[:：]\s*(\d+(?:\.\d{1,2})?)\s*[:：]?\s*([^\]]*)\]/;
+
+/** 从 assistant 回复里拆出第一枚 [转账:金额:备注] 标记 → 金额/备注 + 去掉全部标记的干净文本 */
+export function extractTransfer(text: string): { amount: number; note: string; clean: string } | null {
+  const m = text.match(TRANSFER_RE);
+  if (!m) return null;
+  const amount = Math.round(Number(m[1]) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 52000) return null;
+  const clean = text.replace(new RegExp(TRANSFER_RE.source, "g"), "").replace(/\n{2,}/g, "\n").trim();
+  return { amount, note: (m[2] || "").trim().slice(0, 20) || "恭喜发财，大吉大利", clean };
+}
+
+/** 自然语言收款兜底：模型爱直接说"收下啦/转到我卡上了"——命中即视为收取最近一笔待收转账 */
+const RECEIVE_WORDS = /(收下|收了|领了|已收|到账|转入.{0,4}(成功|我)|打到我|转给我?了?\s*(我)?就收)/;
+export function looksLikeReceive(text: string): boolean {
+  return RECEIVE_WORDS.test(text);
 }
 
 /** AI 引用历史消息协议：拼入私聊链路 system（编号表由调用方现算追加）。
@@ -75,19 +120,25 @@ export interface SendPrefs {
   enterSendsText: boolean;
   /** 发完后自动生成回复：无草稿且停止输入 2 秒后触发（模式03） */
   autoReplyAfterSend: boolean;
+  /** 连发模式：开启后每条消息先暂存上屏（queued），点「发送全部」或 20 秒静默才真正发出并请求回复 */
+  batchQueueMode?: boolean;
 }
 
 export const DEFAULT_SEND_PREFS: SendPrefs = {
   sendReplacesGenerate: true,
   enterSendsText: true,
   autoReplyAfterSend: false,
+  batchQueueMode: false,
 };
 
 /** 模型出戏兜底：网关/模型偶尔返回"我是语言模型/AI助手"等 OOC 声明，直接丢弃不展示给用户 */
-const OOC_PATTERNS =
+export const OOC_PATTERNS =
   /语言模型|人工智能|(我是|作为)\s*(一个)?\s*(AI|文本|文字|虚拟)|文本\s*AI|文生?字?(机器|程序|软件)|无法(提供|回答|帮助|扮演|处理|满足)|没(办法|能)提供这方面|(我)?只(是|是个)\s*(一个)?\s*(文本|文字|虚拟|AI)|(超出|不在).{0,12}(范围|能力)|这超出|我没有.{0,8}(情感|意识)|程序(设定|限制)|违反.{0,8}(规定|政策|准则)/i;
 
+/** 转账/收款话术白名单：形似"收到…转账/已到账"的 OOC 兜底词在带 transfer 上下文的回复里放行（真人收钱就会说这些） */
+const MONEY_OK_RE = /(收到|领取|收下|转入|打款).{0,6}转账|转账.{0,6}(成功|已到账|已收取)|已(经)?到账|到账了|(钱|红包).{0,4}(收下|收了)/i;
 export function isOocLine(line: string): boolean {
+  if (MONEY_OK_RE.test(line)) return false;
   return OOC_PATTERNS.test(line);
 }
 

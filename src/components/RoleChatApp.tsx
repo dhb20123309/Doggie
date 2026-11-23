@@ -20,6 +20,8 @@ import {
   MoreVertical,
   Ban,
   Quote,
+  Banknote,
+  Coins,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +44,20 @@ import {
   displayName,
   QUOTE_PROTOCOL,
   extractQuote,
+  TRANSFER_PROTOCOL,
+  extractTransfer,
+  looksLikeReceive,
+  QUEUE_AUTO_FLUSH_MS,
+  QUEUE_MAX,
 } from "@/lib/chat-types";
+import {
+  useWallet,
+  readWallet,
+  walletUserSend,
+  walletCharSend,
+  walletUserReceive,
+  walletCharRestore,
+} from "@/lib/wallet-store";
 import {
   type WorldBook,
   type Sticker,
@@ -464,6 +479,116 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       {node}
     </MessageActions>
   );
+
+  // ===== 转账（微信式橙色卡片；余额 vp-phone:wallet:v1） =====
+  const [wallet, setWallet] = useWallet();
+  /** 转账编辑面板（输入框上方弹层） */
+  const [transferOpen, setTransferOpen] = useState(false);
+  /** 点开详情的转账单 id */
+  const [transferSheet, setTransferSheet] = useState<string | null>(null);
+
+  /** 用户发起转账：即时扣款入账 + 发一张 outgoing 卡片，随后请求角色回复（TA 会按协议对收钱作出反应） */
+  const sendTransfer = (amount: number, note: string) => {
+    if (!active || pending) return;
+    // 余额校验与扣款统一走 walletUserSend（内部直写 localStorage），避免 setWallet 快照覆盖双份扣款
+    if (!walletUserSend(active.id, amount, note, displayName(active))) {
+      console.warn(`[transfer] 余额不足 need=${amount} have=${readWallet().userBalance}`);
+      return;
+    }
+    setWallet(readWallet());
+    const story = Boolean(active.storyMode);
+    const userMsg: ChatEntry = {
+      id: `t${Date.now()}`,
+      role: "user",
+      content: `¥${amount.toFixed(2)}`,
+      at: Date.now(),
+      transfer: { amount, note, from: "user", type: "outgoing" },
+      ...(story ? { story: true } : {}),
+    };
+    setLog((prev) => [...prev, userMsg]);
+    writeLogNow(active.id, (prev) => [...prev, userMsg]);
+    setTransferOpen(false);
+    scrollBottom();
+    console.log(`[transfer] user → ${active.id} ¥${amount} "${note}"`);
+    void requestReply([...stateRef.current.log, userMsg], userMsg.id, story);
+  };
+
+  /** AI 回复里的转账标记 → incoming 卡片（挂账扣 TA 余额，等用户点收） */
+  const digestTransfer = (reply: string): { text: string; transfer?: ChatEntry["transfer"] } => {
+    const t = extractTransfer(reply);
+    if (!t) return { text: reply };
+    if (active) walletCharSend(active.id, t.amount, t.note);
+    console.log(`[transfer] char offered ¥${t.amount} "${t.note}" → 待用户点收`);
+    return { text: t.clean, transfer: { amount: t.amount, note: t.note, from: "char", type: "incoming" } };
+  };
+
+  /** 自然语言收款兜底：模型没写标记但话说"收下啦"——把最近一笔用户 outgoing 未结算卡视为已收 */
+  const settleIncomingByWords = (reply: string, entries: ChatEntry[]): boolean => {
+    if (!looksLikeReceive(reply)) return false;
+    const last = [...entries].reverse().find((e) => e.transfer?.type === "outgoing" && !e.transfer.settled);
+    if (!last) return false;
+    console.log(`[transfer] 自然语言收款命中 msg=${last.id}`);
+    writeLogNow(active?.id ?? "", (prev) => prev.map((e) => (e.id === last.id ? { ...e, transfer: { ...e.transfer!, settled: "received" } } : e)));
+    setLog((prev) => prev.map((e) => (e.id === last.id ? { ...e, transfer: { ...e.transfer!, settled: "received" } } : e)));
+    return true;
+  };
+
+  /** 用户点收下 incoming 卡片：入账 + 卡片置灰"已收到"（钱包直写 localStorage 后同步 React 快照） */
+  const receiveTransfer = (entry: ChatEntry) => {
+    if (!entry.transfer || entry.transfer.settled || !active) return;
+    walletUserReceive(active.id, entry.transfer.amount, entry.transfer.note, displayName(active));
+    setWallet(readWallet());
+    writeLogNow(active.id, (prev) => prev.map((e) => (e.id === entry.id ? { ...e, transfer: { ...e.transfer!, settled: "received" } } : e)));
+    setLog((prev) => prev.map((e) => (e.id === entry.id ? { ...e, transfer: { ...e.transfer!, settled: "received" } } : e)));
+    console.log(`[transfer] user received ¥${entry.transfer.amount} from ${active.id}`);
+  };
+
+  /** 用户退回 incoming 卡片：TA 挂账金额回滚 + 卡片"已退还" */
+  const refundTransfer = (entry: ChatEntry) => {
+    if (!entry.transfer || entry.transfer.settled || !active) return;
+    walletCharRestore(active.id, entry.transfer.amount);
+    setWallet(readWallet());
+    writeLogNow(active.id, (prev) => prev.map((e) => (e.id === entry.id ? { ...e, transfer: { ...e.transfer!, settled: "refunded" } } : e)));
+    setLog((prev) => prev.map((e) => (e.id === entry.id ? { ...e, transfer: { ...e.transfer!, settled: "refunded" } } : e)));
+    console.log(`[transfer] user refunded ¥${entry.transfer.amount} back to ${active.id}`);
+  };
+
+  // ===== 连发模式：暂存多条、全部发出后角色才回复一次 =====
+  const queuedEntries = log.filter((e) => e.queued);
+  const queueTimer = useRef<number | null>(null);
+  /** 真正发出暂存连发条：去 queued 标记落库，以最后一条为锚点请求回复 */
+  const flushQueue = () => {
+    if (!active || pending) return;
+    const q = stateRef.current.log.filter((e) => e.queued);
+    if (!q.length) return;
+    if (queueTimer.current) {
+      clearTimeout(queueTimer.current);
+      queueTimer.current = null;
+    }
+    const ids = new Set(q.map((e) => e.id));
+    const lastId = q[q.length - 1].id;
+    const story = Boolean(active.storyMode);
+    writeLogNow(active.id, (prev) => prev.map((e) => (ids.has(e.id) ? { ...e, queued: false } : e)));
+    const sent = stateRef.current.log.map((e) => (ids.has(e.id) ? { ...e, queued: false } : e));
+    setLog(sent);
+    console.log(`[queue] flush count=${q.length} anchor=${lastId} → 请求单次回复`);
+    void requestReply(sent, lastId, story);
+  };
+  // 静默兜底：最后一条暂存消息 QUEUE_AUTO_FLUSH_MS 无新增即视为发完，自动发出
+  useEffect(() => {
+    if (queueTimer.current) {
+      clearTimeout(queueTimer.current);
+      queueTimer.current = null;
+    }
+    if (view !== "chat" || !prefs.batchQueueMode) return;
+    const lastQ = [...log].reverse().find((e) => e.queued);
+    if (!lastQ || pending) return;
+    queueTimer.current = window.setTimeout(flushQueue, QUEUE_AUTO_FLUSH_MS);
+    return () => {
+      if (queueTimer.current) clearTimeout(queueTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [log, pending, view, prefs.batchQueueMode]);
   /** 深层世界书解锁表：charId → AI 已用 [查设定:名字] 申请过、下一轮起全文注入的条目名（内存态，不落库） */
   const unlockedIntroRef = useRef<Record<string, string[]>>({});
 
@@ -512,6 +637,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
         memeText +
+        TRANSFER_PROTOCOL +
         QUOTE_PROTOCOL +
         quoteTable +
         "\n\n" +
@@ -549,9 +675,21 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const ch = active;
     const cfgSnapshot = config;
     const sysPrompt = buildSys(ch, storyMode, memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "), storyMode ? "" : buildQuoteTable(ch, entries));
+    // 转账单描述注入：让模型看得见"待收/已收"卡片状态，才能自然地说收下或推辞
+    const transferCtx = (() => {
+      const list = entries.filter((e) => e.transfer && !e.failed);
+      if (!list.length) return "";
+      const lines = list.slice(-4).map((e) => {
+        const t = e.transfer!;
+        const state = t.settled === "received" ? "已收到" : t.settled === "refunded" ? "已退回" : t.type === "incoming" ? "待你（角色）点卡片收下" : "已由系统即时到账（你口头表示收下即可，别复述金额流程）";
+        return `- ${t.type === "incoming" ? `${ch.name || "TA"}转给你 ¥${t.amount.toFixed(2)}（备注：${t.note}）` : `你转给对方 ¥${t.amount.toFixed(2)}（备注：${t.note}）`}：${state}`;
+      });
+      return "\n【转账往来】\n" + lines.join("\n") + "\n（只有带标记的卡片才是真实转账；你说收钱必须用 [转账:金额:备注] 标记转出，收钱则对最近一笔待收做出反应）";
+    })();
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
-      if (!storyMode) return [{ role: "system", content: sysPrompt }, ...msgs.map((e) => ({ role: e.role, content: e.content }))];
+      const fmt = (e: ChatEntry) => (e.transfer ? `[转账卡片 ¥${e.transfer.amount.toFixed(2)} 备注:${e.transfer.note}${e.transfer.settled ? ` ${e.transfer.settled === "received" ? "已收" : "已退"}` : e.transfer.type === "incoming" ? " 待收" : ""}]` : e.content);
+      if (!storyMode) return [{ role: "system", content: sysPrompt + transferCtx }, ...msgs.map((e) => ({ role: e.role, content: fmt(e) }))];
       // 剧情链路：玩家消息带人称锚点包装（前文叙述转"你"），assistant 历史原样保留——记忆完整互通
       const out: { role: string; content: string }[] = [{ role: "system", content: sysPrompt }];
       let lastStoryNarration = "";
@@ -624,6 +762,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         let clean = result.ok ? digestIntroRequests(ch.id, sanitizeReply(result.reply)) : "";
         let quoted = clean ? digestQuote(clean, entries) : { text: "" };
         clean = quoted.text;
+        // 转账标记拆卡：[转账:金额:备注] → incoming 卡片（挂账待用户点收），正文只留 TA 说的话
+        const trans = clean && !storyMode ? digestTransfer(clean) : { text: clean };
+        clean = trans.text;
+        // 自然语言收款兜底：TA 没写标记但话说"收下啦"——最近一笔用户转账卡片自动置为已收
+        if (!trans.transfer && clean) settleIncomingByWords(clean, entries);
         let rep = false;
         if (clean && isRepetitiveReply(clean, recentAssistants)) {
           rep = true;
@@ -643,15 +786,16 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           if (again) {
             console.log(`[reply] regen ok char=${ch.id}`);
             const againDigest = digestQuote(digestIntroRequests(ch.id, again), entries);
-            settleReply(ch.id, userMsgId, againDigest.text, storyMode, againDigest.quote);
+            const againTrans = !storyMode ? digestTransfer(againDigest.text) : { text: againDigest.text, transfer: undefined };
+            settleReply(ch.id, userMsgId, againTrans.text, storyMode, againDigest.quote, againTrans.transfer);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
           }
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
-          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}`);
-          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote);
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}`);
+          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
@@ -665,13 +809,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
-  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }) => {
+  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"]) => {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
       // 只标记本次新产出的回复为剧情内容：历史消息的 story 标记原样保留（记忆互通）
       const kept = prev.map((e) => (e.id === userMsgId ? { ...e, failed: reply == null, ...(story ? { story: true } : {}) } : e));
-      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}) }] : kept;
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
     } catch {
@@ -694,6 +838,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     if (!text || pending || !ready) return false;
     const story = Boolean(active?.storyMode);
     const quote = quoteDraft ?? undefined;
+    // 连发模式：先暂存上屏（queued），不请求回复；「发送全部」或静默 20s 后统一发出
+    if (prefs.batchQueueMode && stateRef.current.log.filter((e) => e.queued).length < QUEUE_MAX) {
+      const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now(), queued: true, ...(quote ? { quote } : {}) };
+      setLog((prev) => [...prev, userMsg]);
+      writeLogNow(active?.id ?? "", (prev) => [...prev, userMsg]);
+      setInput("");
+      setQuoteDraft(null);
+      scrollBottom();
+      console.log(`[queue] staged msg=${userMsg.id} count=${stateRef.current.log.filter((e) => e.queued).length + 1} → 等待发完再回复`);
+      return true;
+    }
     const userMsg: ChatEntry = { id: `u${Date.now()}`, role: "user", content: text, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}) };
     // 先同步更新界面（用户气泡必须立刻出现），再直写该角色存储保证后台回复基于完整上下文；
     // 顺序反了会被后续 setLog(stored) 用旧快照覆盖掉刚发的消息（曾导致自己发的消息要退出重进才可见）
@@ -736,6 +891,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
 
   const generate = () => {
     if (pending || !active) return;
+    // 连发模式：有暂存条时"生成回复"按钮即发出全部暂存（连同草稿），发完才请求单次回复
+    if (prefs.batchQueueMode && log.some((e) => e.queued)) {
+      if (!ready) return;
+      if (input.trim()) flushDraft();
+      flushQueue();
+      return;
+    }
     // 拉黑彩蛋：消息发不出去，只回显微信式拒收提示（无需 API 配置也能演）
     if (active.blocked) {
       console.log(`[block] send rejected char=${active.id}`);
@@ -802,6 +964,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
     if (view !== "chat" || !prefs.autoReplyAfterSend || !ready || pending) return;
     if (input.trim()) return;
+    // 连发模式：暂存条不算"已发出"，倒计时不触发回复（由 flushQueue 统一请求）
+    if (prefs.batchQueueMode && log.some((e) => e.queued)) return;
     const last = log[log.length - 1];
     if (!last || last.role !== "user") return;
     // 兜底：若最后一条用户消息已发出超过 AUTO_DELAY_MS 仍未进入回复流程（如 effect 竞态漏触发），立即补发；
@@ -1259,16 +1423,21 @@ export function RoleChatApp({ config, background, onBack }: Props) {
               </div>
             );
           }
-          // 普通气泡挂长按/右键引用操作（剧情灰框在上面分支已 return，天然不可引用）
+          // 普通气泡挂长按/右键引用操作（剧情灰框在上面分支已 return，天然不可引用）；转账走橙色卡片不进气泡
           return entry.role === "user" ? (
             wrapCitable(
               entry,
               <div className="flex flex-col items-end gap-1">
                 {entry.quote && <QuoteBlock quote={entry.quote} side="right" />}
-                {entry.stickerUrl ? (
+                {entry.transfer ? (
+                  <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />
+                ) : entry.stickerUrl ? (
                   <img src={entry.stickerUrl} alt="表情" className="w-24 rounded-2xl shadow-md shadow-[var(--bubble-shadow)]" />
                 ) : (
                   <Bubble side="right">{entry.content}</Bubble>
+                )}
+                {entry.queued && (
+                  <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-[9.5px] text-muted-foreground">待发送 · 连发中</span>
                 )}
               <span className="msg-time pr-1">{fmtTime(entry.at)}</span>
               {entry.failed && !pending && (
@@ -1287,15 +1456,18 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           ) : (
             wrapCitable(
               entry,
-              <AssistantRow
-                entry={entry}
-                character={active}
-                stickerLib={stickers}
-                online={ready}
-                canSpeak={canSpeak}
-                speaking={voiceBusy === entry.id}
-                onSpeak={() => void speak(entry.id, entry.content)}
-              />
+              <div className="flex flex-col items-start gap-1">
+                <AssistantRow
+                  entry={entry}
+                  character={active}
+                  stickerLib={stickers}
+                  online={ready}
+                  canSpeak={canSpeak}
+                  speaking={voiceBusy === entry.id}
+                  onSpeak={() => void speak(entry.id, entry.content)}
+                />
+                {entry.transfer && <TransferCard entry={entry} charName={displayName(active)} onOpen={() => setTransferSheet(entry.id)} />}
+              </div>
             )
           );
         })}
@@ -1313,6 +1485,32 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       </div>
 
       <div className="glass-nav border-t border-white/50 px-3 py-2.5">
+        {/* 连发暂存条：待发数量 + 一键发送全部 */}
+        {queuedEntries.length > 0 && (
+          <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5">
+            <Coins className="size-3.5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-primary">
+              已暂存 {queuedEntries.length} 条，TA 发完后才回复
+            </span>
+            <button
+              type="button"
+              onClick={flushQueue}
+              disabled={!ready || pending}
+              className="jelly-btn h-6 shrink-0 rounded-full bg-primary px-3 text-[10.5px] font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              发送全部
+            </button>
+          </div>
+        )}
+        {/* 转账编辑面板 */}
+        {transferOpen && active && (
+          <TransferPanel
+            charName={displayName(active)}
+            balance={wallet.userBalance}
+            onSend={(a, n) => sendTransfer(a, n)}
+            onClose={() => setTransferOpen(false)}
+          />
+        )}
         {/* 引用条：待发引用显示在输入框上方，微信式浅灰小块 + 关闭按钮 */}
         {quoteDraft && (
           <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-1.5">
@@ -1344,13 +1542,26 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         )}
         <div className="flex items-center gap-2">
           <ToolboxButton open={toolboxOpen} onClick={() => setToolboxOpen((v) => !v)} />
+          <button
+            type="button"
+            onClick={() => {
+              console.log(`[transfer] open panel char=${active.id}`);
+              setTransferOpen((v) => !v);
+            }}
+            aria-label="转账"
+            className={`jelly-icon flex size-9 shrink-0 items-center justify-center rounded-full ${transferOpen ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-primary"}`}
+          >
+            <Banknote className="size-4.5" />
+          </button>
           <Input
             placeholder={
               !ready
                 ? "请先在设置中接入接口"
-                : prefs.sendReplacesGenerate
-                  ? `发给 ${active.name || "TA"}，点击即生成回复…`
-                  : `输入内容，${prefs.enterSendsText ? "回车" : "右侧按钮"}只发文字…`
+                : prefs.batchQueueMode
+                  ? `连发模式：${queuedEntries.length ? "继续写或点发送全部…" : "发的每条先暂存，说完一起发"}`
+                  : prefs.sendReplacesGenerate
+                    ? `发给 ${active.name || "TA"}，点击即生成回复…`
+                    : `输入内容，${prefs.enterSendsText ? "回车" : "右侧按钮"}只发文字…`
             }
             value={input}
             disabled={!ready || pending}
@@ -1370,6 +1581,38 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         </div>
       </div>
 
+      {/* 转账详情弹层：点卡片打开，微信式金额详情页，待收时提供收下/退还 */}
+      {transferSheet && (() => {
+        const e = log.find((x) => x.id === transferSheet);
+        if (!e?.transfer) return null;
+        const t = e.transfer;
+        return (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 p-8" onClick={() => setTransferSheet(null)}>
+            <div className="drawer-panel w-full max-w-[280px] rounded-2xl bg-white p-5 shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
+              <p className="text-center text-[11px] text-muted-foreground">{t.type === "incoming" ? `${displayName(active)} 转给你` : "你转出给 TA"}</p>
+              <p className="mt-2 text-center text-[26px] font-bold text-neutral-800">¥{t.amount.toFixed(2)}</p>
+              <p className="mt-1 text-center text-[11.5px] text-muted-foreground">备注：{t.note}</p>
+              <p className="mt-3 rounded-lg bg-orange-50 px-3 py-2 text-center text-[11px] text-orange-600">
+                {t.settled === "received" ? "已收到，金额已到账" : t.settled === "refunded" ? "已退还给对方" : t.type === "incoming" ? "待收款 · 24小时内未收将自动退回" : "已支付 · 对方收取中"}
+              </p>
+              {t.type === "incoming" && !t.settled ? (
+                <div className="mt-4 flex gap-2">
+                  <button type="button" onClick={() => { receiveTransfer(e); setTransferSheet(null); }} className="jelly-btn h-9 flex-1 rounded-xl bg-primary text-[12.5px] font-semibold text-primary-foreground">
+                    收下
+                  </button>
+                  <button type="button" onClick={() => { refundTransfer(e); setTransferSheet(null); }} className="jelly-btn h-9 flex-1 rounded-xl border border-border bg-secondary text-[12.5px] font-semibold text-secondary-foreground">
+                    退还
+                  </button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setTransferSheet(null)} className="jelly-btn mt-4 h-9 w-full rounded-xl bg-neutral-100 text-[12.5px] font-semibold text-neutral-600">
+                  关闭
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       {/* 拉黑彩蛋弹窗：TA 的挽留——只有"不拉黑了ovo"一个选项，点击即恢复正常 */}
       {blockedAsk && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 p-8">
@@ -1933,6 +2176,79 @@ function MessageActions({
   );
 }
 
+/** 转账卡片（微信式橙色渐变）：点击打开详情弹层；已收/已退后置灰显示状态 */
+function TransferCard({ entry, charName, onOpen }: { entry: ChatEntry; charName: string; onOpen: () => void }) {
+  const t = entry.transfer!;
+  const settled = t.settled;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`jelly-btn flex w-[210px] items-center gap-2.5 rounded-xl px-3 py-2.5 text-left shadow-md shadow-[var(--bubble-shadow)] transition-opacity ${
+        settled ? "bg-neutral-200 opacity-70" : "bg-gradient-to-br from-[#f5a623] to-[#f0862c]"
+      }`}
+    >
+      <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${settled ? "bg-neutral-300 text-neutral-500" : "bg-white/25 text-white"}`}>
+        <Banknote className="size-4" />
+      </span>
+      <span className="min-w-0">
+        <span className={`block truncate text-[12.5px] font-bold ${settled ? "text-neutral-500" : "text-white"}`}>¥{t.amount.toFixed(2)}</span>
+        <span className={`block truncate text-[9.5px] ${settled ? "text-neutral-400" : "text-white/80"}`}>
+          {settled === "received" ? "已收到" : settled === "refunded" ? "已退还" : t.type === "incoming" ? `${charName}的转账 · 点按收款` : "你发出的转账 · 待对方收取"}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/** 转账编辑面板：金额 + 快捷额 + 备注 + 余额显示，确认即发 */
+function TransferPanel({ charName, balance, onSend, onClose }: { charName: string; balance: number; onSend: (amount: number, note: string) => void; onClose: () => void }) {
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("恭喜发财，大吉大利");
+  const num = Number(amount);
+  const valid = Number.isFinite(num) && num > 0 && num <= 52000 && num <= balance;
+  return (
+    <div className="fade-up mb-2 rounded-2xl border border-border bg-white p-3 shadow-lg">
+      <div className="flex items-center justify-between">
+        <span className="text-[12px] font-semibold">转给 {charName}</span>
+        <button type="button" onClick={onClose} aria-label="关闭转账" className="jelly-icon flex size-5 items-center justify-center rounded-full text-muted-foreground">
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <div className="mt-2 flex items-baseline gap-1 border-b border-border pb-1.5">
+        <span className="text-[18px] font-bold text-neutral-700">¥</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          className="w-full bg-transparent text-[24px] font-bold text-neutral-800 outline-none placeholder:text-neutral-300"
+        />
+      </div>
+      <div className="mt-2 flex gap-1.5">
+        {[5.2, 52, 131.44, 520].map((v) => (
+          <button key={v} type="button" onClick={() => setAmount(String(v))} className={`jelly-btn flex-1 rounded-lg border py-1 text-[10.5px] font-medium ${Number(amount) === v ? "border-primary bg-primary/10 text-primary" : "border-border bg-secondary text-secondary-foreground"}`}>
+            ¥{v}
+          </button>
+        ))}
+      </div>
+      <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={20} placeholder="留言" className="mt-2 h-8 rounded-lg bg-muted/40 text-[11.5px]" />
+      <p className={`mt-1.5 text-[10px] ${num > balance ? "text-destructive" : "text-muted-foreground"}`}>
+        可用余额 ¥{balance.toFixed(2)}{num > balance ? " · 余额不足" : ""}
+      </p>
+      <button
+        type="button"
+        disabled={!valid}
+        onClick={() => onSend(Math.round(num * 100) / 100, note.trim() || "恭喜发财，大吉大利")}
+        className="jelly-btn mt-2 h-9 w-full rounded-xl bg-gradient-to-br from-[#f5a623] to-[#f0862c] text-[12.5px] font-semibold text-white disabled:opacity-40"
+      >
+        转账给 TA
+      </button>
+    </div>
+  );
+}
+
 type DotStatus = "online" | "typing" | "offline";
 
 function Avatar({ character, size, status, badge }: { character: Character; size: number; status?: DotStatus; badge?: number }) {
@@ -2006,6 +2322,7 @@ function PrefsEditor({ prefs, onSave, onCancel }: { prefs: SendPrefs; onSave: (p
     { key: "sendReplacesGenerate", label: "发送按钮代替生成按钮", desc: "开启后点发送直接请求回复（一问一答）；关闭则发送只发文字，另出现“生成回复”按钮。" },
     { key: "enterSendsText", label: "回车发送文字", desc: "开启后回车立即发出这条文字；关闭时回车不发，可连发多条后再点触发。" },
     { key: "autoReplyAfterSend", label: "发完后自动生成回复", desc: "输入框没有草稿且停止输入 2 秒后自动开始回复；期间继续输入或发新消息会重新等待。" },
+    { key: "batchQueueMode", label: "连发模式", desc: "开启后每条消息先暂存上屏（不触发回复），点「发送全部」或停止输入 20 秒视为说完，角色才统一回复一次。" },
   ];
 
   return (

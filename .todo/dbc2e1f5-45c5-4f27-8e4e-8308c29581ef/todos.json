@@ -1,30 +1,37 @@
 [
   {
-    "content": "chat-types.ts：ChatEntry 加 quote 字段 + QUOTE_PROTOCOL/extractQuote",
-    "id": "q1",
+    "content": "chat-types.ts：transfer/queued 字段 + 转账协议/解析器",
+    "id": "w1",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "RoleChatApp：长按操作条+引用条+用户消息带引用发出",
-    "id": "q2",
+    "content": "wallet-store.ts：余额与流水数据层",
+    "id": "w2",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "RoleChatApp：AI 引用链路（编号表注入 system、回复解析渲染 QuoteBlock）",
-    "id": "q3",
+    "content": "RoleChatApp：转账面板+卡片渲染+用户发起/AI 标记拆卡结算",
+    "id": "w3",
     "priority": "high",
     "skills": [],
-    "status": "completed"
+    "status": "in_progress"
   },
   {
-    "content": "双门禁 + extractQuote 冒烟测试 + 截图验收 + AGENTS.md",
-    "id": "q4",
+    "content": "RoleChatApp：连发模式（暂存多条、发完才回复）+ SendPrefs 开关",
+    "id": "w4",
     "priority": "high",
     "skills": [],
-    "status": "completed"
+    "status": "pending"
+  },
+  {
+    "content": "双门禁 + 冒烟测试 + 截图验收 + AGENTS.md",
+    "id": "w5",
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
   }
 ]

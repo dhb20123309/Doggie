@@ -1,0 +1,23 @@
+[
+  {
+    "content": "读取 10 份上传文档全文",
+    "id": "h1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "提炼合规协议并全局接入三条链路",
+    "id": "h2",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "双门禁 + AGENTS.md + 交付",
+    "id": "h3",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  }
+]

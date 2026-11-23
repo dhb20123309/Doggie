@@ -88,6 +88,13 @@ import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
+import {
+  ANTI_GREASE_BASELINE,
+  LIVING_PERSON_PROTOCOL,
+  TEXT_STYLE_PROTOCOL,
+  PROGRESSIVE_BOND_PROTOCOL,
+  NARRATIVE_NO_AI_FLAVOR,
+} from "@/lib/liveliness-worldbook";
 import { PRESET_MEME_BOOK } from "@/lib/meme-book-data";
 import { type MemeEntry, type MemePrefs, DEFAULT_MEME_PREFS, buildMemeSection } from "@/lib/meme-worldbook";
 import { useProfiles, presetProfileFor, parseProfileMd, type CharacterProfile } from "@/lib/character-profile";
@@ -620,6 +627,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           }\n` +
           STORY_PROTOCOL(ch.name || "他") +
           CHARACTER_FIDELITY +
+          // 第二批全局协议：反油腻底线+活人主体性+渐进交互（剧情共用），叙事去AI味仅剧情链路
+          ANTI_GREASE_BASELINE +
+          LIVING_PERSON_PROTOCOL +
+          PROGRESSIVE_BOND_PROTOCOL +
+          NARRATIVE_NO_AI_FLAVOR +
           worldText +
           memeText
         );
@@ -638,6 +650,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         HUMAN_TYPING_PROTOCOL +
         CHARACTER_FIDELITY +
         ONLINE_CHAT_ECONOMY +
+        // 第二批全局协议（私聊链路）：反油腻底线+活人主体性+渐进交互为共用层，打字说话风格仅私聊
+        ANTI_GREASE_BASELINE +
+        LIVING_PERSON_PROTOCOL +
+        PROGRESSIVE_BOND_PROTOCOL +
+        TEXT_STYLE_PROTOCOL +
         buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
@@ -1005,6 +1022,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         PROACTIVE_PROTOCOL.replace("{{char}}", ch.name || "TA") +
         // 《Ai恋人主动报备指令》by你闻起来像小猫：内容随机池八类+情绪过滤（她近期低落时屏蔽吐槽/炫耀/求助类）
         PROACTIVE_REPORT_POOL +
+        "\n注意：主动消息同样遵守反油腻底线与活人主体性——报备内容要像你真实生活里发生的事，条数与语气延续你当前状态。" +
         "\n\n" +
         pickTopicSeeds() +
         "\n请像日常手机聊天一样主动找对方说话（真人打字习惯协议照常执行）：每条最多 10 个字，超过就拆行发；条数参考上面【你的发送节奏】换着来，别总是同一个条数；只写说出口的话本身，绝对不要旁白、动作描写或解释；可以结合你们之前的聊天内容自然延续话题。";

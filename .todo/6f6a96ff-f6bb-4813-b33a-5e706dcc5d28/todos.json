@@ -15,35 +15,35 @@
   },
   {
     "id": "t3",
-    "status": "in_progress",
+    "status": "completed",
     "content": "自定义桌面图标（companion-store+HomeCarousel+SettingsApp）",
     "priority": "medium",
     "skills": []
   },
   {
     "id": "t4",
-    "status": "pending",
+    "status": "completed",
     "content": "音乐改回 mp3 逐行链接（media+SettingsApp+ShellApps）",
     "priority": "medium",
     "skills": []
   },
   {
     "id": "t5",
-    "status": "pending",
+    "status": "completed",
     "content": "AI 每日自动日记（companion-store+PhoneShell）",
     "priority": "medium",
     "skills": []
   },
   {
     "id": "t6",
-    "status": "pending",
+    "status": "completed",
     "content": "小剧场角色化+AI生成剧本（companion-store+CompanionApps）",
     "priority": "medium",
     "skills": []
   },
   {
     "id": "t7",
-    "status": "pending",
+    "status": "completed",
     "content": "双门禁+dev重启+截图验收+AGENTS.md",
     "priority": "high",
     "skills": []

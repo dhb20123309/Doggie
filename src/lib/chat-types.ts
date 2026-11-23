@@ -16,6 +16,8 @@ export interface Character {
   photoEnabled?: boolean;
   /** 主动消息开关：关闭后该角色不会不请自来 */
   proactiveEnabled?: boolean;
+  /** 主动消息频率：quiet=偶尔 / normal=现状默认 / active=黏人；影响闲置门槛、触发概率与连发条数 */
+  proactiveFreq?: "quiet" | "normal" | "active";
   /** 互动剧情模式（对标 Mufy）：开启后聊天走第三人称剧情链路，与普通私聊互通同一份记忆 */
   storyMode?: boolean;
   /** 会话备注名（微信式"设置备注和标签"，显示优先于角色本名） */

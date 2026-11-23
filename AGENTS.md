@@ -98,6 +98,8 @@
 
 - **表情发送挪到输入栏下方（第73轮）**：顶栏 SmilePlus 表情库按钮删除；输入栏下一行新增表情快捷条——左侧小 SmilePlus 图标仍可进整页表情库（setView("stickers")），右侧横滑最多 12 个全局表情缩略图（size-7），点一下即 sendSticker 发出，无全局表情时整条不渲染。日志 [sticker] quick send name=。
 
+- **主动消息频率可设置（第74轮）**：`chat-types.ts` Character 加 proactiveFreq?："quiet"|"normal"|"active"（缺省 normal=旧行为，老数据零迁移）。`RoleChatApp.tsx` PROACTIVE_FREQ 表=[闲置门槛,触发概率,每轮最多连发]：quiet(15min/35%/1条)、normal(60s/75%/2条)、active(30s/90%/3条)；定时器里按选中角色的档位取数。CharacterEditor「允许主动找我聊天」开关下方新增三档胶囊（仅开关打开时显示，附各档人话说明），onToggleFreq 写回 characters:v2。日志 [proactive] freq char= → 。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

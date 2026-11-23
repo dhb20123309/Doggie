@@ -138,11 +138,17 @@ const fmtTime = (at: number) => {
 
 const EMOJIS = ["🌙", "🦊", "🐱", "🤖", "🌸", "⚡", "🫧", "🍵", "🎧", "🪐", "🔥", "🎻"];
 const AUTO_DELAY_MS = 2000;
-/** 主动消息检查间隔 / 距上次会话内任何消息超过该时长即可能"不请自来" */
+/** 主动消息检查间隔 / 距上次会话内任何消息超过该时长即可能"不请自来"（频率档可覆盖闲置门槛与概率） */
 const PROACTIVE_CHECK_MS = 20_000;
 const PROACTIVE_IDLE_MS = 60_000;
 /** 每轮定时器最多连发几条，让角色更像连着碎碎念 */
 const PROACTIVE_MAX_PER_TICK = 2;
+/** 频率档 → [闲置门槛 ms, 触发概率, 每轮最多连发条数]：quiet 更克制、active 黏人 */
+const PROACTIVE_FREQ: Record<"quiet" | "normal" | "active", [number, number, number]> = {
+  quiet: [15 * 60_000, 0.35, 1],
+  normal: [PROACTIVE_IDLE_MS, 0.75, PROACTIVE_MAX_PER_TICK],
+  active: [30_000, 0.9, 3],
+};
 /** 自动分享照片：距上次照片至少间隔这么久，且触发主动消息时小概率附带一张 */
 const PHOTO_COOLDOWN_MS = 15 * 60_000;
 const PHOTO_CHANCE = 0.3;
@@ -1545,13 +1551,15 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       const candidates = characters.filter((c) => c.proactiveEnabled);
       if (!candidates.length) return;
       const ch = candidates[Math.floor(Math.random() * candidates.length)];
+      // 频率档：quiet/normal/active 决定闲置门槛、触发概率与连发条数（缺省 normal=旧行为）
+      const [idleMs, chance, maxPerTick] = PROACTIVE_FREQ[ch.proactiveFreq ?? "normal"];
       const last = readLastEntry(ch.id);
-      const idle = !last || Date.now() - last.at > PROACTIVE_IDLE_MS;
+      const idle = !last || Date.now() - last.at > idleMs;
       if (!idle) return;
-      if (Math.random() > 0.75) return; // 大部分检查都会触发，偶尔放过
+      if (Math.random() > chance) return; // 按档位概率放过本轮
       setProactiveBusy(true);
       try {
-        const count = 1 + Math.floor(Math.random() * PROACTIVE_MAX_PER_TICK);
+        const count = 1 + Math.floor(Math.random() * maxPerTick);
         for (let i = 0; i < count; i++) {
           if (cancelled) break;
           await fireOne(ch, i === 0 ? last : readLastEntry(ch.id));
@@ -1742,6 +1750,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         onCancel={() => setView(log.length ? "chat" : "list")}
         onOpenWorldBooks={() => setView("worldbooks")}
         onToggleProactive={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, proactiveEnabled: v } : x)))}
+        onToggleFreq={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, proactiveFreq: v } : x)))}
         onTogglePhoto={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, photoEnabled: v } : x)))}
         onToggleStory={(v) => {
           console.log(`[story] toggle char=${active.id} → ${v ? "剧情模式" : "普通聊天"}`);
@@ -3221,6 +3230,7 @@ function CharacterEditor({
   onCancel,
   onOpenWorldBooks,
   onToggleProactive,
+  onToggleFreq,
   onTogglePhoto,
   onToggleStory,
   onPickVoice,
@@ -3233,6 +3243,7 @@ function CharacterEditor({
   onCancel: () => void;
   onOpenWorldBooks: () => void;
   onToggleProactive: (v: boolean) => void;
+  onToggleFreq: (v: "quiet" | "normal" | "active") => void;
   onTogglePhoto: (v: boolean) => void;
   onToggleStory: (v: boolean) => void;
   onPickVoice: (id: string) => void;
@@ -3344,6 +3355,39 @@ function CharacterEditor({
               }}
             />
           </div>
+          {/* 主动消息频率：仅开关打开时可调 */}
+          {(form.proactiveEnabled ?? true) && (
+            <div className="rounded-xl bg-muted/40 px-2.5 py-2">
+              <p className="text-[11px] font-medium text-muted-foreground">TA 主动找我的频率</p>
+              <div className="mt-1.5 flex gap-1.5">
+                {([
+                  ["quiet", "偶尔想起我"],
+                  ["normal", "正常黏度"],
+                  ["active", "很黏人"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      console.log(`[proactive] freq char=${character.id} → ${key}`);
+                      setForm((f) => ({ ...f, proactiveFreq: key }));
+                      onToggleFreq(key);
+                    }}
+                    className={`jelly-btn flex-1 rounded-full px-2 py-1.5 text-[11px] font-medium transition-colors ${(form.proactiveFreq ?? "normal") === key ? "bg-primary text-primary-foreground shadow-sm" : "glass text-secondary-foreground"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                {(form.proactiveFreq ?? "normal") === "quiet"
+                  ? "闲够 15 分钟才可能冒泡，一次只发一条"
+                  : (form.proactiveFreq ?? "normal") === "active"
+                    ? "闲 30 秒就可能来找我，一轮最多连发三条碎碎念"
+                    : "闲置一分钟左右就可能不请自来，保持现在的节奏"}
+              </p>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <Label className="cursor-pointer text-[13px] font-semibold" htmlFor="photoSw">会分享写实日常照片</Label>
             <Switch

@@ -1,0 +1,113 @@
+# WebSearch 完整正文
+# query: gpt-image-2 OpenAI API images/generations model name 2026
+# index: 3
+
+创建图像
+post /images/generations
+ 使用 GPT Image 模型根据提示词创建图像。参阅 图像与视觉指南 。
+请求体参数
+ 内容类型为  application/json 。
+model: string or ImageModel
+ 用于图像生成的 GPT Image 模型，须显式指定。 支持的模型包括  gpt-image-1-mini 、 gpt-image-1.5 、 gpt-image-2 、  gpt-image-2-2026-04-21 、 gpt-image-2.5-sunburst 、  gpt-image-2.5-sunburst-2026-09-08 、 gpt-image-2.5-flare 、  gpt-image-2.5-flare-2026-09-08 、 gpt-image-2.6-sunburst 、 gpt-image-2.6-flare  和  chatgpt-image-latest 。
+gpt-image-1  已于 2026 年 10 月 23 日停用，请使用  gpt-image-2.5-sunburst  或  gpt-image-2.5-flare 。
+string
+ImageModel = "gpt-image-1.5" or "gpt-image-2" or "gpt-image-2-2026-04-21" or 11 more
+"gpt-image-1.5"
+"gpt-image-2"
+"gpt-image-2-2026-04-21"
+"gpt-image-2.5-sunburst"
+"gpt-image-2.5-sunburst-2026-09-08"
+"gpt-image-2.5-flare"
+"gpt-image-2.5-flare-2026-09-08"
+"gpt-image-2.6-sunburst"
+"gpt-image-2.6-flare"
+"gpt-image-1"
+"gpt-image-1-mini"
+"chatgpt-image-latest"
+"dall-e-2"
+"dall-e-3"
+prompt: string
+ 对所需图像的文本描述，最多 32000 个字符。
+background: optional "transparent" or "opaque" or "auto" or null (default: "auto")
+ 设置生成图像的背景。此参数仅适用于 GPT Image 模型，必须为  transparent 、 opaque  或  auto （默认 值）。使用  auto  时，模型会自动确定最合适的 图像背景。
+gpt-image-2.5-sunburst  and  gpt-image-2.5-flare , including their  2026-09-08  快照）支持  opaque  和  transparent  背景。支持此功能的 GPT Image 模型可使用透明背景。 gpt-image-2  和  gpt-image-2-2026-04-21  的此功能处于预览阶段。使用  transparent  时， 须将输出格式设为  png  或  webp 。
+"transparent"
+"opaque"
+"auto"
+complexity: optional "low" or "medium" or "high" or null
+ 用于规划图像的计算投入，独立于渲染质量。省略时使用图像模型配置的默认值。对于 SVG 输出，此项控制参考图像，独立于 SVG 编写模型的推理。
+"low"
+"medium"
+"high"
+frame_count: optional integer or null
+ GIF 输出的帧数，接受 2–16 的整数，省略时默认为 9。仅在 output_format=gif 时支持。请求尺寸须符合所选模型的 GIF 尺寸限制。GIF 输出不支持流式传输、部分图像、蒙版或自定义输出压缩，并要求具有所选模型的 GIF 预览权限。
+minimum: 2 ,  maximum: 16
+frame_duration_ms: optional integer or null
+ GIF 每帧的请求延迟，单位为毫秒，省略时默认为 200。GIF 输出会将延迟取整到最接近的 10 毫秒，每帧编码延迟上限为 655,350 毫秒。仅在 output_format=gif 时支持。
+minimum: 20
+moderation: optional "low" or "auto" or null (default: "auto")
+ 控制 GPT Image 模型生成图像的内容审核级别。可设为过滤限制较少的  low  或默认值  auto 。
+"low"
+"auto"
+n: optional integer or null (default: 1)
+ 生成图像的数量，范围为 1–10。
+minimum: 1 ,  maximum: 10
+output_compression: optional integer or null (default: 100)
+ 生成图像的压缩级别，范围为 0–100%。仅适用于 GPT Image 模型的  webp  或  jpeg  输出，默认为 100。
+output_format: optional "png" or "webp" or "jpeg" or 2 more or null (default: "png")
+ 生成图像的输出格式，此参数仅支持 GPT Image 模型。
+"png"
+"webp"
+"jpeg"
+"gif"
+"svg"
+partial_images: optional integer or null (default: 0)
+ 要生成的部分图像数量。此参数用于 返回部分图像的流式响应，值必须为 0–3。 设为 0 时，响应通过单个流式事件发送一张图像。
+ 如果完整图像生成得更快，最终图像可能会在全部请求的部分图像 生成之前发出。
+minimum: 0 ,  maximum: 3
+quality: optional "low" or "medium" or "high" or 5 more or null (default: "auto")
+ 要生成图像的质量。
+auto  (default value) will automatically select the best quality for the given 模型。 high ,  medium  and  low  are supported for the GPT image models. gpt-image-2.5-sunburst  and  gpt-image-2.5-flare , including their  2026-09-08  快照）还支持  xhigh  和  max 。
+"low"
+"medium"
+"high"
+"xhigh"
+"max"
+"auto"
+"standard"
+"hd"
+response_format: optional "url" or "b64_json" or null
+ 已停用图像模型的历史响应格式参数。GPT Image 模型不支持此参数，始终返回 Base64 编码的图像。
+"url"
+"b64_json"
+safety_identifier: optional string or null
+ 组织内终端用户的稳定标识，用于安全监测和滥用检测。可对用户名或电子邮箱做哈希，避免发送身份信息。非空值优先于已弃用的  user  参数。若省略、为 null 或为空，API 会使用可用的  user  值。参阅 安全标识说明 。
+maxLength: 128
+size: optional string or "auto" or "1024x1024" or "1536x1024" or 5 more or null (default: "auto")
+ 生成图像的尺寸。 gpt-image-2 、 gpt-image-2-2026-04-21 、 gpt-image-2.5-sunburst 、 gpt-image-2.5-sunburst-2026-09-08 、 gpt-image-2.5-flare  和  gpt-image-2.5-flare-2026-09-08  支持以  WIDTHxHEIGHT  字符串指定任意分辨率，例如  1536x864 。宽和高均须能被 16 整除，宽高比须在 1:3 至 3:1 之间。高于  2560x1440  的分辨率属于实验功能，支持的最高分辨率为  3840x2160 。尺寸还须符合模型当前的像素数与边长限制。GPT Image 模型支持标准尺寸  1024x1024 、 1536x1024  和  1024x1536 ；允许自动尺寸的模型支持  auto 。
+string
+"auto" or "1024x1024" or "1536x1024" or 5 more
+ 生成图像的尺寸。 gpt-image-2 、 gpt-image-2-2026-04-21 、 gpt-image-2.5-sunburst 、 gpt-image-2.5-sunburst-2026-09-08 、 gpt-image-2.5-flare  和  gpt-image-2.5-flare-2026-09-08  支持以  WIDTHxHEIGHT  字符串指定任意分辨率，例如  1536x864 。宽和高均须能被 16 整除，宽高比须在 1:3 至 3:1 之间。高于  2560x1440  的分辨率属于实验功能，支持的最高分辨率为  3840x2160 。尺寸还须符合模型当前的像素数与边长限制。GPT Image 模型支持标准尺寸  1024x1024 、 1536x1024  和  1024x1536 ；允许自动尺寸的模型支持  auto 。
+"auto"
+"1024x1024"
+"1536x1024"
+"1024x1536"
+"256x256"
+"512x512"
+"1792x1024"
+"1024x1792"
+stream: optional boolean or null (default: false)
+ 以流式模式生成图像，默认为  false 。详情参阅  图像生成指南 。 此参数仅适用于 GPT Image 模型。
+style: optional "vivid" or "natural" or null
+ 已停用图像模型的历史风格参数。GPT Image 模型不支持此参数，应在提示词中描述所需风格。
+"vivid"
+"natural"
+svg: optional object { model, reasoning } or null
+ 选择用于编写 SVG 输出的模型与推理强度。要求 output_format=svg，并具备 SVG 模型选择权限。启用模型选择时提供 svg.model，未启用时省略此对象。顶层 model 参数选择生成参考图像的图像模型。SVG 生成要求 n=1，不支持流式传输、部分图像、prompt_rewriter 或 output_compression。
+model: string
+ 编写 SVG 的模型。启用 SVG 模型选择时为必填。
+minLength: 1
+reasoning: optional object { effort } or null
+ SVG 编写模型的推理设置，独立于图像复杂度。effort 省略或为 null 时采用编写模型默认值。支持的强度取决于所选编写模型。
+effort: optional "none" or "minimal" or "low" or 4 more or null
+ 控制 

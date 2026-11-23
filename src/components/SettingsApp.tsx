@@ -10,7 +10,7 @@ import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, fetchMiniMaxVoices, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
-import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, type ImageConfig } from "@/lib/media";
+import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, GPT_IMAGE_MODELS, type ImageConfig } from "@/lib/media";
 
 interface Props {
   config: AiConfig;
@@ -403,11 +403,27 @@ function ImageSection() {
         </p>
       )}
       <Input
-        placeholder={form.mode === "pollinations" ? "模型名（选填，如 flux / turbo）" : "图像模型名（选填，如 gemini-image-free）"}
+        placeholder={form.mode === "pollinations" ? "模型名（选填，如 flux / turbo）" : "图像模型名（默认 gpt-image-2）"}
         value={form.model}
         onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
         className="h-9 rounded-lg glass-input text-[12px]"
       />
+      {form.mode === "openai" && (
+        <div className="flex flex-wrap gap-1.5">
+          {GPT_IMAGE_MODELS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, model: m }))}
+              className={`jelly-btn h-6 rounded-full px-2.5 text-[10.5px] font-medium ${
+                form.model === m ? "bg-primary text-primary-foreground" : "glass-input text-muted-foreground"
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2">
         <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={save}>
           {savedMsg ? "已保存" : "保存生图配置"}

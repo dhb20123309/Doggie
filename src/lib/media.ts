@@ -159,7 +159,11 @@ export interface ImageConfig {
 
 const IMG_KEY = "vp-phone:imageconfig:v1";
 
-export const DEFAULT_IMAGE_CONFIG: ImageConfig = { baseUrl: "", apiKey: "", mode: "openai", model: "" };
+/** 默认走 gpt-image-2（OpenAI 官方 /v1/images/generations 支持的模型名） */
+export const DEFAULT_IMAGE_CONFIG: ImageConfig = { baseUrl: "", apiKey: "", mode: "openai", model: "gpt-image-2" };
+
+/** gpt-image 系列快捷选项（自定义网关中转站同款命名） */
+export const GPT_IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-1.5"];
 
 export function loadImageConfig(): ImageConfig {
   try {
@@ -236,12 +240,15 @@ async function tryOpenAIImages(baseUrl: string, key: string, model: string, prom
   const base = normalizeBaseUrl(baseUrl);
   if (!base) return "";
   const candidates = /\/v\d+$/.test(base) ? [base] : [base, `${base}/v1`];
+  // gpt-image 系列只认 1024x1024 / 1024x1536 / 1536x1024 / auto；其他模型沿用旧尺寸
+  const isGptImage = /^gpt-image/i.test(model.trim());
+  const size = isGptImage ? "1024x1536" : "768x1024";
   for (const url of candidates) {
     try {
       const res = await fetch(`${url}/images/generations`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-        body: JSON.stringify({ prompt, n: 1, size: "768x1024", response_format: "b64_json", ...(model.trim() ? { model: model.trim() } : {}) }),
+        body: JSON.stringify({ prompt, n: 1, size, response_format: "b64_json", ...(model.trim() ? { model: model.trim() } : {}) }),
       });
       if (!res.ok) continue; // 该网关可能没有图像能力，换候选或回落
       const json = await res.json().catch(() => null);

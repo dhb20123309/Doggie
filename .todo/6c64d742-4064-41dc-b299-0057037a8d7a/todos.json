@@ -1,35 +1,28 @@
 [
   {
-    "content": "call-observe.ts：analyzeTake/summarizeObservation/情绪接口/IndexedDB缓存",
-    "id": "o1",
+    "content": "ai-api.ts 流式能力（复用既有 chatStream，无需新增）",
+    "id": "r1",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "call-reply.ts 注入观察文本+禁断言协议；VoiceConfig 增情绪接口字段",
-    "id": "o2",
+    "content": "call-reply.ts 通话日志独立+streamCallReply首句先行",
+    "id": "r2",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "VoiceCallApp 观察卡UI+保留录音按钮+runReply传观察",
-    "id": "o3",
+    "content": "VoiceCallApp 队列播放器+状态机UI+打断+兜底语音",
+    "id": "r3",
     "priority": "high",
-    "skills": [],
-    "status": "completed"
-  },
-  {
-    "content": "SettingsApp 新增 CallObserveSection（开关+删缓存）",
-    "id": "o4",
-    "priority": "medium",
     "skills": [],
     "status": "completed"
   },
   {
     "content": "单测+双门禁+dev重启+AGENTS.md",
-    "id": "o5",
+    "id": "r4",
     "priority": "high",
     "skills": [],
     "status": "completed"

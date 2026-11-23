@@ -1,12 +1,15 @@
-// 语音通话步骤C：把转写文本交给当前角色生成通话回复（复用聊天页同款协议与世界书，记忆互通同一份 rolechat-log）
+// 语音通话步骤C：转写文本交给当前角色生成通话回复。
+// ⚠️ 通话内容不写入私聊对话框——记忆走独立的 vp-phone:calllog:{charId}（每角色最近40条，重拨仍记得）；
+//    该角色从未通过电话时回落读一次私聊日志，让第一通电话 TA 也记得平时聊的事。
 import type { AiConfig } from "./types";
 import type { WorldBook } from "./worldbook";
-import { chatCompletion, type ChatMessage } from "./ai-api";
+import { chatCompletion, chatStream, type ChatMessage } from "./ai-api";
 import {
   CHAT_LIVENESS,
   displayName,
   isRepetitiveReply,
   sanitizeReply,
+  splitBubbles,
   type Character,
   type ChatEntry,
 } from "./chat-types";
@@ -15,7 +18,8 @@ import { getActiveWorldBooks, buildWorldSectionV2 } from "./worldbook";
 import { CHARACTER_FIDELITY } from "./adult-worldbook";
 import { LANGUAGE_PROTOCOL, ANTI_GREASE_BASELINE, LIVING_PERSON_PROTOCOL } from "./liveliness-worldbook";
 
-const LOG_PREFIX = "vp-phone:rolechat-log:";
+const CALL_LOG_PREFIX = "vp-phone:calllog:";
+const CALL_LOG_MAX = 40;
 
 /** 通话场景协议：口头交流≠打字碎句——不注入 HUMAN_TYPING/TEXT_STYLE/条数轮换，
  *  转账/外卖/表情等文字标记在通话里渲染不出来，也一并不注入。 */
@@ -46,31 +50,56 @@ export function buildCallSys(ch: Character, books: WorldBook[], recentText = "",
   );
 }
 
-/** 落库形态：assistant 一条回复按换行拆成多条气泡（与聊天页 splitBubbles 口径一致） */
-function toBubbles(reply: string): ChatEntry[] {
-  const lines = reply
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const items = lines.length ? lines : [reply.trim() || "…"];
-  const t = Date.now();
-  return items.map((content, i) => ({ id: `c${t}${i}`, role: "assistant" as const, content, at: t + i }));
+/* ---------- 通话独立记忆（不进私聊对话框） ---------- */
+
+export function readCallLog(charId: string): ChatEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(`${CALL_LOG_PREFIX}${charId}`) || "[]") as ChatEntry[];
+  } catch {
+    return [];
+  }
 }
 
-/** 请求角色对转写文本的通话回复：OOC 过滤 + 复读拦截重生成一次；失败抛错由界面展示人话原因。
- *  observationText：本轮通话观察（可选），拼入 system 供 TA 隐约感知停顿/语气，禁断言协议在文本内自带 */
-export async function requestCallReply(cfg: AiConfig, ch: Character, books: WorldBook[], text: string, observationText = ""): Promise<string> {
-  const history = readLastEntries(ch.id, 20).filter((e) => !e.failed && !e.transfer && !e.location && !e.order);
-  const sys = buildCallSys(ch, books, text, observationText);
-  const msgs: ChatMessage[] = [
-    { role: "system", content: sys },
+/** 通话往来落独立日志：assistant 一条回复按换行拆成多条气泡（与聊天页 splitBubbles 口径一致） */
+export function commitCallExchange(charId: string, userText: string, reply: string | null): void {
+  try {
+    const prev = readCallLog(charId);
+    const t = Date.now();
+    const bubbles = reply == null ? [] : splitBubbles(reply).map((content, i) => ({ id: `c${t}${i}`, role: "assistant" as const, content, at: t + i }));
+    const userEntry: ChatEntry = { id: `u${t}`, role: "user", content: userText, at: t };
+    if (reply == null) userEntry.failed = true;
+    const next: ChatEntry[] = [...prev, userEntry, ...bubbles].slice(-CALL_LOG_MAX);
+    localStorage.setItem(`${CALL_LOG_PREFIX}${charId}`, JSON.stringify(next));
+    console.log(`[call-reply] committed char=${charId} ok=${reply != null} bubbles=${bubbles.length}`);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+}
+
+/** 上下文来源：优先本通话日志最近20条；该角色从未通过电话时回落私聊日志最近12条（仅这一次） */
+function callHistoryFor(charId: string): ChatEntry[] {
+  const log = readCallLog(charId).filter((e) => !e.failed && !e.transfer && !e.location && !e.order);
+  if (log.length) return log.slice(-20);
+  return readLastEntries(charId, 12).filter((e) => !e.failed && !e.transfer && !e.location && !e.order);
+}
+
+/** 兜底剥除违规方括号标记（协议已禁，模型偶尔仍会带出来——语音念出"[转账:520]"会穿帮） */
+const stripMarks = (s: string) => s.replace(/\[(?:转账|定位|外卖|礼物|引用|表情|查设定|远程MCP)[:：][^\]]*\]/g, "").trim();
+
+function buildCallMsgs(ch: Character, books: WorldBook[], text: string, observationText: string, history: ChatEntry[]): ChatMessage[] {
+  return [
+    { role: "system", content: buildCallSys(ch, books, text, observationText) },
     ...history.map((e) => ({ role: e.role, content: e.content })),
     { role: "user", content: `（电话里 TA 说）${text}` },
   ];
-  console.log(`[call-reply] start char=${ch.id} histLen=${history.length} sysLen=${sys.length}`);
+}
+
+/** 请求角色对转写文本的通话回复（非流式，保留给回落场景）：OOC 过滤 + 复读拦截重生成一次 */
+export async function requestCallReply(cfg: AiConfig, ch: Character, books: WorldBook[], text: string, observationText = ""): Promise<string> {
+  const history = callHistoryFor(ch.id);
+  const msgs = buildCallMsgs(ch, books, text, observationText, history);
+  console.log(`[call-reply] start char=${ch.id} histLen=${history.length} sysLen=${msgs[0].content.length}`);
   let raw = await chatCompletion(cfg, msgs);
-  // 兜底剥除违规方括号标记（协议已禁，模型偶尔仍会带出来——语音念出"[转账:520]"会穿帮）
-  const stripMarks = (s: string) => s.replace(/\[(?:转账|定位|外卖|礼物|引用|表情|查设定|远程MCP)[:：][^\]]*\]/g, "").trim();
   let clean = sanitizeReply(stripMarks(raw));
   const recentAssistants = history.filter((e) => e.role === "assistant").slice(-6);
   if (!clean || isRepetitiveReply(clean, recentAssistants)) {
@@ -83,20 +112,61 @@ export async function requestCallReply(cfg: AiConfig, ch: Character, books: Worl
   return clean;
 }
 
-/** 通话往来写入该角色的聊天记录（记忆互通）：用户转写文本 + 角色回复都落 vp-phone:rolechat-log:{charId} */
-export function commitCallExchange(charId: string, userText: string, reply: string | null): void {
+/** 流式通话回复：onSentence 每凑满一句完整口语即回调（首句先行送 TTS，实现"及时语音回答"）。
+ *  onAllText 在全文确定后回调（供 OOC/复读整段校验）。
+ *  网关不支持 SSE 时自动回落非流式（onSentence 一次性收到全文）。 */
+export async function streamCallReply(
+  cfg: AiConfig,
+  ch: Character,
+  books: WorldBook[],
+  text: string,
+  observationText: string,
+  onSentence: (sentence: string) => void,
+  onAllText: (full: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const history = callHistoryFor(ch.id);
+  const msgs = buildCallMsgs(ch, books, text, observationText, history);
+  console.log(`[call-reply] stream start char=${ch.id} histLen=${history.length}`);
+  let emitted = 0; // 已吐给 onSentence 的字符位置
+  const BOUNDARIES = ["。", "！", "？", "!", "?", "\n"];
+  const nextBoundary = (s: string, from: number) => {
+    let best = -1;
+    for (const b of BOUNDARIES) {
+      const i = s.indexOf(b, from);
+      if (i >= 0 && (best < 0 || i < best)) best = i;
+    }
+    return best;
+  };
+  const pump = (accumulated: string) => {
+    // 从已吐出位置之后逐个找句子边界即切（流式逐句吐，首句先行送 TTS）
+    for (;;) {
+      const idx = nextBoundary(accumulated, emitted);
+      if (idx < 0) break;
+      const sentence = stripMarks(accumulated.slice(emitted, idx + 1)).replace(/\s+/g, " ").trim();
+      emitted = idx + 1;
+      if (sentence) onSentence(sentence);
+    }
+  };
+  let full: string;
   try {
-    const key = `${LOG_PREFIX}${charId}`;
-    const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
-    const t = Date.now();
-    const next: ChatEntry[] = [
-      ...prev,
-      { id: `u${t}`, role: "user", content: userText, at: t, ...(reply == null ? { failed: true } : {}) },
-      ...(reply != null ? toBubbles(reply) : []),
-    ];
-    localStorage.setItem(key, JSON.stringify(next));
-    console.log(`[call-reply] committed char=${charId} ok=${reply != null} bubbles=${reply != null ? next.length - prev.length - 1 : 0}`);
-  } catch {
-    /* 隐私模式忽略 */
+    full = await chatStream(cfg, msgs, pump, signal);
+  } catch (e) {
+    if (!(e instanceof Error) || e.message !== "STREAM_UNSUPPORTED") throw e;
+    console.log("[call-reply] 网关不支持流式，回落整段返回");
+    full = await chatCompletion(cfg, msgs, signal);
   }
+  const clean = sanitizeReply(stripMarks(full));
+  const recentAssistants = history.filter((e) => e.role === "assistant").slice(-6);
+  if (!clean || isRepetitiveReply(clean, recentAssistants)) {
+    console.warn(`[call-reply] stream ${clean ? "repetitive" : "OOC"}，重生成一次（非流式）`);
+    const again = await chatCompletion(cfg, [...msgs, { role: "user", content: "（系统提示：刚才那句被拦截了。这次用全新的说法接她的话，回到角色身份，不许提自己是模型或程序）" }], signal);
+    const retry = sanitizeReply(stripMarks(again));
+    if (!retry) throw new Error("TA 这次没能组织好语言（回复被安全过滤拦下），挂断重拨或换个话题试试");
+    onAllText(retry);
+    return retry;
+  }
+  onAllText(clean);
+  console.log(`[call-reply] stream ok char=${ch.id} len=${clean.length}`);
+  return clean;
 }

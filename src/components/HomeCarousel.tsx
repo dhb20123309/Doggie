@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, PhoneCall, Sparkles, UtensilsCrossed, SmilePlus } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
-import { useCharacters, unreadCount, useReadMarks } from "@/lib/chat-store";
+import { useCharacters, unreadCount, useReadMarks, presetPhoto } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
 import { ICON_URLS, AVATAR_BG, iconFor, useDiaries, useMemo, useBond, useProfile, HEART_LINES, seedDiaries } from "@/lib/companion-store";
 
@@ -99,6 +99,8 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   const [profile] = useProfile();
   const [diaries] = useDiaries();
   const activeId = localStorage.getItem("vp-phone:active-character:v1") || "";
+  // 与 useActiveCharId 同口径兜底：存储里的 id 失效（导入角色后删除等）时回落第一个角色，
+  // 否则真机旧数据上 ch=undefined，整个头像底座会被条件渲染隐藏（"人不见了"）
   const ch = characters.find((c) => c.id === activeId) ?? characters[0];
   const latest = diaries[0] ?? seedDiaries(ch?.id ?? "")[0];
   const hour = now.getHours();
@@ -118,17 +120,27 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
         </div>
       </div>
 
-      {/* 头像底座 */}
+      {/* 头像底座（真机旧数据兜底：无角色也渲染，预置角色缺头像回落定妆照；图片加载失败显示名字占位） */}
       <button type="button" onClick={() => onOpen("profile")} className="jelly-btn relative mx-auto mt-6 block w-full max-w-[240px] overflow-hidden rounded-[28px] border border-white/80 shadow-[0_4px_20px_rgba(180,150,90,0.12)]">
         <span className="absolute inset-0 bg-gradient-to-br from-[oklch(0.97_0.025_85)] via-[oklch(0.95_0.035_78)] to-[oklch(0.93_0.045_70)]" />
         <span className="relative flex items-center justify-center py-7">
           <span className="flex size-[110px] items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gradient-to-br from-[oklch(0.95_0.04_85)] to-[oklch(0.88_0.06_75)] shadow-[0_6px_18px_-6px_rgba(180,150,90,0.4)]">
-            {ch?.avatar?.startsWith("data:") || ch?.avatar?.startsWith("http") ? (
-              <img src={ch.avatar} alt="" className="size-full object-cover" />
-            ) : (
-              <span className="text-[46px] leading-none">{ch?.avatar || "💛"}</span>
-            )}
+            {(() => {
+              const id = ch?.id ?? "";
+              const src = ch?.avatar || presetPhoto(id);
+              const isImg = src.startsWith("data:") || src.startsWith("http");
+              if (!isImg) return <span className="text-[46px] leading-none">{src || "💛"}</span>;
+              return (
+                <img
+                  src={src}
+                  alt={ch?.name ?? "TA"}
+                  className="size-full object-cover"
+                  onError={() => console.warn(`[home-avatar] img load failed char=${id || "?"} src=${src.slice(0, 80)}`)}
+                />
+              );
+            })()}
           </span>
+          {!!ch && !ch.avatar && <span className="sr-only">{ch.name}</span>}
         </span>
       </button>
 

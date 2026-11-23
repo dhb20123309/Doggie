@@ -13,6 +13,7 @@ import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, fetchMiniMaxVoices, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
 import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, GPT_IMAGE_MODELS, type ImageConfig } from "@/lib/media";
 import { loadMcpPrefs } from "@/lib/reality-mcp";
+import { CloudAccountSection } from "@/components/CloudAccountSection";
 
 interface Props {
   config: AiConfig;
@@ -21,6 +22,8 @@ interface Props {
   onLock: () => void;
   notify: { on: boolean; setOn: (v: boolean | ((p: boolean) => boolean)) => void };
   onOpenMcp: () => void;
+  /** 打开云账号登录/注册全屏页（PhoneShell 层） */
+  onOpenAuth: () => void;
   wallpapers: {
     lockWp: string;
     homeWp: string;
@@ -39,7 +42,7 @@ const PROVIDERS = [
   { name: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
 ];
 
-export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp, wallpapers }: Props) {
+export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp, onOpenAuth, wallpapers }: Props) {
   const [form, setForm] = useState<AiConfig>(config);
   const [showKey, setShowKey] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
@@ -242,6 +245,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp,
         {result && <TestResultCard result={result} />}
 
         <PasscodeSection onLock={onLock} />
+        <CloudAccountSection onOpenAuth={onOpenAuth} />
         <NotificationSection notify={notify} />
         <McpEntryCard onOpen={onOpenMcp} />
         <WallpaperSection wallpapers={wallpapers} />

@@ -1,54 +1,16 @@
 [
   {
-    "content": "加载 meoo-cloud/meoo-cloud-auth 技能并读参考文档",
-    "id": "c0",
-    "priority": "high",
-    "skills": [
-      "meoo-cloud",
-      "meoo-cloud-auth"
-    ],
-    "status": "in_progress"
-  },
-  {
-    "content": "cloud init + 建 vp_snapshots 表/RLS + Storage 桶",
-    "id": "c1",
-    "priority": "high",
-    "skills": [
-      "meoo-cloud"
-    ],
-    "status": "pending"
-  },
-  {
-    "content": "auth 模板接入 + cloud-store.ts 快照层（图片抽取/备份/恢复）",
-    "id": "c2",
-    "priority": "high",
-    "skills": [
-      "meoo-cloud-auth",
-      "supabase-data-access"
-    ],
-    "status": "pending"
-  },
-  {
-    "content": "AuthSheet.tsx 登录/注册全屏页",
-    "id": "c3",
-    "priority": "high",
-    "skills": [
-      "meoo-cloud-auth"
-    ],
-    "status": "pending"
-  },
-  {
     "content": "SettingsApp 云端账号 Section + PhoneShell 引导卡/自动备份",
     "id": "c4",
     "priority": "high",
     "skills": [],
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "双门禁 + 测试账号验证备份恢复闭环 + AGENTS.md + 交付",
     "id": "c5",
     "priority": "medium",
     "skills": [],
-    "status": "pending"
+    "status": "in_progress"
   }
 ]

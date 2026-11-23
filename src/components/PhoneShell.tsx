@@ -17,6 +17,13 @@ import { DeliveryApp } from "./DeliveryApp";
 import { McpApp } from "./McpApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 import { onNotify, onOpenChat, requestOpenChat, useNotifyOn, type NotifyPayload } from "@/lib/notification-store";
+import { useAuth } from "@/features/supabase-auth-runtime";
+import { AuthSheet } from "./AuthSheet";
+import { CloudOnboard } from "./CloudOnboard";
+import { backupNow, installDirtyTracker, isAutoBackupOn, isDirty, readLastBackupAt } from "@/lib/cloud-store";
+
+const ONBOARD_KEY = "vp-pho…d:v1";
+const AUTO_GAP_MS = 30 * 60 * 1000; // 自动备份节流：距上次成功至少 30 分钟
 
 interface Props {
   config: AiConfig;
@@ -36,6 +43,41 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const [homeWp, setHomeWp] = useHomeWallpaper();
   const [chatBg, setChatBg] = useChatBackground();
   const [notifyOn, setNotifyOn] = useNotifyOn();
+  const { status: authStatus } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [onboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY));
+
+  // 云存档：安装写入脏标记监听 + 切后台/关页时按开关静默自动备份
+  useEffect(() => {
+    installDirtyTracker();
+    let ticking = false;
+    const autoBackup = () => {
+      if (ticking || !isAutoBackupOn() || !isDirty()) return;
+      if (Date.now() - readLastBackupAt() < AUTO_GAP_MS) return;
+      ticking = true;
+      void backupNow().then((r) => {
+        ticking = false;
+        console.log(`[cloud] auto backup ${r.ok ? "ok" : "skip"}${r.error ? ` (${r.error})` : ""}`);
+      });
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") autoBackup();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", autoBackup);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", autoBackup);
+    };
+  }, []);
+
+  // 登录成功后关闭登录页与引导卡
+  useEffect(() => {
+    if (authStatus === "authenticated") {
+      setAuthOpen(false);
+      setOnboard(false);
+    }
+  }, [authStatus]);
 
   // ===== 消息通知横幅：聊天页发事件 → 这里弹出 iOS 式顶部横幅，点按直达会话 =====
   const [banner, setBanner] = useState<NotifyPayload | null>(null);
@@ -174,6 +216,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                   onLock={lock}
                   notify={{ on: notifyOn, setOn: setNotifyOn }}
                   onOpenMcp={() => setScreen("mcp")}
+                  onOpenAuth={() => setAuthOpen(true)}
                   wallpapers={{ lockWp, homeWp, chatBg, setLockWp, setHomeWp, setChatBg }}
                 />
               )}
@@ -209,8 +252,22 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               className="absolute bottom-1.5 left-1/2 z-50 h-1.5 w-[110px] -translate-x-1/2 rounded-full backdrop-blur transition-colors hover:bg-black/40"
               style={{ backgroundColor: screen === "home" ? "oklch(1 0 0 / 0.5)" : "oklch(0.4 0.02 275 / 0.4)" }}
             />
+
+            {/* 云存档开机引导：未登录且没跳过时弹一次 */}
+            {onboard && authStatus === "anonymous" && (
+              <CloudOnboard
+                onLogin={() => setAuthOpen(true)}
+                onSkip={() => {
+                  localStorage.setItem(ONBOARD_KEY, "1");
+                  setOnboard(false);
+                }}
+              />
+            )}
           </>
         )}
+
+        {/* 云账号登录/注册全屏页（盖在锁屏与桌面之上） */}
+        {authOpen && <AuthSheet onDone={() => setAuthOpen(false)} onClose={() => setAuthOpen(false)} />}
       </div>
     </div>
   );

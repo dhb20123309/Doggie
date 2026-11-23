@@ -1,6 +1,7 @@
 // 根布局：Provider 放这里；页面路由在 src/routes/ 下单独建文件，勿堆进 index.tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
+import { AuthProvider } from '@/features/supabase-auth-runtime';
 import {
   Outlet,
   Navigate,
@@ -34,7 +35,9 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem storageKey="meoo-theme">
-        <Outlet />
+        <AuthProvider>
+          <Outlet />
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

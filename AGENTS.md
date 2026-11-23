@@ -46,6 +46,8 @@
 
 - **手机全屏自适应（第44轮）**：PhoneShell 机身响应式双形态——<640px（H5/真手机）时 phone-frame 铺满视口（h-full w-full、去圆角边框侧键，stage p-0）；≥sm 桌面时保持模拟机身（屏幕 `h-[min(720px,calc(100dvh-56px))]`×`w-[min(360px,calc(100dvw-48px))]` 随窗口伸缩，上限比旧 660px 更大）。index.tsx stage 改 h-full+sm:p-6。内部各 App 均 h-full 自适应无需改动。
 
+- **世界书一键导入 + 插入深度（第45轮）**：`worldbook.ts` WorldBook 加 depth(0常驻/1触发默认/2深层，旧存档缺省=1)与 keywords[]；autoKeywords 只统计 `[\p{Script=Han}]{2,}` 纯汉字滑窗高频片段（❌ 全字符滑窗会把中英混排文本切成 user/use/er 碎片），短条目无重复词时兜底取正文首个汉字段前缀；buildWorldSectionV2(books, recentText, requestedNames) 三段拼接=常驻全文+触发命中全文（子串或≥2字公共片段双向匹配 shares()）+深层目录（≤20条带 [查设定:名字] 申请指令）；extractIntroRequests 消化标记。parseDocxBuffer 用 jszip 浏览器端解 word/document.xml（pStyle Heading*/Title、整段加粗≤30字、"第X章/数字序号"行视为标题分节）。WorldBookApp 顶栏 FileUp 导入按钮→ImportPanel（文件选择/预览勾选/统一深度三档/重名加序号、上限50条）；列表卡显示深度徽章+触发词；BookEditor 深度三档+触发词 Input(onBlur 手改)。RoleChatApp：buildSys 第四参 recentText（最近3条消息 join），toHistory/requestReply/fireOne 均传入；unlockedIntroRef 内存解锁表，digestIntroRequests 在 settleReply 落库前与主动消息 line 处理处调用（渲染层零改动）。日志 [worldbook] section resident/triggered/unlocked/catalog、deep request、import parsed/count。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

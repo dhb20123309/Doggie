@@ -44,7 +44,8 @@ import {
   type WorldBook,
   type Sticker,
   getActiveWorldBooks,
-  buildWorldSection,
+  buildWorldSectionV2,
+  extractIntroRequests,
   buildStickerHint,
   parseReplyToMessages,
 } from "@/lib/worldbook";
@@ -360,21 +361,35 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   const stateRef = useRef({ log, input, pending, ready, prefs });
   stateRef.current = { log, input, pending, ready, prefs };
   const autoTimer = useRef<number | null>(null);
+  /** 深层世界书解锁表：charId → AI 已用 [查设定:名字] 申请过、下一轮起全文注入的条目名（内存态，不落库） */
+  const unlockedIntroRef = useRef<Record<string, string[]>>({});
 
-  /** 每次请求现算：人设 + 生效世界书 + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL。
+  /** 消化回复里的 [查设定:名字] 标记：登记解锁 + 返回去掉标记的干净文本 */
+  const digestIntroRequests = (charId: string, text: string): string => {
+    const { clean, names } = extractIntroRequests(text, books);
+    if (names.length) {
+      const cur = unlockedIntroRef.current[charId] ?? [];
+      unlockedIntroRef.current[charId] = [...new Set([...cur, ...names])];
+      console.log(`[worldbook] deep request char=${charId} ${names.join("、")} → 已解锁`);
+    }
+    return clean;
+  };
+
+  /** 每次请求现算：人设 + 生效世界书（按插入深度分层） + 表情名单 → system prompt；剧情模式换拼 STORY_PROTOCOL。
    * memeText：热梗世界书命中片段（由调用方按"本轮用户消息"现算，剧情/私聊两条链路共用注入位） */
   const buildSys = useCallback(
-    (ch: Character, story: boolean, memeText = "") => {
+    (ch: Character, story: boolean, memeText = "", recentText = "") => {
       const activeBooks = getActiveWorldBooks(ch.id, books, ch.boundWorldBookIds ?? []);
       const usable = stickers.filter((s) => s.isGlobal);
+      const worldText = buildWorldSectionV2(activeBooks, recentText, unlockedIntroRef.current[ch.id] ?? []);
       if (story) {
-        // 互动剧情：第三人称小说链路——保留完整历史记忆，不注入私聊气泡式铁律与表情名单
+        // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单
         return (
           `你正在以小说叙事者视角演绎一段互动剧情，男主角为「${ch.name || "无名角色"}」。\n男主设定：${
             ch.persona || "无额外设定"
           }\n` +
           STORY_PROTOCOL(ch.name || "他") +
-          buildWorldSection(activeBooks) +
+          worldText +
           memeText
         );
       }
@@ -392,7 +407,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         HUMAN_TYPING_PROTOCOL +
         buildCountHint(recentCounts) +
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
-        buildWorldSection(activeBooks) +
+        worldText +
         memeText +
         "\n\n" +
         buildStickerHint(usable)
@@ -408,7 +423,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   };
 
   const toHistory = (ch: Character, entries: ChatEntry[]) => [
-    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries)) },
+    { role: "system", content: buildSys(ch, Boolean(ch.storyMode), memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" ")) },
     ...entries.filter((e) => !e.failed).slice(-20).map((e) => ({ role: e.role, content: e.content })),
   ];
 
@@ -428,7 +443,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     // 快照请求上下文：回复在后台继续，退出聊天页/切换会话也不会打断（结果直写该角色存储）
     const ch = active;
     const cfgSnapshot = config;
-    const sysPrompt = buildSys(ch, storyMode, memeFor(entries));
+    const sysPrompt = buildSys(ch, storyMode, memeFor(entries), entries.filter((e) => !e.failed).slice(-3).map((e) => e.content).join(" "));
     const toHist = (es: ChatEntry[]) => {
       const msgs = es.filter((e) => !e.failed).slice(-20);
       if (!storyMode) return [{ role: "system", content: sysPrompt }, ...msgs.map((e) => ({ role: e.role, content: e.content }))];
@@ -501,7 +516,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           }
           return firstTry.v;
         };
-        let clean = result.ok ? sanitizeReply(result.reply) : "";
+        let clean = result.ok ? digestIntroRequests(ch.id, sanitizeReply(result.reply)) : "";
         let rep = false;
         if (clean && isRepetitiveReply(clean, recentAssistants)) {
           rep = true;
@@ -520,7 +535,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           );
           if (again) {
             console.log(`[reply] regen ok char=${ch.id}`);
-            settleReply(ch.id, userMsgId, again, storyMode);
+            settleReply(ch.id, userMsgId, digestIntroRequests(ch.id, again), storyMode);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
@@ -702,7 +717,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       // 剧情模式下角色不"不请自来"发私聊式碎句——主动 tick 跳过带 storyMode 的角色
       if (ch.storyMode) return;
       const sys =
-        buildSys(ch, false, memeFor(last ? [last] : [])) +
+        buildSys(ch, false, memeFor(last ? [last] : []), last?.content ?? "") +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
         (ch.name || "TA") +
         "）主动想找对方说话。" +
@@ -734,6 +749,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         line = lines?.length ? lines[Math.floor(Math.random() * lines.length)] : "";
       }
       if (cancelled) return;
+      line = digestIntroRequests(ch.id, line);
       line = line
         .split(/\r?\n/)
         .map((s) => s.trim())

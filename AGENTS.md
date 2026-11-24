@@ -122,6 +122,8 @@
 
 - **bundle 同步链路三轮排障实录（第89-91轮，用户本地 DHB20123309/Doggie）**：①git 身份未配置 → "Committer identity unknown"，pull 合并提交失败；②沙箱 main 与 GitHub main 历史分叉（远端有 8 个用户本地"发布线"提交不在沙箱史：f843c7d 清理/.9c48272 Pages部署/e82727f 真机沉浸/dd9da10 头像兜底/9dc8f2a App5个/d08d96d ci自检/607bf53 hash路由/c250074 Dock上移）→ 沙箱 git fetch github main + merge（index.html 冲突取 viewport-fit+禁缓存meta 并立、AGENTS.md modify/delete 保留沙箱版、.plan 按远端规则 rm --cached），merge-base --is-ancestor FETCH_HEAD main 验证 FF_OK 后才导 bundle；③sync.bat UTF-8 中文被 cmd GBK 码页咬断命令行（'--ff-only'→'f-only'）→ 脚本必须纯 ASCII（node 校验 non-ascii=0）；④用户本地残留未完成 merge（unmerged files）→ sync.bat v2 先检测 .git\MERGE_HEAD 自动 merge --abort，另备 reset.bat（merge --abort + fetch bundle + reset --hard FETCH_HEAD + clean -fd）作最后手段。诊断入口优先 curl GitHub API：/repos/.../commits/main 对比沙箱 HEAD、/actions/runs 看部署结论。⚠️ 教训：Pages"没同步"先查 push 是否真的成功过（API commits），不要猜缓存。
 
+- **生图"站点有调用但聊天无图"排查（第92轮）**：请求确实发出（网关计费记录为证），断点在 tryOpenAIImages 响应消化——旧代码只认 `data[0].url/b64_json`，中转站私有字段（顶层 url/images/result.url/output[]、data[0].image、b64_json 变体）全部静默丢弃。修复：①兼容五类出图字段（含 >1024 长度校验防误吞错误串）；②全路径日志：非 2xx 打 `[photo] gateway {status} body前200字`、JSON 解析失败打 not-json、200 无图字段打 keys 清单、每种成功形态打 `gateway ok <来源>`——下次再出现直接看日志定位是网关报错还是格式问题。⚠️ 坑记：`.find()` 联合类型需 `(v): v is string =>` 谓词否则 TS 推不出 string；bundle 导出必须确认 commit 真的产生（git log 核对哈希），沙箱曾出现组合命令中断导致 bundle 停在旧 HEAD。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

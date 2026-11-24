@@ -255,6 +255,38 @@ export async function generateCharPhoto(
 }
 
 /**
+ * 被动要照片专用：与 generateCharPhoto 同四级通道，但**全失败返回空串**（不塞定妆照）——
+ * 无生图额度/网关报错时角色只回文字，不会硬发一张假照糊弄用户。
+ */
+export async function generateCharPhotoSafe(
+  cfg: { baseUrl: string; apiKey: string },
+  prompt: string,
+  charModel?: string
+): Promise<string> {
+  const ic = loadImageConfig();
+  const model = charModel?.trim() || ic.model;
+  if (ic.mode === "pollinations") {
+    try {
+      const url = await fetchPollinations(prompt, 768, 1024, model);
+      if (url) return url;
+    } catch {
+      /* 继续下一通道 */
+    }
+  }
+  if (ic.baseUrl.trim()) {
+    const url = await tryOpenAIImages(ic.baseUrl.trim(), ic.apiKey.trim() || cfg.apiKey.trim(), model, prompt);
+    if (url) return url;
+  }
+  const base = normalizeBaseUrl(cfg.baseUrl);
+  const key = cfg.apiKey.trim();
+  if (base && key) {
+    const url = await tryOpenAIImages(base, key, model, prompt);
+    if (url) return url;
+  }
+  return "";
+}
+
+/**
  * 真实生图连接测试：向 /images/generations 发一次最小生图请求（小尺寸、固定测试句），
  * 能出图才算通过——不再复用聊天接口的 testConnection，避免拿聊天模型撞生图网关的误导报错。
  * ⚠️ 会实际消耗一次生图额度。

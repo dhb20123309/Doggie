@@ -122,6 +122,27 @@ export function looksLikeReceive(text: string): boolean {
   return RECEIVE_WORDS.test(text);
 }
 
+/** AI 照片共享协议：拼入私聊链路 system。标记 [照片:场景] 由 settleReply 前 digestPhoto 拆成真实生图附图。 */
+export const PHOTO_PROTOCOL =
+  "\n【日常照片】对方想看你的照片、想让你报备现场（如\"报备一下\"\"看看照片\"\"分享照片\"\"拍一张\"\"你现在在干嘛发个图\"）时，如果此刻方便拍，就在回复里单独一行输出 [照片:一句话场景]（如 [照片:深夜练完琴的琴房]，不超过14字），系统会按你的人设自动生成一张第一人称俯拍生活照（不露脸）发给对方。" +
+  "场景要贴合你们正在聊的话题和你的人设（穿着习惯、常去的地方、手里的东西）；不方便拍（在忙、场合不合适）就别写标记，用文字自然带过或撒娇推辞，符合活人逻辑。不要没事就发图，一次回复最多一枚标记。";
+
+const PHOTO_MARK_RE = /\[照片[:：]\s*([^\]]{1,30})\]/;
+
+/** 从 assistant 回复里拆出 [照片:场景] 标记 → 场景描述 + 去掉全部标记的干净文本 */
+export function extractPhotoMark(text: string): { scene: string; clean: string } | null {
+  const m = text.match(PHOTO_MARK_RE);
+  if (!m) return null;
+  const clean = text.replace(new RegExp(PHOTO_MARK_RE.source, "g"), "").replace(/\n{2,}/g, "\n").trim();
+  return { scene: (m[1] || "").trim(), clean };
+}
+
+/** 用户索要照片话术识别（兜底触发）：报备/查岗/看照片等诸如此类的表达 */
+const PHOTO_REQUEST_WORDS = /(报备|查岗|爆照|照片|拍照|拍张|拍一[张张]|视频(一个|一下|吗)?|露个脸|露一脸|给(我)?看(看|一下).{0,4}(你|现在|那边)|长(什么|啥)样|现在什么样|身边(什么|啥)|发张|来张|show (me )?(a )?(photo|pic|picture))/i;
+export function looksLikePhotoRequest(text: string): boolean {
+  return PHOTO_REQUEST_WORDS.test(text);
+}
+
 /** AI 定位共享协议：拼入私聊链路 system。标记 [定位:地点名] 由 settleReply 拆成 location 卡片。 */
 export const LOCATION_PROTOCOL =
   "\n【位置共享】你们可以互发实时位置。想告诉对方你在哪时，单独一行输出 [定位:地点名]（如 [定位:健身房]，地点名不超过10字），系统会渲染成地图位置卡片。" +
@@ -250,6 +271,8 @@ const EN_PROFANITY_RE = /\b(fuck(?:ing|ed|s|er)?|shit(?:e)?|bitch(?:es)?|ass ?ho
 
 export function isOocLine(line: string): boolean {
   if (MONEY_OK_RE.test(line)) return false;
+  // 照片标记行放行：[照片:场景] 是系统协议指令不是出戏话
+  if (PHOTO_MARK_RE.test(line)) return false;
   if (EN_OOC_RE.test(line) || EN_PROFANITY_RE.test(line)) return true;
   return OOC_PATTERNS.test(line) || isMostlyEnglish(line);
 }

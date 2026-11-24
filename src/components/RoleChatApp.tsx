@@ -53,6 +53,9 @@ import {
   TRANSFER_PROTOCOL,
   extractTransfer,
   looksLikeReceive,
+  PHOTO_PROTOCOL,
+  extractPhotoMark,
+  looksLikePhotoRequest,
   LOCATION_PROTOCOL,
   extractLocation,
   ORDER_PROTOCOL,
@@ -95,7 +98,7 @@ import {
   usePersisted,
 } from "@/lib/chat-store";
 import { loadVoiceConfig, voiceReady, synthesizeSpeech, MINIMAX_VOICES } from "@/lib/tts";
-import { generateCharPhoto, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS } from "@/lib/media";
+import { generateCharPhoto, generateCharPhotoSafe, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
@@ -154,6 +157,8 @@ const PROACTIVE_FREQ: Record<"quiet" | "normal" | "active", [number, number, num
 /** 自动分享照片：距上次照片至少间隔这么久，且触发主动消息时小概率附带一张 */
 const PHOTO_COOLDOWN_MS = 15 * 60_000;
 const PHOTO_CHANCE = 0.3;
+/** 被动要照片轻冷却：用户开口就该给，但 60 秒内连发多条消息只生成一张，防爆额度 */
+const PHOTO_PASSIVE_COOLDOWN_MS = 60_000;
 
 /** 照片配文模板：按场景写死贴合语境的短句，随机挑一条，避免每次"刚拍的，给你看看" */
 const PHOTO_CAPTIONS: Record<string, string[]> = {
@@ -620,6 +625,27 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     return { text: t.clean, transfer: { amount: t.amount, note: t.note, from: "char", type: "incoming" } };
   };
 
+  /** AI 回复里的照片标记 → 真实生图附图：[照片:场景] 拆出后按人设现生成一张俯拍生活照；
+   *  生图失败（无额度/网关报错）只回文字不塞假照；60 秒轻冷却防连发消息爆额度 */
+  const digestPhoto = async (reply: string, ch: Character, cfg: { baseUrl: string; apiKey: string }): Promise<{ text: string; photoUrl?: string }> => {
+    const p = extractPhotoMark(reply);
+    if (!p) return { text: reply };
+    if (!ch.photoEnabled) return { text: p.clean };
+    if (Date.now() - lastPhotoAt(ch.id) < PHOTO_PASSIVE_COOLDOWN_MS) {
+      console.log(`[photo] passive cooldown char=${ch.id} skip`);
+      return { text: p.clean };
+    }
+    // 标记里的场景优先（模型结合话题现编），为空回落最近聊天匹配
+    const scene = p.scene || matchPhotoScene(reply);
+    const url = await generateCharPhotoSafe(cfg, photoPrompt(ch.name, ch.persona, scene), ch.imageModel).catch(() => "");
+    if (url) {
+      console.log(`[photo] passive ok char=${ch.id} scene="${scene}" model=${ch.imageModel?.trim() || "全局默认"}`);
+      return { text: p.clean, photoUrl: url };
+    }
+    console.warn(`[photo] passive fail char=${ch.id} 生图不可用，仅回文字`);
+    return { text: p.clean };
+  };
+
   /** 自然语言收款兜底：模型没写标记但话说"收下啦"——把最近一笔用户 outgoing 未结算卡视为已收 */
   const settleIncomingByWords = (reply: string, entries: ChatEntry[]): boolean => {
     if (!looksLikeReceive(reply)) return false;
@@ -892,6 +918,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         maskText +
         memeText +
         TRANSFER_PROTOCOL +
+        PHOTO_PROTOCOL +
         LOCATION_PROTOCOL +
         ORDER_PROTOCOL +
         REALITY_MCP_PROTOCOL +
@@ -1140,20 +1167,58 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         let quoted = clean ? digestQuote(clean, entries) : { text: "" };
         clean = quoted.text;
         // 转账标记拆卡：[转账:金额:备注] → incoming 卡片（挂账待用户点收），正文只留 TA 说的话
-        const trans = clean && !storyMode ? digestTransfer(clean) : { text: clean };
+        let trans = clean && !storyMode ? digestTransfer(clean) : { text: clean };
         clean = trans.text;
         // 定位/外卖标记拆卡：[定位:地点] / [外卖:…] / [礼物:…] → 结构化卡片
-        const rich = clean && !storyMode ? digestRichCards(clean) : { text: clean };
+        let rich = clean && !storyMode ? digestRichCards(clean) : { text: clean };
         clean = rich.text;
         // 手机能力标记拆行动作：[震动:] / [播报:] / [提醒:] → 真实执行 + 执行记录（异步，剧情模式不注入碎句协议但标记仍消化）
-        const mcp = clean ? extractMcpMarks(clean) : { clean, actions: [] as McpAction[] };
+        let mcp = clean ? extractMcpMarks(clean) : { clean, actions: [] as McpAction[] };
         clean = mcp.clean;
         // 远程 MCP 标记消化：[远程MCP:服务:工具:参数] → 授权校验 + 高危确认 + 真实调用
-        const remote = clean ? extractRemoteMarks(clean) : { clean, marks: [] };
+        let remote = clean ? extractRemoteMarks(clean) : { clean, marks: [] };
         clean = remote.clean;
+        // 照片标记拆图：[照片:场景] → 按人设真实生图（失败只回文字）；剧情模式叙事文体不带标记协议，跳过
+        let photo = clean && !storyMode ? await digestPhoto(clean, ch, cfgSnapshot) : { text: clean };
+        clean = photo.text;
         // 自然语言收款兜底：TA 没写标记但话说"收下啦"——最近一笔用户转账卡片自动置为已收
         if (!trans.transfer && !rich.order && clean) settleIncomingByWords(clean, entries);
         let rep = false;
+        // 兜底：用户明说要照片而模型没写标记——带强指令重试一次（仅 photoEnabled 角色，冷却内不重跑）
+        const askedPhoto = !storyMode && !!clean && ch.photoEnabled && !extractPhotoMark(result.reply) && looksLikePhotoRequest(entries.filter((e) => e.role === "user" && !e.failed).slice(-1)[0]?.content ?? "");
+        if (askedPhoto && Date.now() - lastPhotoAt(ch.id) >= PHOTO_PASSIVE_COOLDOWN_MS) {
+          console.log(`[photo] request fallback char=${ch.id}，带强指令重试`);
+          const again = await chatCompletion(cfgSnapshot, [
+            ...toHist(entries),
+            { role: "user", content: "（系统提示：对方正在向你要日常照片。请在回复里单独一行输出 [照片:一句话场景]（不超过14字，贴合当前话题与你的人设），再配一两句你此刻会说的话；若人设此刻确实不方便拍，就按性格推辞，不要提系统或功能）" },
+          ]).then(
+            (r) => sanitizeReply(r),
+            () => ""
+          );
+          if (again && extractPhotoMark(again)) {
+            console.log(`[photo] request fallback ok char=${ch.id}`);
+            clean = again;
+            quoted = digestQuote(clean, entries);
+            clean = quoted.text;
+            const ft = digestTransfer(clean);
+            clean = ft.text;
+            const fr = digestRichCards(clean);
+            clean = fr.text;
+            rich = fr;
+            trans = ft;
+            const fm = extractMcpMarks(clean);
+            clean = fm.clean;
+            mcp = fm;
+            const fremote = extractRemoteMarks(clean);
+            clean = fremote.clean;
+            remote = fremote;
+            const fp = await digestPhoto(clean, ch, cfgSnapshot);
+            clean = fp.text;
+            photo = fp;
+          } else {
+            console.log(`[photo] request fallback no mark char=${ch.id}，保留原回复`);
+          }
+        }
         if (clean && isRepetitiveReply(clean, recentAssistants)) {
           rep = true;
           console.warn(`[reply] repetitive char=${ch.id}，带禁复读指令重生成`);
@@ -1178,18 +1243,20 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             const againRich = !storyMode ? digestRichCards(againTrans.text) : { text: againTrans.text };
             const againMcp = extractMcpMarks(againRich.text);
             const againRemote = extractRemoteMarks(againMcp.clean);
+            // 重生成的回复同样消化照片标记（OOC/复读抢救后仍可能带 [照片:]）
+            const againPhoto = storyMode ? { text: againRemote.clean } : await digestPhoto(againRemote.clean, ch, cfgSnapshot);
             const againNote = [
               againMcp.actions.length ? await execMcpActions(againMcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
               againRemote.marks.length ? await execRemoteMarks(againRemote.marks, remoteBridge()) : "",
             ].filter(Boolean).join(" ｜ ") || undefined;
-            settleReply(ch.id, userMsgId, againRemote.clean, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote);
+            settleReply(ch.id, userMsgId, againPhoto.text, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote, againPhoto.photoUrl);
           } else {
             console.error(`[reply] regen fail char=${ch.id}`);
             settleReply(ch.id, userMsgId, null);
           }
         } else {
           if (clean !== result.reply) console.log(`[reply] OOC line stripped char=${ch.id}`);
-          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}${mcp.actions.length ? ` mcp=${mcp.actions.length}` : ""}${remote.marks.length ? ` remote=${remote.marks.length}` : ""}`);
+          console.log(`[reply] ok char=${ch.id} len=${clean.length}${quoted.quote ? " quote=1" : ""}${trans.transfer ? " transfer=1" : ""}${rich.location ? " loc=1" : ""}${rich.order ? " order=1" : ""}${photo.photoUrl ? " photo=1" : ""}${mcp.actions.length ? ` mcp=${mcp.actions.length}` : ""}${remote.marks.length ? ` remote=${remote.marks.length}` : ""}`);
           // 手机能力动作真实执行（按开关），结果串作为执行记录随消息落库；远程 MCP 同理
           const notes = [
             mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
@@ -1197,7 +1264,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           ].filter(Boolean).join(" ｜ ");
           const mcpNote = notes || undefined;
           clearStreamBubble();
-          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order, mcpNote);
+          settleReply(ch.id, userMsgId, clean, storyMode, quoted.quote, trans.transfer, rich.location, rich.order, mcpNote, photo.photoUrl);
         }
       } else {
         console.error(`[reply] final fail char=${ch.id}:`, result.err instanceof Error ? result.err.message : result.err);
@@ -1233,7 +1300,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   }, []);
 
   /** 回复落定：始终直写该角色的 localStorage（页面已切走也不丢），当前正打开该会话时同步刷新界面；story 标记决定剧情框/气泡渲染 */
-  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"], location?: ChatEntry["location"], order?: ChatEntry["order"], mcpNote?: string) => {
+  const settleReply = (charId: string, userMsgId: string, reply: string | null, story = false, quote?: { name: string; content: string }, transfer?: ChatEntry["transfer"], location?: ChatEntry["location"], order?: ChatEntry["order"], mcpNote?: string, photoUrl?: string) => {
     try {
       const key = `vp-phone:rolechat-log:${charId}`;
       const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
@@ -1267,7 +1334,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           return;
         }
       }
-      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}), ...(mcpNote ? { mcpNote } : {}) }] : kept;
+      const next: ChatEntry[] = reply != null ? [...kept, { id: `a${Date.now()}`, role: "assistant", content: reply, at: Date.now(), ...(story ? { story: true } : {}), ...(quote ? { quote } : {}), ...(transfer ? { transfer } : {}), ...(location ? { location } : {}), ...(order ? { order } : {}), ...(mcpNote ? { mcpNote } : {}), ...(photoUrl ? { photoUrl } : {}) }] : kept;
       localStorage.setItem(key, JSON.stringify(next));
       if (charId === activeId && view === "chat") setLog(next);
       // 通知横幅：角色新回复且当前没有盯着这个会话（正在看该会话时消息已直接上屏，不打扰）

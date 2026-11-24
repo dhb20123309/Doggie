@@ -361,9 +361,18 @@ async function tryOpenAIImages(baseUrl: string, key: string, model: string, prom
 
 /** 按人设拼写实照片提示词：套用「gpt生图指令」by朝汐屿（第一人称俯拍、不露脸的生活照协议），场景与人设特征作为变量注入 */
 export function photoPrompt(charName: string, persona: string, scene: string): string {
-  const traits = persona.slice(0, 160).replace(/\s+/g, " ");
+  // 人设全量注入（原截 160 字符常把穿着/习惯部分切掉，导致服装不贴人设）；仅压掉换行防破坏提示词结构
+  const traits = persona.replace(/\s+/g, " ").trim().slice(0, 600);
   // 指令原文要求构图以食物/风景为主、身体只入一角，故把话题场景写成画面主体
-  return `${PHOTO_STYLE_POSITIVE} Subject context: this photo belongs to ${charName} (${traits}); today's moment: ${scene}. Outfit and environment details should subtly reflect these traits while keeping the headless first-person composition.`;
+  return [
+    PHOTO_STYLE_POSITIVE,
+    `Subject context: this photo is taken by ${charName} themselves.`,
+    `Character persona (outfit style, habits, lifestyle and props in the frame must stay consistent with this; never contradict it): ${traits}`,
+    scene ? `Today's moment: ${scene}.` : "",
+    "Outfit, carried items and environment details should read as this exact character's daily life while keeping the strict headless first-person composition above.",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** 负面提示词：官方 gpt-image 系列无 negative_prompt 字段，仅中转/兼容网关透传 */

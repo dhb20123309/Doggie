@@ -25,13 +25,13 @@
     "id": "d4",
     "priority": "high",
     "skills": [],
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "双门禁+dev+bundle+AGENTS.md 交付",
     "id": "d5",
     "priority": "medium",
     "skills": [],
-    "status": "pending"
+    "status": "completed"
   }
 ]

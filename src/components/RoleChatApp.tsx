@@ -98,7 +98,7 @@ import {
   usePersisted,
 } from "@/lib/chat-store";
 import { loadVoiceConfig, voiceReady, synthesizeSpeech, MINIMAX_VOICES } from "@/lib/tts";
-import { generateCharPhoto, generateCharPhotoSafe, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS } from "@/lib/media";
+import { generateCharPhoto, generateCharPhotoSafe, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS, loadImageConfig } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
@@ -159,6 +159,8 @@ const PHOTO_COOLDOWN_MS = 15 * 60_000;
 const PHOTO_CHANCE = 0.3;
 /** 被动要照片轻冷却：用户开口就该给，但 60 秒内连发多条消息只生成一张，防爆额度 */
 const PHOTO_PASSIVE_COOLDOWN_MS = 60_000;
+/** 索要照片话术内存标记（charId→时间戳）：被动生图失败后 5 分钟内用户再开口即自动重试，不落库不污染历史 */
+const photoAskAt = new Map<string, number>();
 
 /** 照片配文模板：按场景写死贴合语境的短句，随机挑一条，避免每次"刚拍的，给你看看" */
 const PHOTO_CAPTIONS: Record<string, string[]> = {
@@ -637,12 +639,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
     // 标记里的场景优先（模型结合话题现编），为空回落最近聊天匹配
     const scene = p.scene || matchPhotoScene(reply);
-    const url = await generateCharPhotoSafe(cfg, photoPrompt(ch.name, ch.persona, scene), ch.imageModel).catch(() => "");
+    console.log(`[photo] digest char=${ch.id} scene="${scene.slice(0, 40)}" cfg=${JSON.stringify({ mode: loadImageConfig().mode, hasBase: !!loadImageConfig().baseUrl.trim(), model: ch.imageModel?.trim() || "全局默认" })}`);
+    const url = await generateCharPhotoSafe(cfg, photoPrompt(ch.name, ch.persona, scene), ch.imageModel).catch((e) => {
+      console.warn(`[photo] digest throw char=${ch.id}:`, e instanceof Error ? e.message : e);
+      return "";
+    });
     if (url) {
-      console.log(`[photo] passive ok char=${ch.id} scene="${scene}" model=${ch.imageModel?.trim() || "全局默认"}`);
+      photoAskAt.delete(ch.id);
+      console.log(`[photo] passive ok char=${ch.id} scene="${scene.slice(0, 40)}" model=${ch.imageModel?.trim() || "全局默认"}`);
       return { text: p.clean, photoUrl: url };
     }
-    console.warn(`[photo] passive fail char=${ch.id} 生图不可用，仅回文字`);
+    // 生图失败：记下这次索要，用户 5 分钟内再开口自动重试（治"网关抖一下之后再也不发图"）
+    photoAskAt.set(ch.id, Date.now());
+    console.warn(`[photo] passive fail char=${ch.id} 生图不可用，仅回文字（已记待重试）`);
     return { text: p.clean };
   };
 
@@ -1103,7 +1112,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const call: Promise<{ ok: true; reply: string } | { ok: false; err: unknown }> = (async () => {
       try {
         if (streamOn) {
-          const reply = await chatStream(cfgSnapshot, hist, onChunk);
+          // 流式气泡不渲染原始 [照片:] 标记（否则生图等待期间用户先看到一行文字标记）；表情标记照常解析
+          const stripPhotoMark = (s: string) => s.replace(/\[[^\[\]]{0,4}照片[:：][^\]]*\]?[^\s]*/g, "").replace(/\[照片[:：][^\]]*$/, "");
+          const reply = await chatStream(cfgSnapshot, hist, (acc) => onChunk(stripPhotoMark(acc)));
           return { ok: true as const, reply };
         }
         return { ok: true as const, reply: await chatCompletion(cfgSnapshot, hist) };
@@ -1185,7 +1196,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         if (!trans.transfer && !rich.order && clean) settleIncomingByWords(clean, entries);
         let rep = false;
         // 兜底：用户明说要照片而模型没写标记——带强指令重试一次（仅 photoEnabled 角色，冷却内不重跑）
-        const askedPhoto = !storyMode && !!clean && ch.photoEnabled && !extractPhotoMark(result.reply) && looksLikePhotoRequest(entries.filter((e) => e.role === "user" && !e.failed).slice(-1)[0]?.content ?? "");
+        const askedPhoto = !storyMode && !!clean && ch.photoEnabled && !extractPhotoMark(result.reply) && (looksLikePhotoRequest(entries.filter((e) => e.role === "user" && !e.failed).slice(-1)[0]?.content ?? "") || Date.now() - (photoAskAt.get(ch.id) ?? 0) < 5 * 60_000);
         if (askedPhoto && Date.now() - lastPhotoAt(ch.id) >= PHOTO_PASSIVE_COOLDOWN_MS) {
           console.log(`[photo] request fallback char=${ch.id}，带强指令重试`);
           const again = await chatCompletion(cfgSnapshot, [
@@ -2933,10 +2944,13 @@ function AssistantRow({
   onSpeak: () => void;
 }) {
   const lines = splitBubbles(entry.content);
+  // 保险丝：万一历史消息里残留原始 [照片:] 标记（旧版本落库或消化失败），渲染层直接滤掉不显示文字
+  const photoStripped = lines.filter((l) => !/^\s*[\[【(]?\s*(系统)?\s*(生图|绘图|拍照)?指令?标记?\s*[:：]?\s*\S*照片/.test(l) || !/\[照片|【照片|照片\s*[:：]/.test(l));
+  if (photoStripped.length !== lines.length) console.log(`[photo] render strip residual mark char=${character.id}`);
   // entry.quote（AI 引用历史消息）只挂在第一个文字气泡上方，微信式 reply 小块
   let quoteUsed = false;
   type RenderPart = { type: "text"; content: string; quote?: { name: string; content: string } } | { type: "sticker"; sticker: Sticker };
-  const parts: RenderPart[] = lines.flatMap((line) =>
+  const parts: RenderPart[] = photoStripped.flatMap((line) =>
     parseReplyToMessages(line, stickerLib).map((p): RenderPart => {
       if (p.type === "text" && p.content && !quoteUsed && entry.quote) {
         quoteUsed = true;

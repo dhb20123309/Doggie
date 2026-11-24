@@ -1,11 +1,12 @@
-// 拉密（Rummikub）：106张数字牌(1-13×4色+2鬼)。摆出组(同数3-5色顺/同色连续≥3)即可，先出完手牌胜。
+// 拉密（Rummikub）：106张数字牌(1-13×4色+2鬼)。摆出组(同数3-5色/同色连续≥3)即可，先出完手牌胜。支持 2-5 人。
 import type { GameSpec, GAction, GView } from "./types";
 import { shuffle, randInt } from "./types";
 
 type RCard = { id: string; num: number; suit: number }; // suit 0-3, -1=鬼
-type S = { hands: RCard[][]; table: RCard[][]; deck: RCard[]; turn: number; over: boolean; winner: number; plies: number };
+type S = { hands: RCard[][]; table: RCard[][]; deck: RCard[]; turn: number; over: boolean; winner: number; plies: number; seats: number };
 const SUIT_CH = ["🔴", "🟡", "🔵", "⚫"];
 const label = (c: RCard) => (c.suit < 0 ? "★鬼" : SUIT_CH[c.suit] + c.num);
+const seatName = (seat: number) => (seat === 0 ? "你" : seat === 1 ? "TA" : `小机 ${seat - 1}`);
 
 function validGroup(g: RCard[]): boolean {
   if (g.length < 3) return false;
@@ -26,15 +27,18 @@ const spec: GameSpec<S> = {
   category: "card",
   players: "2-5人",
   ruleSummary: "凑同色顺子或异色同数(≥3张)摆到桌面，先出完手牌赢",
-  simplified: "本版本采用简化规则：两人局各12张；每回合只能新摆一组合法牌（不拆重组桌面）；无牌可摆则摸一张过牌；牌堆空后比手牌少者胜。",
+  simplified: "本版本采用简化规则：每人12张；每回合只能新摆一组合法牌（不拆重组桌面）；无牌可摆则摸一张过牌；牌堆空后比手牌少者胜。",
   undoable: false,
-  maxTurns: 80,
-  create: (_seats, rng) => {
+  maxTurns: 160,
+  minSeats: 2,
+  maxSeats: 5,
+  create: (seatsRaw, rng) => {
+    const seats = Math.max(2, Math.min(5, Math.floor(seatsRaw || 2)));
     const cards: RCard[] = []; let n = 0;
     for (let s = 0; s < 4; s++) for (let k = 1; k <= 13; k++) cards.push({ id: `r${n++}`, num: k, suit: s });
     cards.push({ id: `r${n++}`, num: 0, suit: -1 }, { id: `r${n++}`, num: 0, suit: -1 });
     const d = shuffle(cards, rng);
-    return { hands: [d.slice(0, 12), d.slice(12, 24)], table: [], deck: d.slice(24), turn: 0, over: false, winner: -1, plies: 0 };
+    return { hands: Array.from({ length: seats }, (_, i) => d.slice(i * 12, i * 12 + 12)), table: [], deck: d.slice(seats * 12), turn: 0, over: false, winner: -1, plies: 0, seats };
   },
   turnOf: (s) => s.turn,
   legalActions: (s) => {
@@ -87,9 +91,15 @@ const spec: GameSpec<S> = {
       if (!hands[s.turn].length) { over = true; winner = s.turn; }
     } else if (a.kind === "draw") {
       if (deck.length) hands[s.turn].push(deck.shift()!);
-      else { over = true; winner = hands[0].length === hands[1].length ? -1 : hands[0].length < hands[1].length ? 0 : 1; }
+      else {
+        over = true;
+        let best = 0;
+        for (let i = 1; i < s.seats; i++) if (hands[i].length < hands[best].length) best = i;
+        const minLen = hands[best].length;
+        winner = hands.filter((h) => h.length === minLen).length > 1 ? -1 : best;
+      }
     } else return null;
-    return { ...s, hands, table, deck, turn: 1 - s.turn, over, winner, plies: s.plies + 1 };
+    return { ...s, hands, table, deck, turn: (s.turn + 1) % s.seats, over, winner, plies: s.plies + 1 };
   },
   status: (s) => (s.over ? "over" : "playing"),
   resultFor: (s, seat) => (s.winner === -1 ? "draw" : s.winner === seat ? "win" : "lose"),
@@ -104,15 +114,15 @@ const spec: GameSpec<S> = {
     return acts.find((a) => a.kind === "draw") ?? acts[randInt(Math.random, acts.length)];
   },
   serialize: (s) => s,
-  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length === 2 ? o : null; },
+  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length >= 2 && o.hands.length === (o.seats ?? o.hands.length) ? o : null; },
   view: (s) => ({
     kind: "cards",
     hands: s.hands.map((h, i) => ({ seat: i, cards: h.map((c) => ({ id: c.id, token: String(c.suit), label: label(c) })) })),
     tableCards: s.table.flat().map((c) => ({ id: c.id, token: String(c.suit), label: label(c) })),
-    notes: [`桌面 ${s.table.length} 组 · 牌堆 ${s.deck.length} · 你剩 ${s.hands[0].length} 张`],
+    notes: [`桌面 ${s.table.length} 组 · 牌堆 ${s.deck.length} · ${s.seats}人局 · 你剩 ${s.hands[0].length} 张`],
   }),
   acceptDraw: () => false,
-  endLine: (s, name) => (s.winner === 0 ? `${name} 的拉密还没理完，你先出清了` : s.winner === 1 ? `${name} 拉密先出清了手牌` : "拉密摸完牌堆打平"),
+  endLine: (s, name) => (s.winner === 0 ? `${name} 的拉密还没理完，你先出清了` : s.winner === 1 ? `${name} 拉密先出清了手牌` : s.winner > 1 ? `小机先出清了这局拉密` : "拉密摸完牌堆打平"),
 };
 
 export default spec;

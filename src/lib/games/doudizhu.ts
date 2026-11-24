@@ -1,12 +1,11 @@
-// 斗地主（1v1 简化三人局：玩家 vs 角色 + 中立农民AI，或按 seats=2 双人对打简化为轮流叫分）。
-// 本实现取"经典三人局"：seat0=玩家，seat1=角色，seat2=NPC；叫分定地主，地主对两农民。
+// 斗地主：seat0=玩家，其余为角色/人机；叫分定地主后地主对众农民，先出完手牌的一方胜。
 import type { GameSpec, GAction, GView } from "./types";
 import { shuffle, randInt } from "./types";
 import { makeDeck, comboOf, beats, cardLabel, type PCard, type Combo } from "./cards";
 
 type S = {
   hands: PCard[][]; last: PCard[] | null; lastOwner: number; turn: number; passes: number;
-  landlord: number; phase: "call" | "play"; over: boolean; winner: number; plies: number; bottom: PCard[];
+  landlord: number; phase: "call" | "play"; over: boolean; winner: number; plies: number; bottom: PCard[]; seats: number;
 };
 
 const sortHand = (h: PCard[]) => h.slice().sort((a, b) => a.rank - b.rank || a.suit - b.suit);
@@ -49,26 +48,39 @@ function combosFrom(hand: PCard[], mustBeat: Combo | null): PCard[][] {
   return out.filter((cs) => { const co = comboOf(cs); return co.kind !== "invalid" && beats(co, mustBeat); });
 }
 
+/** 经典三人用整副 54 张；人更多时只用一副牌（rank 天然唯一，避免多副重复 id/同点异花歧义），发牌均分 */
+function deckFor(seats: number, rng: () => number): { deck: PCard[]; per: number; bottomN: number } {
+  if (seats <= 3) return { deck: shuffle(makeDeck(true), rng), per: 17, bottomN: 3 };
+  const deck = makeDeck(true); // 54 张：6 人各 8 张 + 6 张底牌
+  const per = Math.floor((deck.length - 3) / seats);
+  return { deck: shuffle(deck, rng), per, bottomN: deck.length - per * seats };
+}
+
 const spec: GameSpec<S> = {
   id: "doudizhu",
   name: "斗地主",
   category: "card",
-  players: "3人",
+  players: "3-6人",
   ruleSummary: "叫分定地主，先出完手牌者胜",
-  simplified: "本版本采用简化规则：三人名义局（你 / TA / 小机NPC）；叫分只比谁抢地主（1-3分制简化为有炸即抢）；不出牌即过，两家过则重出；无春天翻倍结算。",
+  simplified: "本版本采用简化规则：地主对众农民；叫分只比谁抢地主（有炸弹即抢）；不出牌即过，其余各家全过则重出；无春天翻倍结算；超过 3 人时自动并入第二副牌。",
   undoable: false,
-  maxTurns: 120,
-  create: (_seats, rng) => {
-    const deck = shuffle(makeDeck(true), rng);
-    const hands = [deck.slice(0, 17), deck.slice(17, 34), deck.slice(34, 51)].map(sortHand);
-    const bottom = deck.slice(51);
-    // 简化叫分：手上有炸弹或大王者当地主，否则随机
-    const hasBomb = (h: PCard[]) => new Set(h.map((c) => c.rank)).size < h.length && [...new Set(h.map((c) => c.rank))].some((r) => h.filter((c) => c.rank === r).length === 4);
-    let landlord = hasBomb(hands[0]) ? 0 : hasBomb(hands[1]) ? 1 : hasBomb(hands[2]) ? 2 : randInt(rng, 3);
-    if (bottom.some((c) => c.rank === 17)) landlord = randInt(rng, 3);
+  maxTurns: 160,
+  minSeats: 3,
+  maxSeats: 6,
+  create: (seatsRaw, rng) => {
+    const seats = Math.max(3, Math.min(6, Math.floor(seatsRaw || 3)));
+    const { deck, per, bottomN } = deckFor(seats, rng);
+    const hands: PCard[][] = [];
+    for (let i = 0; i < seats; i++) hands.push(sortHand(deck.slice(i * per, i * per + per)));
+    const bottom = deck.slice(seats * per, seats * per + bottomN);
+    // 简化叫分：从 seat0 起第一个有炸弹者当地主，都没有则随机
+    const hasBomb = (h: PCard[]) => [...new Set(h.map((c) => c.rank))].some((r) => h.filter((c) => c.rank === r).length === 4);
+    let landlord = -1;
+    for (let i = 0; i < seats; i++) if (hasBomb(hands[i])) { landlord = i; break; }
+    if (landlord < 0 || (seats <= 3 && bottom.some((c) => c.rank === 17))) landlord = randInt(rng, seats);
     for (const c of bottom) hands[landlord].push(c);
     hands[landlord] = sortHand(hands[landlord]);
-    return { hands, last: null, lastOwner: -1, turn: landlord, passes: 0, landlord, phase: "play", over: false, winner: -1, plies: 0, bottom };
+    return { hands, last: null, lastOwner: -1, turn: landlord, passes: 0, landlord, phase: "play", over: false, winner: -1, plies: 0, bottom, seats };
   },
   turnOf: (s) => s.turn,
   legalActions: (s) => {
@@ -77,7 +89,7 @@ const spec: GameSpec<S> = {
     const opts = combosFrom(s.hands[s.turn], s.last && s.lastOwner !== s.turn ? comboOf(s.last) : null);
     // 限制候选数量防爆（挑每种型最小的几个）
     const uniq = new Map<string, PCard[]>();
-    for (const cs of opts) { const co = comboOf(cs); const key = `${co.kind}:${co.main}:${co.len}`; if (!uniq.has(key)) uniq.set(key, cs); }
+    for (const cs of opts) { const co = comboOf(cs); const key = `${co.kind}:${co.main}:${cs.length}`; if (!uniq.has(key)) uniq.set(key, cs); }
     for (const cs of [...uniq.values()].slice(0, 24)) acts.push({ kind: "play", s: JSON.stringify(cs.map((c) => c.id)), label: cs.map(cardLabel).join(" ") });
     if (s.last && s.lastOwner !== s.turn) acts.push({ kind: "pass", label: "不出" });
     return acts;
@@ -88,8 +100,8 @@ const spec: GameSpec<S> = {
     if (a.kind === "pass") {
       if (!s.last || s.lastOwner === s.turn) return null;
       const passes = s.passes + 1;
-      if (passes >= 2) return { ...s, turn: (s.turn + 1) % 3, last: null, lastOwner: -1, passes: 0, plies: s.plies + 1 };
-      return { ...s, turn: (s.turn + 1) % 3, passes, plies: s.plies + 1 };
+      if (passes >= s.seats - 1) return { ...s, turn: (s.turn + 1) % s.seats, last: null, lastOwner: -1, passes: 0, plies: s.plies + 1 };
+      return { ...s, turn: (s.turn + 1) % s.seats, passes, plies: s.plies + 1 };
     }
     if (a.kind !== "play" || !a.s) return null;
     const ids = new Set(JSON.parse(a.s) as string[]);
@@ -100,7 +112,7 @@ const spec: GameSpec<S> = {
     if (s.last && s.lastOwner !== s.turn && !beats(co, comboOf(s.last))) return null;
     hands[s.turn] = hands[s.turn].filter((c) => !ids.has(c.id));
     if (!hands[s.turn].length) return { ...s, hands, last: cards, lastOwner: s.turn, over: true, winner: s.turn, plies: s.plies + 1 };
-    return { ...s, hands, last: cards, lastOwner: s.turn, passes: 0, turn: (s.turn + 1) % 3, plies: s.plies + 1 };
+    return { ...s, hands, last: cards, lastOwner: s.turn, passes: 0, turn: (s.turn + 1) % s.seats, plies: s.plies + 1 };
   },
   status: (s) => (s.over ? "over" : "playing"),
   resultFor: (s, seat) => {
@@ -123,25 +135,26 @@ const spec: GameSpec<S> = {
     return scored[0]?.p ?? null;
   },
   serialize: (s) => s,
-  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length === 3 ? o : null; },
+  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length >= 3 && o.hands.length === (o.seats ?? o.hands.length) ? o : null; },
   view: (s, _sel, hints) => {
-    const plays = hints.filter((h) => h.kind === "play").map((h) => new Set(JSON.parse(h.s!) as string[]));
-    const mark = new Set<string>();
-    for (const set of plays) for (const id of set) mark.add(id);
+    void hints;
     return {
       kind: "cards",
       hands: s.hands.map((h, i) => ({ seat: i, cards: h.map((c) => ({ id: c.id, token: c.rank >= 16 ? "joker" : String(c.suit), label: cardLabel(c) })) })),
       tableCards: s.last ? s.last.map((c) => ({ id: c.id, token: c.rank >= 16 ? "joker" : String(c.suit), label: cardLabel(c) })) : [],
-      notes: [`地主：${["你", "TA", "小机"][s.landlord]} · 上家${s.last ? (s.lastOwner === s.turn ? "是你自己" : ["你", "TA", "小机"][s.lastOwner]) : "未出"} · 你的手牌 ${s.hands[0].length} 张`],
-    } as GView & { highlight?: unknown };
-    void mark;
+      notes: [`地主：${seatName(s.landlord)} · 你的手牌 ${s.hands[0].length} 张 · ${s.seats} 人局`],
+    } as GView;
   },
   acceptDraw: () => false,
   endLine: (s, name) => {
     if (!s.over) return "";
     const landWin = s.winner === s.landlord;
-    return landWin ? (s.landlord === 0 ? `斗地主：你当地主赢了，${name} 认输` : `${name}${s.landlord === 1 ? " 当地主" : ""}赢了斗地主`) : (s.landlord === 0 ? "斗地主：你的地主位输了" : `${name} 的地主位输了，你跟着赢`);
+    return landWin ? (s.landlord === 0 ? `斗地主：你当地主赢了，${name} 认输` : `${name}${s.landlord === 1 ? " 当地主" : ""}赢了斗地主`) : (s.landlord === 0 ? "斗地主：你的地主位输了" : `${name} 的地主位输了，农民家一起赢`);
   },
 };
+
+function seatName(seat: number): string {
+  return seat === 0 ? "你" : seat === 1 ? "TA" : `小机 ${seat - 1}`;
+}
 
 export default spec;

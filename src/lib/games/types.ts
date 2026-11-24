@@ -57,6 +57,9 @@ export interface GameSpec<S = any> {
   undoable: boolean;
   /** 最大回合数兜底，超限判和 */
   maxTurns: number;
+  /** 可变人数玩法：座位范围（缺省视为固定 2 人，UI 不出人数配置） */
+  minSeats?: number;
+  maxSeats?: number;
   /** 创建初始局面；seats=参与座位数，seedRng=随机函数（可复现） */
   create(seats: number, rng: () => number): S;
   turnOf(s: S): number;

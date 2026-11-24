@@ -1,9 +1,9 @@
-// 掼蛋（简化单挑版）：基于斗地主牌型 + 级牌概念。当前级牌为2，逢人配(红桃级牌)作万能。
+// 掼蛋（简化多人版）：基于斗地主牌型 + 级牌概念。当前级牌为2，逢人配(红桃级牌)作万能。
 import type { GameSpec, GAction, GView } from "./types";
 import { shuffle, randInt } from "./types";
 import { makeDeck, cardLabel, comboOf, beats, type PCard, type Combo } from "./cards";
 
-type S = { hands: PCard[][]; table: Combo | null; leader: number; turn: number; passes: number; over: boolean; winner: number; plies: number };
+type S = { hands: PCard[][]; table: Combo | null; leader: number; turn: number; passes: number; over: boolean; winner: number; plies: number; seats: number };
 const levelRank = 2; // 固定级牌2
 
 function gdCombo(cs: PCard[]): Combo | null {
@@ -12,19 +12,25 @@ function gdCombo(cs: PCard[]): Combo | null {
   return { ...base, cards: cs, typeName: TYPE_CN[base.kind] ?? base.kind };
 }
 const TYPE_CN: Record<string, string> = { single: "单张", pair: "对子", triple: "三张", triple1: "三带一", triple2: "三带二", straight: "顺子", pairStraight: "连对", bomb: "炸弹", rocket: "王炸", quad2: "四带二" };
+const seatName = (seat: number) => (seat === 0 ? "你" : seat === 1 ? "TA" : `小机 ${seat - 1}`);
 
 const spec: GameSpec<S> = {
   id: "guandan",
   name: "掼蛋",
   category: "card",
-  players: "4人",
+  players: "2-4人",
   ruleSummary: "两副牌跟牌，牌型同斗地主但级牌(2)仅次于王，先出完者胜",
-  simplified: "本版本采用简化规则：两人局各13张（你 vs TA）；级牌固定为2（比A大、比小王小）；不做进贡还贡与双下升级；无同花顺最大设定，按普通顺子计。",
+  simplified: "本版本采用简化规则：每人13张；级牌固定为2（比A大、比小王小）；不做进贡还贡与双下升级；无同花顺最大设定，按普通顺子计；其余各家都不要时最后出牌方重新起手。",
   undoable: false,
-  maxTurns: 80,
-  create: (_seats, rng) => {
+  maxTurns: 160,
+  minSeats: 2,
+  maxSeats: 4,
+  create: (seatsRaw, rng) => {
+    const seats = Math.max(2, Math.min(4, Math.floor(seatsRaw || 2)));
     const d = shuffle(makeDeck(true), rng);
-    return { hands: [d.slice(0, 13), d.slice(13, 26)], table: null, leader: 0, turn: 0, passes: 0, over: false, winner: -1, plies: 0 };
+    const hands: PCard[][] = [];
+    for (let i = 0; i < seats; i++) hands.push(d.slice(i * 13, i * 13 + 13));
+    return { hands, table: null, leader: 0, turn: 0, passes: 0, over: false, winner: -1, plies: 0, seats };
   },
   turnOf: (s) => s.turn,
   legalActions: (s) => {
@@ -72,8 +78,9 @@ const spec: GameSpec<S> = {
     if (a.kind === "pass") {
       if (!s.table) return null;
       const passes = s.passes + 1;
-      if (passes >= 1) return { ...s, table: null, leader: s.turn, turn: s.turn, passes: 0, plies: s.plies + 1 };
-      return { ...s, turn: 1 - s.turn, passes, plies: s.plies + 1 };
+      // 除最后出牌方外全部过 → 桌面清空，由出牌方重开
+      if (passes >= s.seats - 1) return { ...s, table: null, leader: s.leader, turn: s.leader, passes: 0, plies: s.plies + 1 };
+      return { ...s, turn: (s.turn + 1) % s.seats, passes, plies: s.plies + 1 };
     }
     if (a.kind !== "play" || !a.s) return null;
     const ids = new Set(JSON.parse(a.s) as string[]);
@@ -83,7 +90,7 @@ const spec: GameSpec<S> = {
     if (!cb || (s.table && !beats(cb, s.table, levelRank))) return null;
     hands[s.turn] = hands[s.turn].filter((c) => !ids.has(c.id));
     if (!hands[s.turn].length) return { ...s, hands, over: true, winner: s.turn, plies: s.plies + 1 };
-    return { ...s, hands, table: cb, leader: s.turn, turn: 1 - s.turn, passes: 0, plies: s.plies + 1 };
+    return { ...s, hands, table: cb, leader: s.turn, turn: (s.turn + 1) % s.seats, passes: 0, plies: s.plies + 1 };
   },
   status: (s) => (s.over ? "over" : "playing"),
   resultFor: (s, seat) => (s.winner === -1 ? "draw" : s.winner === seat ? "win" : "lose"),
@@ -96,15 +103,15 @@ const spec: GameSpec<S> = {
     return plays[randInt(Math.random, Math.min(2, plays.length))];
   },
   serialize: (s) => s,
-  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length === 2 ? o : null; },
+  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length >= 2 && o.hands.length === (o.seats ?? o.hands.length) ? o : null; },
   view: (s) => ({
     kind: "cards",
     hands: s.hands.map((h, i) => ({ seat: i, cards: h.map((c) => ({ id: c.id, token: String(c.suit), label: cardLabel(c) })) })),
     tableCards: s.table?.cards ? s.table.cards.map((c) => ({ id: c.id, token: String(c.suit), label: cardLabel(c) })) : [],
-    notes: [`级牌【2】 · ${s.table ? `桌面${s.table.typeName}` : "自由出牌"} · 你剩 ${s.hands[0].length} 张 TA剩 ${s.hands[1].length} 张`],
+    notes: [`级牌【2】 · ${s.seats}人局 · ${s.table ? `${seatName(s.leader)}出${s.table.typeName}` : "自由出牌"} · 你剩 ${s.hands[0].length} 张`],
   }),
   acceptDraw: () => false,
-  endLine: (s, name) => (s.winner === 0 ? `${name} 的掼蛋被你抢光了手牌` : s.winner === 1 ? `${name} 掼蛋先出完，把你剩在手里` : "掼蛋平局"),
+  endLine: (s, name) => (s.winner === 0 ? `${name} 的掼蛋被你抢光了手牌` : s.winner === 1 ? `${name} 掼蛋先出完，把你剩在手里` : s.winner > 1 ? `小机先出完了这局掼蛋` : "掼蛋平局"),
 };
 
 export default spec;

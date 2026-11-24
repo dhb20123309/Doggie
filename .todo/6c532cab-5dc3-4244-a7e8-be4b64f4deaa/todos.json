@@ -1,0 +1,37 @@
+[
+  {
+    "content": "types.ts 加 minSeats/maxSeats + GameHall 开局配置弹层",
+    "id": "m1",
+    "status": "completed",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "content": "GameStage/GameViews/DuelApp/duel-store 多人链路改造",
+    "id": "m2",
+    "status": "completed",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "content": "牌类引擎泛化（斗地主/UNO/卡五星/麻将/掼蛋/炸金花/德州/干瞪眼/四色/拉密/开火车）",
+    "id": "m3",
+    "status": "completed",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "content": "骰子桌游引擎泛化（吹牛骰✓/快艇骰✓/大富翁×2✓/宝石商人/卡卡颂/跳棋/飞行棋）",
+    "id": "m4",
+    "status": "completed",
+    "priority": "medium",
+    "skills": []
+  },
+  {
+    "content": "冒烟多座位用例 + 双门禁 + dev + 截图 + bundle + AGENTS.md",
+    "id": "m5",
+    "status": "in_progress",
+    "priority": "high",
+    "skills": []
+  }
+]

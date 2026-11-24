@@ -1,5 +1,4 @@
-// 宝石商人（Splendor 简化单挑版）：拿宝石→买发展卡→凑等级，先集满 15 分者胜。
-// 手持临时宝石全部内聚在 state.tokens 中（旧版用模块级全局表会跨局污染，已废弃）。
+// 宝石商人（Splendor 简化版）：拿宝石→买发展卡→凑等级，先集满 15 分者胜。支持 2-4 人。
 import type { GameSpec, GAction, GView } from "./types";
 import { randInt } from "./types";
 
@@ -14,8 +13,10 @@ type S = {
   winner: number;
   plies: number;
   log: string[];
+  seats: number;
 };
 const GEM_CN = ["⚪", "🔵", "🟢", "🔴", "⚫"];
+const seatName = (seat: number) => (seat === 0 ? "你" : seat === 1 ? "TA" : `小机 ${seat - 1}`);
 
 function makeCards(): Card[][] {
   const tiers: Card[][] = [[], [], []];
@@ -77,12 +78,15 @@ const spec: GameSpec<S> = {
   category: "table",
   players: "2-4人",
   ruleSummary: "拿宝石买卡片，卡片既加分又当永久矿脉，先到15分赢",
-  simplified: "本版本采用简化规则：两人局；每回合三选一——拿2颗同款 / 拿2颗不同款 / 买一张明牌；某色集满7张卡额外+3分。",
+  simplified: "本版本采用简化规则：每回合三选一——拿2颗同款 / 拿2颗不同款 / 买一张明牌；某色集满7张卡额外+3分；多人按座位轮流。",
   undoable: false,
-  maxTurns: 60,
-  create: (_seats, rng) => {
+  maxTurns: 60 * 2,
+  minSeats: 2,
+  maxSeats: 4,
+  create: (seatsRaw, rng) => {
+    const seats = Math.max(2, Math.min(4, Math.floor(seatsRaw || 2)));
     const cards = makeCards().map((tier) => shuffleTier(tier, rng));
-    return { bank: [4, 4, 4, 4, 4], cards, tokens: [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]], turn: 0, over: false, winner: -1, plies: 0, log: ["商战开始，先攒到 15 分！"] };
+    return { bank: [4, 4, 4, 4, 4], cards, tokens: Array.from({ length: seats }, () => [0, 0, 0, 0, 0]), turn: 0, over: false, winner: -1, plies: 0, log: [`商战开始，${seats}人局，先攒到 15 分！`], seats };
   },
   turnOf: (s) => s.turn,
   legalActions: (s) => {
@@ -107,12 +111,12 @@ const spec: GameSpec<S> = {
     if (a.kind === "take2" && a.n !== undefined) {
       if (bank[a.n] < 2) return null;
       bank[a.n] -= 2; tokens[me][a.n] += 2;
-      log.push(`${["你", "TA"][me]}拿了2颗${GEM_CN[a.n]}`);
+      log.push(`${seatName(me)}拿了2颗${GEM_CN[a.n]}`);
     } else if (a.kind === "take" && a.n !== undefined && a.s !== undefined) {
       const h = Number(a.s);
       if (bank[a.n] < 1 || bank[h] < 1) return null;
       bank[a.n]--; bank[h]--; tokens[me][a.n]++; tokens[me][h]++;
-      log.push(`${["你", "TA"][me]}拿了${GEM_CN[a.n]}和${GEM_CN[h]}`);
+      log.push(`${seatName(me)}拿了${GEM_CN[a.n]}和${GEM_CN[h]}`);
     } else if (a.kind === "buy" && a.n !== undefined) {
       let found: Card | null = null, tierIdx = -1;
       for (let t = 0; t < 3; t++) { const c = cards[t].find((x) => x.id === a.n); if (c) { found = c; tierIdx = t; break; } }
@@ -122,15 +126,15 @@ const spec: GameSpec<S> = {
       found.owner = me;
       cards[tierIdx] = cards[tierIdx].filter((x) => x.id !== a.n);
       if (tierIdx < 2 && cards[tierIdx + 1].length) cards[tierIdx].push(cards[tierIdx + 1].shift()!);
-      log.push(`${["你", "TA"][me]}买下了${GEM_CN[found.color]} ${found.pts}分卡`);
+      log.push(`${seatName(me)}买下了${GEM_CN[found.color]} ${found.pts}分卡`);
       const sc = myScore(next, me);
-      if (sc >= 15) return { ...next, over: true, winner: me, turn: me, plies: s.plies + 1, log: [...log, `${["你", "TA"][me]}冲到 ${sc} 分！`] };
+      if (sc >= 15) return { ...next, over: true, winner: me, turn: me, plies: s.plies + 1, log: [...log, `${seatName(me)}冲到 ${sc} 分！`] };
     } else return null;
     // 手持上限10颗：超限自动弃回最多余量
     const t = tokens[me];
     let total = t.reduce((x, y) => x + y, 0);
     while (total > 10) { const g = t.indexOf(Math.max(...t)); t[g]--; total--; }
-    return { ...s, bank, cards, tokens, turn: 1 - me, over: false, winner: -1, plies: s.plies + 1, log };
+    return { ...s, bank, cards, tokens, turn: (me + 1) % s.seats, over: false, winner: -1, plies: s.plies + 1, log };
   },
   status: (s) => (s.over ? "over" : "playing"),
   resultFor: (s, seat) => {
@@ -151,18 +155,18 @@ const spec: GameSpec<S> = {
     return acts[randInt(Math.random, acts.length)];
   },
   serialize: (s) => s,
-  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.bank) && o.bank.length === 5 && Array.isArray(o.tokens) && o.tokens.length === 2 ? o : null; },
+  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.bank) && o.bank.length === 5 && Array.isArray(o.tokens) && o.tokens.length >= 2 && o.tokens.length === (o.seats ?? o.tokens.length) ? o : null; },
   view: (s) => ({
     kind: "panel",
-    panels: [0, 1].map((i) => ({
+    panels: s.tokens.map((_, i) => ({
       seat: i,
-      title: i === 0 ? "你的商铺" : "TA的商铺",
+      title: `${seatName(i)}的商铺`,
       lines: [`积分 ${myScore(s, i)} / 15`, `手持宝石 ${tokenLabel(s, i)}`, `名下卡片 ${ownedCount(s, i).map((n, g) => (n ? GEM_CN[g] + n : "")).filter(Boolean).join(" ") || "无"}`],
     })),
-    notes: [`银行 ${s.bank.map((n, g) => GEM_CN[g] + n).join(" ")} · 桌面一级 ${s.cards[0].slice(0, 4).map((c) => `${GEM_CN[c.color]}${c.pts}${c.owner != null ? "(已购)" : ""}`).join(" ")}`, ...s.log.slice(-2)],
+    notes: [`银行 ${s.bank.map((n, g) => GEM_CN[g] + n).join(" ")} · ${s.seats}人局 · 桌面一级 ${s.cards[0].slice(0, 4).map((c) => `${GEM_CN[c.color]}${c.pts}${c.owner != null ? "(已购)" : ""}`).join(" ")}`, ...s.log.slice(-2)],
   }),
-  acceptDraw: (s) => s.plies > 40,
-  endLine: (s, name) => (s.winner === 0 ? `${name} 的宝石商人被你抢先做大了(15分)` : s.winner === 1 ? `${name} 在宝石商人里先你一步成了大亨` : "宝石商人还在盘货"),
+  acceptDraw: (s) => s.plies > 40 * s.seats,
+  endLine: (s, name) => (s.winner === 0 ? `${name} 的宝石商人被你抢先做大了(15分)` : s.winner === 1 ? `${name} 在宝石商人里先你一步成了大亨` : s.winner > 1 ? `小机在宝石商人里先一步成了大亨` : "宝石商人还在盘货"),
 };
 
 export default spec;

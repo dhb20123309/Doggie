@@ -1,8 +1,8 @@
-// 麻将（简化单挑推倒胡）：只用万/条/筒三门 108 张，可碰可胡，4组+1将对。
+// 麻将（简化推倒胡）：只用万/条/筒三门 108 张，可碰可胡，4组+1将对。支持 2-4 人轮流摸打。
 import type { GameSpec, GAction, GView } from "./types";
 import { shuffle, randInt } from "./types";
 
-type S = { wall: string[]; hands: string[][]; melds: string[][][]; discards: string[][]; turn: number; claim: { tile: string; from: number } | null; over: boolean; winner: number; winTile: string; plies: number };
+type S = { wall: string[]; hands: string[][]; melds: string[][][]; discards: string[][]; turn: number; claim: { tile: string; from: number } | null; over: boolean; winner: number; winTile: string; plies: number; seats: number };
 
 const SUITS = ["w", "t", "b"];
 const SUIT_CN: Record<string, string> = { w: "万", t: "条", b: "筒" };
@@ -50,6 +50,7 @@ export function mjIsWin(hand: string[], meldCount: number): boolean {
   }
   return false;
 }
+const seatName = (seat: number) => (seat === 0 ? "你" : seat === 1 ? "TA" : `小机 ${seat - 1}`);
 
 const spec: GameSpec<S> = {
   id: "mahjong",
@@ -57,27 +58,32 @@ const spec: GameSpec<S> = {
   category: "card",
   players: "2-4人",
   ruleSummary: "摸打碰胡，凑齐四个面子加一对将即胡",
-  simplified: "本版本采用简化规则：两人局（你 vs TA），只用万条筒108张；可碰不可吃、无杠；自摸或对方点炮即胡，不计番种，平胡算赢；牌墙摸完为流局。",
+  simplified: "本版本采用简化规则：只用万条筒108张；可碰不可吃、无杠；多人时按座位轮流摸打，出牌后其他家可碰/胡（优先胡）；自摸或点炮即胡，不计番种，平胡算赢；牌墙摸完为流局。",
   undoable: false,
-  maxTurns: 120,
-  create: (_seats, rng) => {
+  maxTurns: 240,
+  minSeats: 2,
+  maxSeats: 4,
+  create: (seatsRaw, rng) => {
+    const seats = Math.max(2, Math.min(4, Math.floor(seatsRaw || 2)));
     const wall: string[] = [];
     for (const s of SUITS) for (let n = 1; n <= 9; n++) for (let k = 0; k < 4; k++) wall.push(`${s}${n}`);
     const d = shuffle(wall, rng);
-    return { wall: d.slice(13), hands: [[...d.slice(0, 6)].sort(), [...d.slice(6, 13)].sort()], melds: [[], []], discards: [[], []], turn: 0, claim: null, over: false, winner: -1, winTile: "", plies: 0 };
+    // seat0 庄 7 张，其余各 6 张；牌墙从 6*seats+1 起
+    const hands = Array.from({ length: seats }, (_, i) => (i === 0 ? [...d.slice(0, 7)].sort() : [...d.slice(1 + (i - 1) * 6, 1 + (i - 1) * 6 + 6)].sort()));
+    return { wall: d.slice(6 * seats + 1), hands, melds: Array.from({ length: seats }, () => [] as string[][]), discards: Array.from({ length: seats }, () => [] as string[]), turn: 0, claim: null, over: false, winner: -1, winTile: "", plies: 0, seats };
   },
   turnOf: (s) => s.turn,
   legalActions: (s) => {
     if (s.over) return [];
     const acts: GAction[] = [];
     if (s.claim) {
-      const me = 1 - s.claim.from, t = s.claim.tile, hand = s.hands[me];
+      const me = s.turn, t = s.claim.tile, hand = s.hands[me];
       if (mjIsWin([...hand, t], s.melds[me].length)) acts.push({ kind: "hu", s: t, label: `胡 ${mjTileCn(t)}！` });
       if (hand.filter((x) => x === t).length >= 2) acts.push({ kind: "peng", s: t, label: `碰 ${mjTileCn(t)}` });
       acts.push({ kind: "passc", label: "过" });
       return acts;
     }
-    let hand = s.hands[s.turn];
+    const hand = s.hands[s.turn];
     if (hand.length % 3 === 2) {
       if (mjIsWin(hand, s.melds[s.turn].length)) acts.push({ kind: "hu", s: "self", label: "自摸胡！" });
       for (const t of [...new Set(hand)]) acts.push({ kind: "discard", s: t, label: `打 ${mjTileCn(t)}` });
@@ -105,7 +111,7 @@ const spec: GameSpec<S> = {
       return { ...s, hands, wall, melds, discards, turn, claim: null, over: true, winner: turn, winTile: a.s === "self" ? hands[turn][hands[turn].length - 1] : String(a.s), plies: plies + 1 };
     }
     if (claim) {
-      const me = 1 - claim.from;
+      const me = turn;
       if (a.kind === "peng") {
         let removed = 0;
         hands[me] = hands[me].filter((x) => !(x === claim!.tile && removed++ < 2));
@@ -113,7 +119,15 @@ const spec: GameSpec<S> = {
         discards[claim.from].pop();
         return { ...s, hands, wall, melds, discards, turn: me, claim: null, over, winner, winTile, plies: plies + 1 };
       }
-      // 过 → 原出牌方继续（其手牌已是 3n+2 待打状态）
+      // 过 → 该 claim 家放弃；依次问下一家，都没有则原出牌方继续
+      const nextClaimer = (me + 1) % s.seats;
+      if (nextClaimer !== claim.from) {
+        const t = claim.tile;
+        const nh = hands[nextClaimer];
+        if (mjIsWin([...nh, t], melds[nextClaimer].length) || nh.filter((x) => x === t).length >= 2) {
+          return { ...s, hands, wall, melds, discards, turn: nextClaimer, claim, over, winner, winTile, plies: plies + 1 };
+        }
+      }
       return { ...s, hands, wall, melds, discards, turn: claim.from, claim: null, over, winner, winTile, plies: plies + 1 };
     }
     if (a.kind === "discard" && a.s) {
@@ -121,12 +135,15 @@ const spec: GameSpec<S> = {
       if (idx < 0) return null;
       hands[turn].splice(idx, 1);
       discards[turn].push(a.s);
-      const foe = 1 - turn;
-      const canPeng = hands[foe].filter((x) => x === a.s).length >= 2;
-      const canHu = mjIsWin([...hands[foe], a.s], melds[foe].length);
-      if (canPeng || canHu) return { ...s, hands, wall, melds, discards, turn, claim: { tile: a.s, from: turn }, over, winner, winTile, plies: plies + 1 };
-      if (!wall.length) return { ...s, hands, wall, melds, discards, turn: foe, claim: null, over: true, winner: -1, winTile, plies: plies + 1 };
-      return { ...s, hands, wall, melds, discards, turn: foe, claim: null, over, winner, winTile, plies: plies + 1 };
+      // 从下家起依次找可碰/胡的第一家（胡优先由该家动作决定）
+      for (let k = 1; k < s.seats; k++) {
+        const foe = (turn + k) % s.seats;
+        const canPeng = hands[foe].filter((x) => x === a.s).length >= 2;
+        const canHu = mjIsWin([...hands[foe], a.s], melds[foe].length);
+        if (canPeng || canHu) return { ...s, hands, wall, melds, discards, turn: foe, claim: { tile: a.s, from: turn }, over, winner, winTile, plies: plies + 1 };
+      }
+      if (!wall.length) return { ...s, hands, wall, melds, discards, turn: (turn + 1) % s.seats, claim: null, over: true, winner: -1, winTile, plies: plies + 1 };
+      return { ...s, hands, wall, melds, discards, turn: (turn + 1) % s.seats, claim: null, over, winner, winTile, plies: plies + 1 };
     }
     return null;
   },
@@ -158,18 +175,18 @@ const spec: GameSpec<S> = {
     return Math.random() < 0.85 ? scored[0].d : ds[randInt(Math.random, ds.length)];
   },
   serialize: (s) => s,
-  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length === 2 ? o : null; },
+  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length >= 2 && o.hands.length === (o.seats ?? o.hands.length) ? o : null; },
   view: (s) => ({
     kind: "cards",
     hands: s.hands.map((h, i) => ({ seat: i, cards: h.map((t, j) => ({ id: `${i}-${j}-${t}`, token: t[0], label: mjTileCn(t) })) })),
-    tableCards: s.discards[1].slice(-10).map((t, j) => ({ id: `d-${j}-${t}`, token: t[0], label: mjTileCn(t) })),
+    tableCards: s.discards.flatMap((ds, i) => ds.slice(-4).map((t, j) => ({ id: `d-${i}-${j}-${t}`, token: t[0], label: `${seatName(i)[0]}${mjTileCn(t)}` }))),
     notes: [
-      `牌墙 ${s.wall.length} 张 · 你：${s.melds[0].map((m) => m.map(mjTileCn).join("")).join("｜") || "门前清"}`,
-      s.over ? (s.winner >= 0 ? `【${["你", "TA"][s.winner]}】胡 ${mjTileCn(s.winTile)}！` : "流局，牌墙摸完了") : s.claim ? `TA 打出 ${mjTileCn(s.claim.tile)}，轮到你了` : ["你的回合", "TA思考中…"][s.turn],
+      `牌墙 ${s.wall.length} 张 · ${s.seats}人局 · 你：${s.melds[0].map((m) => m.map(mjTileCn).join("")).join("｜") || "门前清"}`,
+      s.over ? (s.winner >= 0 ? `【${seatName(s.winner)}】胡 ${mjTileCn(s.winTile)}！` : "流局，牌墙摸完了") : s.claim ? `${seatName(s.claim.from)} 打出 ${mjTileCn(s.claim.tile)}，轮到你了` : `${seatName(s.turn)}的回合`,
     ],
   }),
   acceptDraw: () => false,
-  endLine: (s, name) => (s.winner === 0 ? `${name} 的麻将被你胡了个 ${mjTileCn(s.winTile)}` : s.winner === 1 ? `${name} 麻将点了你一把 ${mjTileCn(s.winTile)}` : "这圈麻将打到流局，谁也没胡"),
+  endLine: (s, name) => (s.winner === 0 ? `${name} 的麻将被你胡了个 ${mjTileCn(s.winTile)}` : s.winner === 1 ? `${name} 麻将点了你一把 ${mjTileCn(s.winTile)}` : s.winner > 1 ? `小机胡了这圈麻将，你和 ${name} 都没成` : "这圈麻将打到流局，谁也没胡"),
 };
 
 export default spec;

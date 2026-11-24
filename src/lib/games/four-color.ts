@@ -1,12 +1,13 @@
-// 四色牌（跑得快变体）：红黄蓝绿四色 1-10 各一张共40张，三人简化为两人各10张。
-// 大压小单张跟打，同色连对/三连可甩，先出完者胜。
+// 四色牌（跑得快变体）：红黄蓝绿四色 1-10，两副共80张。
+// 大压小单张跟打，同色连顺可甩，先出完者胜。支持 2-4 人。
 import type { GameSpec, GAction, GView } from "./types";
 import { shuffle, randInt } from "./types";
 
 type FC = { id: string; color: number; num: number }; // color 0-3, num 1-10
-type S = { hands: FC[][]; table: FC[] | null; tableKind: string; turn: number; over: boolean; winner: number; plies: number };
+type S = { hands: FC[][]; table: FC[] | null; tableKind: string; turn: number; over: boolean; winner: number; plies: number; seats: number; leader: number };
 const CN = ["红", "黄", "蓝", "绿"];
 const fcLabel = (c: FC) => CN[c.color] + c.num;
+const seatName = (seat: number) => (seat === 0 ? "你" : seat === 1 ? "TA" : `小机 ${seat - 1}`);
 
 function comboOf(cs: FC[]): { kind: string; key: number } | null {
   if (!cs.length) return null;
@@ -31,16 +32,19 @@ const spec: GameSpec<S> = {
   category: "card",
   players: "2-4人",
   ruleSummary: "四色数字牌，单/对/三张/同色顺，大同小，先出完赢",
-  simplified: "本版本采用简化规则：两人局各发10张；只能出单张、同点对子、同点三张或同色连顺（3-5张）；必须压住桌面同类且更长/更大者才能跟牌；无人能接则由最后出牌方重新起手。",
+  simplified: "本版本采用简化规则：每人发10张；只能出单张、同点对子、同点三张或同色连顺（3-5张）；必须压住桌面同类且等长者才能跟牌；无人能接则由最后出牌方重新起手。",
   undoable: false,
-  maxTurns: 60,
-  create: (_seats, rng) => {
+  maxTurns: 120,
+  minSeats: 2,
+  maxSeats: 4,
+  create: (seatsRaw, rng) => {
+    const seats = Math.max(2, Math.min(4, Math.floor(seatsRaw || 2)));
     const all: FC[] = [];
     for (let c = 0; c < 4; c++) for (let n = 1; n <= 10; n++) all.push({ id: `f${c}${n}`, color: c, num: n });
     const extra: FC[] = [];
     for (let c = 0; c < 4; c++) for (let n = 1; n <= 10; n++) extra.push({ id: `f2-${c}${n}`, color: c, num: n });
     const d = shuffle([...all, ...extra], rng);
-    return { hands: [d.slice(0, 10), d.slice(10, 20)], table: null, tableKind: "", turn: 0, over: false, winner: -1, plies: 0 };
+    return { hands: Array.from({ length: seats }, (_, i) => d.slice(i * 10, i * 10 + 10)), table: null, tableKind: "", turn: 0, over: false, winner: -1, plies: 0, seats, leader: 0 };
   },
   turnOf: (s) => s.turn,
   legalActions: (s) => {
@@ -82,10 +86,9 @@ const spec: GameSpec<S> = {
     const hands = s.hands.map((h) => h.slice());
     if (a.kind === "pass") {
       if (!s.table) return null;
-      const foe = 1 - s.turn;
-      // 两家都过 → 上一轮出牌方重开（此处记 foe 若也过则清空桌面）
-      if (s.tableKind === "passed") return { ...s, hands, table: null, tableKind: "", turn: foe, plies: s.plies + 1 };
-      return { ...s, hands, tableKind: "passed", turn: foe, plies: s.plies + 1 };
+      // 除出牌方外全部过 → 清空桌面，出牌方重开
+      if (s.tableKind === "passed") return { ...s, hands, table: null, tableKind: "", turn: s.leader, plies: s.plies + 1 };
+      return { ...s, hands, tableKind: "passed", turn: (s.turn + 1) % s.seats, plies: s.plies + 1 };
     }
     if (a.kind !== "play" || !a.s) return null;
     const ids = new Set(JSON.parse(a.s) as string[]);
@@ -98,8 +101,8 @@ const spec: GameSpec<S> = {
       if (!tb || !beatsCombo(cb, tb, cards.length, s.table.length)) return null;
     }
     hands[s.turn] = hands[s.turn].filter((c) => !ids.has(c.id));
-    if (!hands[s.turn].length) return { ...s, hands, table: cards, tableKind: "", over: true, winner: s.turn, plies: s.plies + 1 };
-    return { ...s, hands, table: cards, tableKind: "", turn: 1 - s.turn, plies: s.plies + 1 };
+    if (!hands[s.turn].length) return { ...s, hands, table: cards, tableKind: "", over: true, winner: s.turn, plies: s.plies + 1, leader: s.turn };
+    return { ...s, hands, table: cards, tableKind: "", turn: (s.turn + 1) % s.seats, plies: s.plies + 1, leader: s.turn };
   },
   status: (s) => (s.over ? "over" : "playing"),
   resultFor: (s, seat) => (s.winner === -1 ? "draw" : s.winner === seat ? "win" : "lose"),
@@ -114,15 +117,15 @@ const spec: GameSpec<S> = {
     return Math.random() < 0.7 ? best : plays[randInt(Math.random, plays.length)];
   },
   serialize: (s) => s,
-  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length === 2 ? o : null; },
+  deserialize: (d) => { const o = d as S; return o && Array.isArray(o.hands) && o.hands.length >= 2 && o.hands.length === (o.seats ?? o.hands.length) ? o : null; },
   view: (s) => ({
     kind: "cards",
     hands: s.hands.map((h, i) => ({ seat: i, cards: h.map((c) => ({ id: c.id, token: String(c.color), label: fcLabel(c) })) })),
     tableCards: s.table ? s.table.map((c) => ({ id: c.id, token: String(c.color), label: fcLabel(c) })) : [],
-    notes: [`桌面${s.table ? s.table.map(fcLabel).join(" ") + (s.tableKind === "passed" ? "（已有一家不要）" : "") : "空·自由出"} · 你剩 ${s.hands[0].length} 张 TA剩 ${s.hands[1].length} 张`],
+    notes: [`桌面${s.table ? s.table.map(fcLabel).join(" ") + (s.tableKind === "passed" ? "（已有人不要）" : "") : "空·自由出"} · ${s.seats}人局 · 你剩 ${s.hands[0].length} 张`],
   }),
   acceptDraw: () => false,
-  endLine: (s, name) => (s.winner === 0 ? `${name} 的四色牌被你跑完了` : s.winner === 1 ? `${name} 四色牌跑得比你快` : "四色牌平局"),
+  endLine: (s, name) => (s.winner === 0 ? `${name} 的四色牌被你跑完了` : s.winner === 1 ? `${name} 四色牌跑得比你快` : s.winner > 1 ? `小机的四色牌先到终点` : "四色牌平局"),
 };
 
 export default spec;

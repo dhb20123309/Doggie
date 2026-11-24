@@ -6,7 +6,8 @@ type UCard = { id: string; color: 0 | 1 | 2 | 3 | 4 /* 4=黑 */; text: string; k
 type S = { hands: UCard[][]; pile: UCard[]; deck: UCard[]; turn: number; dir: number; top: UCard | null; over: boolean; winner: number; plies: number; pendingDraw: number };
 const COLORS = ["红", "黄", "蓝", "绿"];
 
-export function unoCreate(rng: () => number): S {
+export function unoCreate(seatsRaw: number, rng: () => number): S {
+  const seats = Math.max(2, Math.min(6, Math.floor(seatsRaw || 3)));
   const cards: UCard[] = []; let n = 0;
   for (let c = 0; c < 4; c++) {
     cards.push({ id: `u${n++}`, color: c as 0 | 1 | 2 | 3, text: "跳过", kind: "skip" });
@@ -16,8 +17,9 @@ export function unoCreate(rng: () => number): S {
   }
   for (let i = 0; i < 4; i++) { cards.push({ id: `u${n++}`, color: 4, text: "万能", kind: "wild" }); cards.push({ id: `u${n++}`, color: 4, text: "+4", kind: "wild4" }); }
   const deck = shuffle(cards, rng);
-  const hands = [deck.slice(0, 7), deck.slice(7, 14), deck.slice(14, 21)];
-  const rest = deck.slice(21);
+  const hands: UCard[][] = [];
+  for (let i = 0; i < seats; i++) hands.push(deck.slice(i * 7, i * 7 + 7));
+  const rest = deck.slice(seats * 7);
   let top = rest[0];
   while (top && (top.kind === "wild" || top.kind === "wild4")) { rest.push(rest.shift()!); top = rest[0]; }
   return { hands, pile: [], deck: rest.slice(1), turn: 0, dir: 1, top: top ?? null, over: false, winner: -1, plies: 0, pendingDraw: 0 };
@@ -50,7 +52,9 @@ const spec: GameSpec<S> = {
   simplified: "本版本采用简化规则：三人局（你/TA/小机）；万能牌打出后固定指定为下一家可用最多的颜色（自动）；+2/+4不叠加，直接摸并跳过该家；无 UNO 喊叫罚牌。",
   undoable: false,
   maxTurns: 120,
-  create: (_seats, rng) => unoCreate(rng),
+  minSeats: 2,
+  maxSeats: 6,
+  create: (seats, rng) => unoCreate(seats, rng),
   turnOf: (s) => s.turn,
   legalActions: (s) => {
     if (s.over) return [];

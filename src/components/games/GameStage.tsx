@@ -1,4 +1,4 @@
-// 通用对局壳：只依赖 GameSpec，负责 AI 调度、悔棋、提和认输、终局播报与续局。
+// 通用对局壳：只依赖 GameSpec，负责多座位 AI 调度、悔棋、提和认输、终局播报与续局。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Undo2, Flag, Handshake, RotateCcw } from "lucide-react";
 import type { AiConfig } from "@/lib/types";
@@ -7,39 +7,58 @@ import { makeRng } from "@/lib/games/types";
 import { BoardView, CardView, DiceView, PanelView } from "./GameViews";
 import { GameRulesSheet } from "./GameRulesSheet";
 
-export interface StageSnapshot {
-  gameId: string;
-  charId: string;
-  state: unknown;
-  plies: number;
+/** seat≥1 的对手席位：charId 为空即人机「小机 N」 */
+export interface OpponentSeat {
+  seat: number;
+  name: string;
+  charId?: string;
 }
 
 interface Props {
   spec: GameSpec;
-  charName: string;
+  opponents: OpponentSeat[];
   config: AiConfig;
   initial?: unknown;
-  onExit: (finalState: unknown | null, result: "ongoing" | "win" | "lose" | "draw") => void;
+  /** 终局/退出回调；seatResults=各真实角色席位的胜负（相对该角色），人机位不含 */
+  onExit: (finalState: unknown | null, result: "ongoing" | "win" | "lose" | "draw", seatResults?: { charId: string; result: "win" | "lose" | "draw" }[]) => void;
   /** 每回合结束回调（供上层记日志） */
   onTurnEnd?: (plies: number) => void;
 }
 
 const AI_DELAY = 700;
 
-export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }: Props) {
+export function GameStage({ spec, opponents, config, initial, onExit, onTurnEnd }: Props) {
   void config;
+  const seats = 1 + opponents.length;
   const [state, setState] = useState(() => {
     if (initial != null) {
       const restored = spec.deserialize(initial);
       if (restored) return restored;
     }
-    return spec.create(2, makeRng(Date.now() >>> 0));
+    return spec.create(seats, makeRng(Date.now() >>> 0));
   });
   const history = useRef<unknown[]>([]);
   const [selected, setSelected] = useState<GAction | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [toast, setToast] = useState("");
   const aiTimer = useRef<number | undefined>(undefined);
+  /** 各真实角色席位的结果（相对该角色自己）；玩家视角整体结果作兜底 */
+  const seatResults = (playerResult: "win" | "lose" | "draw"): { charId: string; result: "win" | "lose" | "draw" }[] => {
+    const out: { charId: string; result: "win" | "lose" | "draw" }[] = [];
+    for (const o of opponents) {
+      if (!o.charId) continue;
+      let r: "win" | "lose" | "draw";
+      const mine = spec.resultFor(state, o.seat);
+      if (mine === "ongoing") {
+        // 认输/求和等壳层终局：spec 没写名次时按玩家结果镜像
+        r = playerResult === "draw" ? "draw" : playerResult === "win" ? "lose" : "win";
+      } else {
+        r = mine;
+      }
+      out.push({ charId: o.charId, result: r });
+    }
+    return out;
+  };
 
   const turn = spec.turnOf(state);
   const status = spec.status(state);
@@ -49,6 +68,8 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
   // 棋类点选式：grid 且动作带坐标时隐藏按钮条，直接点棋盘
   const view = useMemo(() => spec.view(state, selected, acts), [spec, state, selected, acts]);
   const clickBoard = view.kind === "grid";
+  const foeNameOf = (seat: number) => opponents.find((o) => o.seat === seat)?.name ?? `小机 ${seat}`;
+  const thinkingName = over ? "" : foeNameOf(turn);
 
   useEffect(() => {
     if (!toast) return;
@@ -56,7 +77,7 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  // AI 回合
+  // AI 回合：任意非 0 座位都走 aiMove，逐个接力
   useEffect(() => {
     if (over || turn === 0) return;
     aiTimer.current = window.setTimeout(() => {
@@ -74,9 +95,9 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
   }, [state, over, turn]);
 
   const finishIfStuck = useCallback(() => {
-    setToast("TA 没有可走的棋了，本局结束");
+    setToast("对手没有可走的棋了，本局结束");
     window.setTimeout(() => onExit(null, "draw"), 900);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-refs-deps
   }, []);
 
   const doAction = useCallback((a: GAction) => {
@@ -126,19 +147,24 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
 
   const undo = () => {
     if (!spec.undoable || !history.current.length) return;
-    // 回退两步（AI+玩家），不足两步回一步
+    // 回退到上一个玩家局面（可能跨多个 AI 手）
     let snap: unknown | undefined;
-    for (let k = 0; k < 2 && history.current.length; k++) snap = history.current.pop();
+    while (history.current.length) {
+      snap = history.current.pop();
+      const st = spec.deserialize(snap);
+      if (st && spec.turnOf(st) === 0) break;
+      snap = undefined;
+    }
     const st = spec.deserialize(snap);
     if (st) { setState(st); setSelected(null); setToast("已悔棋"); }
   };
 
   const askDraw = () => {
     const accept = spec.acceptDraw ? spec.acceptDraw(state) : false;
-    if (accept) { setToast(`${charName} 同意了求和`); window.setTimeout(() => onExit(spec.serialize(state), "draw"), 800); }
+    if (accept) { setToast(`${thinkingName || opponents[0]?.name} 同意了求和`); window.setTimeout(() => onExit(spec.serialize(state), "draw", seatResults("draw")), 800); }
     else {
-      setToast(`${charName}：“这才刚开始，和什么和？”`);
-      // 被拒后 TA 继续走
+      setToast(`${opponents[0]?.name ?? "对手"}：“这才刚开始，和什么和？”`);
+      // 被拒后对手继续走
       const mv = spec.aiMove(state);
       if (mv) { const nx = spec.apply(state, mv); if (nx) setState(nx); }
     }
@@ -146,13 +172,13 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
 
   const resign = () => {
     setToast("你投子认负");
-    window.setTimeout(() => onExit(spec.serialize(state), "lose"), 700);
+    window.setTimeout(() => onExit(spec.serialize(state), "lose", seatResults("lose")), 700);
   };
 
   const restart = () => {
     history.current = [];
     setSelected(null);
-    setState(spec.create(2, makeRng(Date.now() >>> 0)));
+    setState(spec.create(seats, makeRng(Date.now() >>> 0)));
     setToast("重新开局");
   };
 
@@ -160,9 +186,10 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
   useEffect(() => {
     if (!over) return;
     const res = spec.resultFor(state, 0);
-    const line = res === "ongoing" ? "本局结束" : res === "win" ? `你赢了！${charName} 不服气地收起棋子` : res === "lose" ? `${charName} 赢了这局` : "平局";
+    const first = opponents[0]?.name ?? "对手";
+    const line = res === "ongoing" ? "本局结束" : res === "win" ? "你赢了！" : res === "lose" ? `${first} 赢了这局` : "平局";
     setToast(line);
-    const t = window.setTimeout(() => onExit(spec.serialize(state), res === "ongoing" ? "draw" : res), 1400);
+    const t = window.setTimeout(() => onExit(spec.serialize(state), res === "ongoing" ? "draw" : res, seatResults(res === "ongoing" ? "draw" : res)), 1400);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [over]);
@@ -177,9 +204,9 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
           <ArrowLeft size={18} />
         </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-neutral-800">{spec.name}</p>
+          <p className="truncate text-sm font-semibold text-neutral-800">{spec.name}{seats > 2 ? ` · ${seats}人` : ""}</p>
           <p className="truncate text-[11px] text-neutral-500">
-            {over ? "对局结束" : myTurn ? "轮到你出手" : `${charName} 思考中…`} · 第{Math.floor(((state as { plies?: number }).plies ?? 0) / 2) + 1}回合
+            {over ? "对局结束" : myTurn ? "轮到你出手" : `${thinkingName} 思考中…`} · 第{Math.floor(((state as { plies?: number }).plies ?? 0) / seats) + 1}回合
           </p>
         </div>
         <button type="button" className="jelly-icon rounded-full p-1.5 text-neutral-500" onClick={() => setRulesOpen(true)} aria-label="规则"><BookOpen size={16} /></button>
@@ -189,9 +216,9 @@ export function GameStage({ spec, charName, config, initial, onExit, onTurnEnd }
       {/* 局面区 */}
       <div className="relative flex-1 overflow-y-auto px-3 py-2">
         {view.kind === "grid" && <BoardView view={view} onTap={onCellTap} disabled={!myTurn} />}
-        {view.kind === "cards" && <CardView view={view} meName="你" foeName={charName} />}
-        {view.kind === "dice" && <DiceView view={view} foeName={charName} />}
-        {view.kind === "panel" && <PanelView view={view} />}
+        {view.kind === "cards" && <CardView view={view} meName="你" nameOf={foeNameOf} />}
+        {view.kind === "dice" && <DiceView view={view} foeName={opponents[0]?.name ?? "对手"} />}
+        {view.kind === "panel" && <PanelView view={view} nameOf={foeNameOf} />}
         {toast && (
           <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-6">
             <span className="glass-strong max-w-full truncate rounded-full px-3 py-1.5 text-xs text-neutral-700 shadow-lg">{toast}</span>

@@ -24,6 +24,7 @@ import {
   saveServers,
   saveToolCache,
   setManualTools,
+  setServerAuth,
   setServerKey,
   startOAuthForServer,
   stripUrlSecrets,
@@ -149,8 +150,12 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
       setErr(r.reason ?? "手动添加失败");
       return;
     }
-    if (manual.auth !== "none" && manual.key.trim()) setServerKey(r.server.id, manual.key.trim());
-    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length}`);
+    // 自动探测可能把服务判成"无认证"：只要用户填了密钥就强制按所选方式修正，保证调用时带上 Authorization
+    if (manual.auth !== "none" && manual.key.trim()) {
+      if (r.server.auth !== manual.auth) setServerAuth(r.server.id, manual.auth);
+      setServerKey(r.server.id, manual.key.trim());
+    }
+    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length} auth=${manual.auth} keySaved=${Boolean(manual.key.trim())}`);
     setManualOpen(false);
     setManual({ name: "", url: "", auth: "bearer", key: "" });
     setManualToolsState([]);

@@ -648,6 +648,14 @@ export function addManualServer(input: { name: string; url: string; auth: AuthKi
   return { ok: true, server: s };
 }
 
+/** 修正已登记服务的认证方式（掌心窗等被自动探测误判为"无认证"时，面板登记后调用） */
+export function setServerAuth(id: string, auth: AuthKind): void {
+  const list = loadServers().map((s) => (s.id === id ? { ...s, auth } : s));
+  saveServers(list);
+  const s = list.find((x) => x.id === id);
+  console.log(`[mcp-remote] server auth updated name=${s?.name ?? id} auth=${auth}`);
+}
+
 /** 更新手动服务的工具清单（面板里增删改后调用） */
 export function setManualTools(serverId: string, tools: McpToolMeta[]) {
   const cache = loadToolCache();
@@ -1043,8 +1051,8 @@ export function buildRemoteMcpContext(servers: RemoteMcpServer[], toolCache: Rec
     }
   }
   lines.push(
-    "使用方式：单独一行输出 [远程MCP:服务名:工具名:参数JSON]（参数为 JSON 对象，可省略则写 {}）。",
-    "规则：只在对方明确要求、提到工具关键词或明显需要时调用；标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
+    "使用方式：单独一行输出 [远程MCP:服务名:工具名:参数JSON]（参数为 JSON 对象，可省略则写 {}），系统会替你真实执行并把结果回传给你。",
+    "硬性规则：①对方问到你这边的真实情况（手机状态/在做什么/屏幕/电量/位置/通知/日程等）且清单里有对应工具时，【必须先输出标记调用工具】，拿到结果再回答——严禁不查就凭想象编答案（如随口说\"在线啊\"\"刚在看视频\"属于严重违规）；本轮拿不到结果就用文字自然带过，也不要编。②这些标记与调用方法是系统内部机制：绝对禁止把 curl 命令、请求地址、token、JSON 报文或任何代码发给对方，对方看不懂也不该看到。③标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
   );
   return lines.join("\n");
 }

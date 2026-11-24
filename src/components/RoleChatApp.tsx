@@ -2948,10 +2948,14 @@ function AssistantRow({
   // 保险丝：万一历史消息里残留原始 [照片:] 标记（旧版本落库或消化失败），渲染层直接滤掉不显示文字
   const photoStripped = lines.filter((l) => !/^\s*[\[【(]?\s*(系统)?\s*(生图|绘图|拍照)?指令?标记?\s*[:：]?\s*\S*照片/.test(l) || !/\[照片|【照片|照片\s*[:：]/.test(l));
   if (photoStripped.length !== lines.length) console.log(`[photo] render strip residual mark char=${character.id}`);
+  // 渲染保险丝②：泄漏的内部机制行——[远程MCP:…] 标记、curl/令牌/端点等调试指令，绝不允许出现在聊天气泡里
+  const INTERNAL_LEAK_RE = /^\s*(curl\s|\s*-H\s|Authorization\s*[:：]|vp-phone:|https?:\/\/\S+\/mcp\b)|\[远程MCP\s*[:：]/i;
+  const cleanLines = photoStripped.filter((l) => !INTERNAL_LEAK_RE.test(l));
+  if (cleanLines.length !== photoStripped.length) console.log(`[mcp-remote] render strip leaked internal line char=${character.id} count=${photoStripped.length - cleanLines.length}`);
   // entry.quote（AI 引用历史消息）只挂在第一个文字气泡上方，微信式 reply 小块
   let quoteUsed = false;
   type RenderPart = { type: "text"; content: string; quote?: { name: string; content: string } } | { type: "sticker"; sticker: Sticker };
-  const parts: RenderPart[] = photoStripped.flatMap((line) =>
+  const parts: RenderPart[] = cleanLines.flatMap((line) =>
     parseReplyToMessages(line, stickerLib).map((p): RenderPart => {
       if (p.type === "text" && p.content && !quoteUsed && entry.quote) {
         quoteUsed = true;

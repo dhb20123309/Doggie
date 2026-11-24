@@ -1,0 +1,37 @@
+[
+  {
+    "content": "duel-engine.ts：五子棋+象棋规则引擎与AI",
+    "id": "d1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "duel-store.ts：棋局/战绩持久化层",
+    "id": "d2",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "DuelApp.tsx：棋盘全屏对局页（两棋种渲染）",
+    "id": "d3",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "接线：ScreenId/PhoneShell路由 + 聊天工具箱入口 + 终局主动消息",
+    "id": "d4",
+    "priority": "high",
+    "skills": [],
+    "status": "in_progress"
+  },
+  {
+    "content": "双门禁+dev+bundle+AGENTS.md 交付",
+    "id": "d5",
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
+  }
+]

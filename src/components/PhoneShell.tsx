@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { startUsageTracker } from "@/lib/reality-mcp";
 import type { AiConfig, ScreenId } from "@/lib/types";
+import type { ChatEntry } from "@/lib/chat-types";
 import { isConfigured } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
 import { LockScreen } from "./LockScreen";
@@ -16,6 +17,7 @@ import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
 import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
 import { DeliveryApp } from "./DeliveryApp";
 import { VoiceCallApp } from "./VoiceCallApp";
+import { DuelApp } from "./DuelApp";
 import { McpApp } from "./McpApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 import { onNotify, onOpenChat, requestOpenChat, useNotifyOn, type NotifyPayload } from "@/lib/notification-store";
@@ -216,6 +218,21 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
     console.log(`[delivery] outbox → char=${charId} ${order.kind} ¥${order.amount}`);
     setScreen("rolechat");
   };
+  /** 双弈终局：把结果写进该角色会话（居中系统灰字），并切回聊天页让角色感想自然衔接 */
+  const duelFinish = (charId: string, result: "win" | "lose" | "draw", gameName: string) => {
+    try {
+      const key = `vp-phone:rolechat-log:${charId}`;
+      const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
+      const tip: ChatEntry = { id: `d${Date.now()}`, role: "assistant", content: "", at: Date.now(), blockedTip: true };
+      // 复用拒收提示的居中灰字渲染形态：文案按对局结果生成
+      tip.content = result === "win" ? `「你赢了这局${gameName}」` : result === "lose" ? `「${gameName}对局结束，你输了」` : `「${gameName}对局结束，和棋」`;
+      localStorage.setItem(key, JSON.stringify([...prev, tip]));
+    } catch {
+      /* ignore */
+    }
+    localStorage.setItem("vp-phone:active-character:v1", charId);
+    console.log(`[duel] finish → chat char=${charId} result=${result}`);
+  };
   const lock = () => {
     setScreen("home");
     setLocked(true);
@@ -321,7 +338,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "chat" && (
                 <ChatApp config={config} onBack={goHome} onOpenSettings={() => setScreen("settings")} />
               )}
-              {screen === "rolechat" && <RoleChatApp config={config} background={chatBg} onBack={goHome} />}
+              {screen === "rolechat" && <RoleChatApp config={config} background={chatBg} onBack={goHome} onOpenDuel={() => setScreen("duel")} />}
               {screen === "worldbook" && <WorldBookApp onBack={goHome} />}
               {screen === "sticker" && <StickerApp onBack={goHome} />}
               {screen === "album" && <AlbumApp onBack={goHome} />}
@@ -340,6 +357,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                 <DeliveryApp onBack={goHome} onSend={(charId, order) => sendOrderToChat(charId, order)} />
               )}
               {screen === "voicecall" && <VoiceCallApp config={config} onBack={goHome} />}
+              {screen === "duel" && <DuelApp config={config} onBack={goHome} onFinish={duelFinish} />}
               {screen === "mcp" && <McpApp config={config} onBack={goHome} />}
             </div>
 

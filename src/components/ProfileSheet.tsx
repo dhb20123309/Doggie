@@ -2,7 +2,7 @@
 // UI 复刻用户提供的酒馆角色卡截图：居中"名字 × 你"大标题、标签胶囊横排、
 // 立绘与文字左右并置、子标题竖线锚点、板块间只用留白无分割线、警告浅红底高亮
 import { useRef, useState } from "react";
-import { X, Wrench, FileText, MessageSquareQuote, Upload, ImagePlus, Clapperboard, ChevronDown, Banknote, MapPin } from "lucide-react";
+import { X, Wrench, FileText, MessageSquareQuote, Upload, ImagePlus, Clapperboard, ChevronDown, Banknote, MapPin, Gamepad2 } from "lucide-react";
 import type { CharacterProfile, ProfileSection } from "@/lib/character-profile";
 import { presetProfileFor } from "@/lib/character-profile";
 import { presetPhoto } from "@/lib/chat-store";
@@ -370,7 +370,7 @@ export function ProfileBody({ profile, onLoadIntro, onUploadCover }: {
 
 /* ---------- ① 工具箱菜单（聊天页左下角弹出） ---------- */
 
-export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport, onSendPhoto, onTransfer, onLocation, onClose }: {
+export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport, onSendPhoto, onTransfer, onLocation, onDuel, onClose }: {
   hasProfile: boolean;
   onOpenProfile: () => void;
   onShowOpener: () => void;
@@ -378,6 +378,7 @@ export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport,
   onSendPhoto: () => void;
   onTransfer: () => void;
   onLocation: () => void;
+  onDuel: () => void;
   onClose: () => void;
 }) {
   return (
@@ -414,6 +415,10 @@ export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport,
           <button type="button" onClick={onImport} className="jelly-btn flex flex-col items-center gap-1 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
             <Upload className="size-4 text-primary" />
             导入档案
+          </button>
+          <button type="button" onClick={onDuel} className="jelly-btn col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
+            <Gamepad2 className="size-4 text-primary" />
+            下棋 · 双弈
           </button>
         </div>
       </div>

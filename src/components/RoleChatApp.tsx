@@ -130,6 +130,8 @@ interface Props {
   /** 聊天背景（用户上传替换，默认内置奶油图） */
   background?: string;
   onBack: () => void;
+  /** 打开双弈下棋全屏页（工具箱入口） */
+  onOpenDuel?: (charId: string) => void;
 }
 
 /** 消息时间戳：当天只显示 HH:MM，跨日补上日期 */
@@ -187,7 +189,7 @@ function lastPhotoAt(charId: string): number {
 
 type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail" | "masks" | "group";
 
-export function RoleChatApp({ config, background, onBack }: Props) {
+export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
   const [characters, setCharacters] = useCharacters();
   const [activeId, setActiveId] = useActiveCharId(characters.map((c) => c.id));
   const active = characters.find((c) => c.id === activeId);
@@ -2442,6 +2444,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             console.log(`[profile] toolbox→导入面板 char=${active.id}`);
             setToolboxOpen(false);
             setProfileImportOpen(true);
+          }}
+          onDuel={() => {
+            console.log(`[duel] toolbox→下棋 char=${active.id}`);
+            setToolboxOpen(false);
+            onOpenDuel?.(active.id);
           }}
           onClose={() => setToolboxOpen(false)}
         />

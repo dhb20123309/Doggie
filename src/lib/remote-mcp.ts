@@ -969,7 +969,8 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
   }
   const check = validateMcpUrl(server.url);
   if (!check.ok) return { ok: false, text: `服务地址已被安全策略拒绝：${check.reason}`, content: "" };
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // MCP Streamable HTTP 规范强制要求 Accept 同时声明 json 与 event-stream，缺失会被服务端 406 Not Acceptable 拒绝（掌心窗实测命中）
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
   const key = (() => {
     try {
       return localStorage.getItem(`vp-phone:mcp-key:${server.id}`) || "";
@@ -989,6 +990,7 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
+  console.log(`[mcp-remote] call → ${server.name}·${tool.name} auth=${server.auth} accept=json+sse`);
   try {
     const res = await fetch(server.url, {
       method: "POST",
@@ -997,12 +999,35 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
       signal: controller.signal,
     });
     const text = await res.text();
+    console.log(`[mcp-remote] call ← HTTP ${res.status} ct=${res.headers.get("content-type")?.slice(0, 40) ?? "?"}`);
     if (!res.ok) {
       appendCallLog(server, tool.name, false, `HTTP ${res.status}`);
       return { ok: false, text: `调用失败（HTTP ${res.status}）`, content: "" };
     }
     let summary = "已完成";
     let content = "";
+    const ct0 = res.headers.get("content-type") ?? "";
+    if (ct0.includes("text/event-stream")) {
+      // SSE 帧响应：取最后一个 data: JSON（tools/call 结果帧）
+      let last: { result?: { content?: { text?: string }[] }; error?: { message?: string } } | null = null;
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          last = JSON.parse(line.slice(5).trim());
+        } catch {
+          /* 忽略非 JSON 帧 */
+        }
+      }
+      if (last?.error?.message) {
+        appendCallLog(server, tool.name, false, last.error.message);
+        return { ok: false, text: `服务返回错误：${maskSecrets(last.error.message).slice(0, 60)}`, content: "" };
+      }
+      content = ((last?.result?.content ?? []).map((c) => c.text ?? "").join("\n")).slice(0, 2000);
+      summary = content ? `返回 ${content.length} 字` : "无正文返回";
+      appendCallLog(server, tool.name, true, `${summary}${tool.private ? " · 结果含私人内容，仅本次会话可见" : ""}`);
+      console.log(`[mcp-remote] call ok via SSE len=${content.length}`);
+      return { ok: true, text: `已调用 ${server.name}·${tool.name}（${summary}）`, content: maskSecrets(content) };
+    }
     try {
       const j = JSON.parse(text) as { result?: { content?: { text?: string }[] }; error?: { message?: string } };
       if (j.error?.message) {

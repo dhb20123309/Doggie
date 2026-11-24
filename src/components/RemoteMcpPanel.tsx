@@ -183,14 +183,15 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
         key: m.key,
       };
     });
-    // 去重合并：已有同名工具不重复加入
+    // 全量覆盖：掌心窗服务端 tools/list 有 138 个工具，旧预置表只是 README 子集；
+    // 残留旧表会让模型只看得见部分能力，且用户手动改过的条目按名字保留
     setManualToolsState((prev) => {
-      const have = new Set(prev.map((t) => t.name));
-      const added = LINJIAN_TOOLS.filter((t) => !have.has(t.name));
-      console.log(`[mcp-remote] linjian preset loaded total=${prev.length + added.length} new=${added.length}`);
-      return [...prev, ...added];
+      const kept = prev.filter((t) => !LINJIAN_TOOLS.some((p) => p.name === t.name) && t.name !== "");
+      const merged = [...LINJIAN_TOOLS, ...kept];
+      console.log(`[mcp-remote] linjian preset synced total=${merged.length} kept-custom=${kept.length}`);
+      return merged;
     });
-    setNotice("已载入掌心窗工具清单（截图/读屏等敏感动作均为高危·每次确认）。请核对端点地址、粘贴 Render 的 LINJIAN_TOKEN 后点「登记服务」。");
+    setNotice("已同步掌心窗完整工具清单（以服务端实时清单为准，截图/锁屏/门禁等敏感动作均为高危·每次确认）。请核对端点地址、粘贴 Render 的 LINJIAN_TOKEN 后点「登记服务」。");
   };
 
   const copyCurl = async (s: RemoteMcpServer) => {

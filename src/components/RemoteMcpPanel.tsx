@@ -145,6 +145,15 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
 
   const doManualInstall = () => {
     setErr("");
+    // 同名/同 host 旧登记先移除——否则重复点登记会留下多条服务，界面显示的永远是旧的（如被截断的 40 条）缓存
+    const dupes = loadServers().filter((x) => x.name === manual.name.trim() || (manual.url.trim() && (() => { try { return new URL(x.url).host === new URL(manual.url.trim()).host; } catch { return false; } })()));
+    for (const d of dupes) {
+      removeServer(d.id);
+      const c = loadToolCache();
+      delete c[d.id];
+      saveToolCache(c);
+      console.log(`[mcp-remote] manual install replaced old server name=${d.name} id=${d.id} oldTools=${(loadToolCache()[d.id] ?? []).length}`);
+    }
     const r = addManualServer({ name: manual.name, url: manual.url, auth: manual.auth, tools: manualTools });
     if (!r.ok || !r.server) {
       setErr(r.reason ?? "手动添加失败");
@@ -155,11 +164,11 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
       if (r.server.auth !== manual.auth) setServerAuth(r.server.id, manual.auth);
       setServerKey(r.server.id, manual.key.trim());
     }
-    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length} auth=${manual.auth} keySaved=${Boolean(manual.key.trim())}`);
+    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length} auth=${manual.auth} keySaved=${Boolean(manual.key.trim())} replaced=${dupes.length}`);
     setManualOpen(false);
     setManual({ name: "", url: "", auth: "bearer", key: "" });
     setManualToolsState([]);
-    setNotice(`「${r.server.name}」已手动登记。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
+    setNotice(`「${r.server.name}」已手动登记${dupes.length ? `（已自动替换 ${dupes.length} 条旧登记）` : ""}。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
     refresh();
   };
 
@@ -191,7 +200,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
       console.log(`[mcp-remote] linjian preset synced total=${merged.length} kept-custom=${kept.length}`);
       return merged;
     });
-    setNotice("已同步掌心窗完整工具清单（以服务端实时清单为准，截图/锁屏/门禁等敏感动作均为高危·每次确认）。请核对端点地址、粘贴 Render 的 LINJIAN_TOKEN 后点「登记服务」。");
+    setNotice("已同步掌心窗完整工具清单（以服务端实时清单为准，截图/锁屏/门禁等敏感动作均为高危·每次确认）。⚠️ 请务必再点下方「登记服务」保存——旧的同名登记会被自动替换，只载入不登记不会生效。");
   };
 
   const copyCurl = async (s: RemoteMcpServer) => {

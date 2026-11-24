@@ -1,0 +1,30 @@
+[
+  {
+    "content": "media.ts：testImageChannel + generateCharPhoto 加 charModel",
+    "id": "p1",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "chat-types.ts Character.imageModel + SettingsApp testChannel 改造",
+    "id": "p2",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "RoleChatApp：主动照片传角色模型 + 设定页生图模型选择",
+    "id": "p3",
+    "priority": "high",
+    "skills": [],
+    "status": "completed"
+  },
+  {
+    "content": "双门禁 + dev + bundle + AGENTS.md",
+    "id": "p4",
+    "priority": "medium",
+    "skills": [],
+    "status": "in_progress"
+  }
+]

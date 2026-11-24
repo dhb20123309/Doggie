@@ -14,6 +14,8 @@ export interface Character {
   minimaxVoiceId?: string;
   /** 是否允许该角色主动生成"写实日常照片"分享 */
   photoEnabled?: boolean;
+  /** 角色绑定的生图模型（覆盖全局生图通道的 model；留空=跟随设置里的默认） */
+  imageModel?: string;
   /** 主动消息开关：关闭后该角色不会不请自来 */
   proactiveEnabled?: boolean;
   /** 主动消息频率：quiet=偶尔 / normal=现状默认 / active=黏人；影响闲置门槛、触发概率与连发条数 */

@@ -110,7 +110,9 @@
 
 - **MCP 工具聊天关键词触发（第83轮，对标小红书 MCP 工具箱表单）**：McpToolMeta 加 keywords?: string[]。RemoteMcpPanel 手动登记表单与"编辑工具"追加行均有「聊天关键词（逗号分隔）」输入（parseKeywords 去重截断≤8个），快捷模板带默认词；buildRemoteMcpContext 新增第三参 recentText——RoleChatApp mcpCtx 处传最近3条用户消息 content（⚠️ ChatEntry 字段是 content 不是 text），命中≥2字关键词即在 system 追加【关键词命中】服务名:工具名清单并打 [mcp-remote] keyword hits 日志；使用规则句同步加"提到工具关键词"。
 
-- **生图通道拉模型+连接测试（第84轮）**：SettingsApp ImageSection 收 config prop，openai 模式下新增两按钮——pullModels 复用 ai-api.fetchModelList（effBase/effKey = 生图地址/Key 留空回落聊天配置，与 generateCharPhoto 回落口径一致；图像类模型名排序靠前、点选填入 form.model）、testChannel 复用 testConnection（⚠️ TestResult 成功态是 status==="success" 不是 ok，title/detail/hints 拼人话红字）。日志 [image] models pulled / channel test ok|fail。
+- **生图通道拉模型+连接测试（第84轮）**：SettingsApp ImageSection 收 config prop，openai 模式下新增两按钮——pullModels 复用 ai-api.fetchModelList（effBase/effKey = 生图地址/Key 留空回落聊天配置，与 generateCharPhoto 回落口径一致；图像类模型名排序靠前、点选填入 form.model）。日志 [image] models pulled。
+
+- **生图连接测试真测生图 + 角色绑定生图模型（第85轮）**：❌ 第84轮的 testChannel 误用 testConnection（最小 chat 请求），拿聊天模型撞生图网关报 503 误导用户。现改为 media.ts 新增 `testImageChannel(ic, fallbackCfg)`：openai 模式对生效网关 POST /images/generations 发最小生图请求（model=ic.model 或默认 gpt-image-2、gpt-image* 用 1024x1024 其余 512x512、固定苹果测试句、候选地址兜底）；pollinations 模式 fetchPollinations 拉 256x256；401/403→"密钥无效"、404→换候选、其他非 2xx 透传 error.message 人话化；返回 {ok,detail,ms}。SettingsApp 按钮文案「测试生图」（testOk 显示"✓ 生图可用"4s）、下方注明"会真实生成一张小图、与聊天接口连接测试互不相干、消耗少量额度"。日志 [image] channel test passed|failed model=… ms=…。角色绑定：Character 加 imageModel?（可选零迁移）；generateCharPhoto 加第4参 charModel（`charModel?.trim() || ic.model`，pollinations/openai/回落三通道全用覆盖后的 model）；RoleChatApp 主动照片处传 ch.imageModel（日志 [photo] attach … model=…）；CharacterEditor 在 photoEnabled 开启时显示「TA 的生图模型」区——跟随全局 + GPT_IMAGE_MODELS 胶囊 + 手填 Input（onBlur 落库），回调 onPickImageModel 写 characters:v2（日志 [photo] model bind）。⚠️ 坑记：TestResult 成功态 status==="success"；本轮起 testConnection 不再被 ImageSection 使用（ApiSection 仍用）。
 
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。

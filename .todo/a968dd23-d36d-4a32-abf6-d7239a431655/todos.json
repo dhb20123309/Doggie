@@ -1,23 +1,26 @@
 [
   {
-    "content": "remote-mcp.ts：手动服务数据结构/存储 + 错误文案人话化 + curl 指令生成",
-    "id": "m1",
+    "content": "media.ts：testImageChannel + generateCharPhoto 加 charModel",
+    "id": "p1",
     "priority": "high",
-    "skills": [],
-    "status": "completed"
+    "skills": []
   },
   {
-    "content": "RemoteMcpPanel.tsx：手动添加服务表单 + 工具登记 + 复制调用指令",
-    "id": "m2",
+    "content": "chat-types.ts Character.imageModel + SettingsApp testChannel 改造",
+    "id": "p2",
     "priority": "high",
-    "skills": [],
-    "status": "completed"
+    "skills": []
+  },
+  {
+    "content": "RoleChatApp：主动照片传角色模型 + 设定页生图模型选择",
+    "id": "p3",
+    "priority": "high",
+    "skills": []
   },
   {
     "content": "双门禁 + dev + bundle + AGENTS.md",
-    "id": "m3",
+    "id": "p4",
     "priority": "medium",
-    "skills": [],
-    "status": "completed"
+    "skills": []
   }
 ]

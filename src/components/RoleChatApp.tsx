@@ -95,7 +95,7 @@ import {
   usePersisted,
 } from "@/lib/chat-store";
 import { loadVoiceConfig, voiceReady, synthesizeSpeech, MINIMAX_VOICES } from "@/lib/tts";
-import { generateCharPhoto, photoPrompt, matchPhotoScene } from "@/lib/media";
+import { generateCharPhoto, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
@@ -1547,8 +1547,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         }
         if (cancelled) return;
         caption = (caption || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || pickCaption(scene);
-        const url = await generateCharPhoto(config, photoPrompt(ch.name, ch.persona, scene), presetPhoto(ch.id));
+        const url = await generateCharPhoto(config, photoPrompt(ch.name, ch.persona, scene), presetPhoto(ch.id), ch.imageModel);
         if (cancelled || !url) return;
+        console.log(`[photo] attach char=${ch.id} model=${ch.imageModel?.trim() || "全局默认"}`);
         setLogForChar(ch.id, {
           id: `ph${Date.now()}`,
           role: "assistant",
@@ -1765,6 +1766,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         onToggleProactive={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, proactiveEnabled: v } : x)))}
         onToggleFreq={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, proactiveFreq: v } : x)))}
         onTogglePhoto={(v) => setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, photoEnabled: v } : x)))}
+        onPickImageModel={(m) => {
+          setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, imageModel: m || undefined } : x)));
+          console.log(`[photo] model bind char=${active.id} model=${m || "跟随全局"}`);
+        }}
         onToggleStory={(v) => {
           console.log(`[story] toggle char=${active.id} → ${v ? "剧情模式" : "普通聊天"}`);
           setCharacters((prev) => prev.map((x) => (x.id === active.id ? { ...x, storyMode: v } : x)));
@@ -3295,6 +3300,7 @@ function CharacterEditor({
   onToggleProactive,
   onToggleFreq,
   onTogglePhoto,
+  onPickImageModel,
   onToggleStory,
   onPickVoice,
   onPickMiniMaxVoice,
@@ -3308,6 +3314,7 @@ function CharacterEditor({
   onToggleProactive: (v: boolean) => void;
   onToggleFreq: (v: "quiet" | "normal" | "active") => void;
   onTogglePhoto: (v: boolean) => void;
+  onPickImageModel: (m: string) => void;
   onToggleStory: (v: boolean) => void;
   onPickVoice: (id: string) => void;
   onPickMiniMaxVoice: (id: string) => void;
@@ -3463,6 +3470,45 @@ function CharacterEditor({
             />
           </div>
           <p className="text-[11px] leading-relaxed text-muted-foreground">主动消息只在长时间没聊时偶尔发生，正文贴合人设不带旁白；照片优先走外部生图接口，不可用时用预置素材。</p>
+          {/* 角色绑定生图模型：TA 分享日常照片时优先用这个模型（覆盖设置里的全局生图通道） */}
+          {(form.photoEnabled ?? false) && (
+            <div className="space-y-1.5 pt-1">
+              <p className="text-[12px] font-semibold">TA 的生图模型</p>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForm((f) => ({ ...f, imageModel: undefined }));
+                    onPickImageModel("");
+                  }}
+                  className={`jelly-btn rounded-full px-2.5 py-1 text-[11px] ${!form.imageModel ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+                >
+                  跟随全局
+                </button>
+                {GPT_IMAGE_MODELS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      setForm((f) => ({ ...f, imageModel: m }));
+                      onPickImageModel(m);
+                    }}
+                    className={`jelly-btn rounded-full px-2.5 py-1 text-[11px] ${form.imageModel === m ? "bg-primary text-primary-foreground" : "glass text-secondary-foreground"}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={form.imageModel ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, imageModel: e.target.value }))}
+                onBlur={(e) => onPickImageModel(e.target.value.trim())}
+                placeholder="也可手填网关里的其他生图模型名，留空=跟随全局"
+                className="glass-input h-8 w-full rounded-xl px-3 text-[11.5px]"
+              />
+              <p className="text-[10px] leading-relaxed text-muted-foreground">绑定后 TA 分享日常照片会走设置里的生图通道、但用这个模型出图；生图地址和密钥仍在「设置 → 角色生图通道」统一配置。</p>
+            </div>
+          )}
         </div>
 
         {/* 音色绑定 */}

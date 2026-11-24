@@ -223,13 +223,17 @@ async function fetchPollinations(prompt: string, width: number, height: number, 
 export async function generateCharPhoto(
   cfg: { baseUrl: string; apiKey: string },
   prompt: string,
-  fallbackUrl: string
+  fallbackUrl: string,
+  /** 角色绑定的生图模型（Character.imageModel）；留空=跟随全局生图配置 */
+  charModel?: string
 ): Promise<string> {
   const ic = loadImageConfig();
+  // 角色级模型覆盖：TA 分享日常照片时优先用自己绑定的模型
+  const model = charModel?.trim() || ic.model;
   // ① 独立通道：pollinations 免 Key 直链
   if (ic.mode === "pollinations") {
     try {
-      const url = await fetchPollinations(prompt, 768, 1024, ic.model);
+      const url = await fetchPollinations(prompt, 768, 1024, model);
       if (url) return url;
     } catch {
       /* 继续下一通道 */
@@ -237,17 +241,94 @@ export async function generateCharPhoto(
   }
   // ①' 独立通道：自定义 OpenAI 兼容网关
   if (ic.mode === "openai" && ic.baseUrl.trim()) {
-    const url = await tryOpenAIImages(ic.baseUrl.trim(), ic.apiKey.trim() || cfg.apiKey.trim(), ic.model, prompt);
+    const url = await tryOpenAIImages(ic.baseUrl.trim(), ic.apiKey.trim() || cfg.apiKey.trim(), model, prompt);
     if (url) return url;
   }
   // ② 回落聊天接口网关
   const base = normalizeBaseUrl(cfg.baseUrl);
   const key = cfg.apiKey.trim();
   if (base && key) {
-    const url = await tryOpenAIImages(base, key, ic.model, prompt);
+    const url = await tryOpenAIImages(base, key, model, prompt);
     if (url) return url;
   }
   return fallbackUrl;
+}
+
+/**
+ * 真实生图连接测试：向 /images/generations 发一次最小生图请求（小尺寸、固定测试句），
+ * 能出图才算通过——不再复用聊天接口的 testConnection，避免拿聊天模型撞生图网关的误导报错。
+ * ⚠️ 会实际消耗一次生图额度。
+ */
+export async function testImageChannel(
+  ic: ImageConfig,
+  fallbackCfg: { baseUrl: string; apiKey: string }
+): Promise<{ ok: boolean; detail: string; ms: number }> {
+  const t0 = Date.now();
+  const model = ic.model.trim() || DEFAULT_IMAGE_CONFIG.model;
+  if (ic.mode === "pollinations") {
+    try {
+      const url = await fetchPollinations("a small red apple on a white table, simple photo", 256, 256, ic.model);
+      const ms = Date.now() - t0;
+      console.log(`[image] channel test ${url ? "ok" : "fail"} mode=pollinations ms=${ms}`);
+      return url ? { ok: true, detail: `免费网关出图成功`, ms } : { ok: false, detail: "免费网关未返回图片，可能暂时不可用", ms };
+    } catch (e) {
+      const ms = Date.now() - t0;
+      console.warn("[image] channel test threw mode=pollinations:", e);
+      return { ok: false, detail: e instanceof Error ? e.message : "网络请求失败", ms };
+    }
+  }
+  const base = ic.baseUrl.trim() || fallbackCfg.baseUrl;
+  const key = ic.apiKey.trim() || fallbackCfg.apiKey;
+  if (!normalizeBaseUrl(base)) return { ok: false, detail: "请先填写生图地址（或先在上方配置聊天接口以启用回落）", ms: 0 };
+  const norm = normalizeBaseUrl(base);
+  const candidates = /\/v\d+$/.test(norm) ? [norm] : [norm, `${norm}/v1`];
+  const isGptImage = /^gpt-image/i.test(model);
+  let lastErr = "";
+  for (const url of candidates) {
+    try {
+      const res = await fetch(`${url}/images/generations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify({
+          prompt: "A tiny red apple on a plain white table, simple product photo",
+          n: 1,
+          size: isGptImage ? "1024x1024" : "512x512",
+          response_format: "b64_json",
+          model,
+        }),
+      });
+      if (res.status === 401 || res.status === 403) {
+        const ms = Date.now() - t0;
+        console.warn(`[image] channel test fail status=${res.status} auth model=${model}`);
+        return { ok: false, detail: `密钥无效（${res.status}）：请检查 API Key 是否属于该站点`, ms };
+      }
+      if (res.status === 404) {
+        lastErr = "该地址下找不到生图接口（404），确认站点是否提供 /images/generations";
+        continue;
+      }
+      if (!res.ok) {
+        // 透传网关错误信息（如"模型无可用渠道"），人话化展示
+        const json = await res.json().catch(() => null);
+        const msg = json?.error?.message || json?.message || `服务返回 ${res.status}`;
+        const ms = Date.now() - t0;
+        console.warn(`[image] channel test fail status=${res.status} model=${model} msg=${msg}`);
+        return { ok: false, detail: `生图请求失败：${msg}`, ms };
+      }
+      const json = await res.json().catch(() => null);
+      const item = json?.data?.[0];
+      const ms = Date.now() - t0;
+      if (item?.url || item?.b64_json) {
+        console.log(`[image] channel test ok model=${model} ms=${ms}`);
+        return { ok: true, detail: `「${model}」出图成功`, ms };
+      }
+      lastErr = "接口返回了空结果，换模型再试";
+    } catch (e) {
+      lastErr = e instanceof Error ? `无法连接该地址（${e.message}）` : "网络请求失败";
+    }
+  }
+  const ms = Date.now() - t0;
+  console.warn(`[image] channel test fail model=${model} detail=${lastErr}`);
+  return { ok: false, detail: lastErr, ms };
 }
 
 /** OpenAI 兼容 /images/generations：候选地址兜底（不带 /vN 补 /v1），返回图片 URL 或 data URL，失败返回空串 */

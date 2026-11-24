@@ -11,7 +11,7 @@ import { normalizeBaseUrl } from "@/lib/types";
 import { testConnection, fetchModelList } from "@/lib/ai-api";
 import { usePasscode, DEFAULT_PASSCODE } from "@/lib/lock-store";
 import { loadVoiceConfig, saveVoiceConfig, testVoiceChannel, fetchMiniMaxVoices, MINIMAX_VOICES, type VoiceConfig } from "@/lib/tts";
-import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, GPT_IMAGE_MODELS, type ImageConfig } from "@/lib/media";
+import { loadMusicTracks, saveMusicTracks, parseMusicSource, loadImageConfig, saveImageConfig, DEFAULT_IMAGE_CONFIG, GPT_IMAGE_MODELS, testImageChannel, type ImageConfig } from "@/lib/media";
 import { loadMcpPrefs } from "@/lib/reality-mcp";
 import { usePersisted } from "@/lib/chat-store";
 import { listCachedTakes, clearAllCachedAudio } from "@/lib/call-observe";
@@ -624,20 +624,21 @@ function ImageSection({ config }: { config: AiConfig }) {
     }
   };
 
-  /** 连接测试：最小对话请求验证该网关地址+Key 是否可用（生图走同套鉴权） */
+  /** 连接测试：真正测生图通道——用当前填写的生图模型向 /images/generations 发一次最小生图请求，能出图才算通过（会消耗一张图的额度） */
   const testChannel = async () => {
     if (testing) return;
     setTesting(true);
     setTestErr("");
     try {
-      const res = await testConnection({ ...config, baseUrl: effBase, apiKey: effKey });
-      if (res.status === "success") {
+      // 表单即时值优先（未保存也能测），mode/model 取当前编辑态
+      const res = await testImageChannel({ ...form, baseUrl: effBase, apiKey: effKey }, config);
+      if (res.ok) {
         setTestOk(true);
-        console.log(`[image] channel test ok title=${res.title}`);
-        setTimeout(() => setTestOk(false), 2500);
+        console.log(`[image] channel test passed model=${form.model || DEFAULT_IMAGE_CONFIG.model} ms=${res.ms}`);
+        setTimeout(() => setTestOk(false), 4000);
       } else {
-        setTestErr([res.title, res.detail].filter(Boolean).join("："));
-        console.warn(`[image] channel test fail status=${res.status} detail=${res.detail}`);
+        setTestErr(res.detail);
+        console.warn(`[image] channel test failed detail=${res.detail}`);
       }
     } catch (e) {
       setTestErr(e instanceof Error ? e.message : "连接失败");
@@ -707,9 +708,10 @@ function ImageSection({ config }: { config: AiConfig }) {
               {pulling ? "拉取中…" : "拉取模型列表"}
             </Button>
             <Button size="sm" variant="outline" className="jelly-btn h-8 flex-1 rounded-xl text-xs" disabled={testing || pulling} onClick={() => void testChannel()}>
-              {testOk ? "✓ 连接正常" : testing ? "测试中…" : "连接测试"}
+              {testOk ? "✓ 生图可用" : testing ? "生成测试图中…" : "测试生图"}
             </Button>
           </div>
+          <p className="text-[10px] leading-relaxed text-muted-foreground">「测试生图」会用所选模型真实生成一张小图来验证生图能力（与聊天接口的连接测试互不相干），会消耗少量额度。</p>
           {models.length > 0 && (
             <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg bg-white/50 p-1.5">
               <p className="px-1 text-[10px] font-semibold text-muted-foreground">该网关可用模型（点选填入，图像类已排前）</p>

@@ -1,6 +1,6 @@
 // Companion OS 主屏：双屏横向轮播（屏1 陪伴主屏 / 屏2 生活 Bento）+ 常驻玻璃 Dock
 import { useEffect, useRef, useState } from "react";
-import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, PhoneCall, Sparkles, UtensilsCrossed, SmilePlus } from "lucide-react";
+import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, PhoneCall, Sparkles, UtensilsCrossed, SmilePlus, Swords } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
 import { useCharacters, unreadCount, useReadMarks } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
@@ -174,6 +174,12 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
             <PhoneCall className="size-7 text-white" />
           </span>
           <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">语音通话</span>
+        </button>
+        <button type="button" onClick={() => onOpen("duel")} className="group flex flex-col items-center gap-1">
+          <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#a8c8f0] to-[#7b9fe0] shadow-[0_4px_14px_-4px_rgba(120,150,220,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">
+            <Swords className="size-7 text-white" />
+          </span>
+          <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">双弈游戏</span>
         </button>
         <button type="button" onClick={() => onOpen("mcp")} className="group flex flex-col items-center gap-1">
           <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#c7b9f5] to-[#8ea3e8] shadow-[0_4px_14px_-4px_rgba(140,130,220,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">

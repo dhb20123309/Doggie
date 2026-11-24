@@ -1,37 +1,58 @@
 [
   {
-    "content": "duel-engine.ts：五子棋+象棋规则引擎与AI",
-    "id": "d1",
+    "content": "games/types.ts 统一 GameSpec 契约 + games/index.ts 注册表",
+    "id": "g1",
+    "priority": "high",
+    "skills": [],
+    "status": "in_progress"
+  },
+  {
+    "content": "棋类引擎（井字/黑白/四连/国际象/跳棋/军棋/斗兽/翻翻/围棋 + 五子象棋适配）",
+    "id": "g2",
     "priority": "high",
     "skills": [],
     "status": "completed"
   },
   {
-    "content": "duel-store.ts：棋局/战绩持久化层",
-    "id": "d2",
+    "content": "牌类引擎（斗地主/UNO/干瞪眼/四色/开火车/炸金花/21点/德州/拉密/掼蛋/卡五星/麻将）",
+    "id": "g3",
     "priority": "high",
     "skills": [],
-    "status": "completed"
+    "status": "pending"
   },
   {
-    "content": "DuelApp.tsx：棋盘全屏对局页（两棋种渲染）",
-    "id": "d3",
-    "priority": "high",
-    "skills": [],
-    "status": "completed"
-  },
-  {
-    "content": "接线：ScreenId/PhoneShell路由 + 聊天工具箱入口 + 终局主动消息",
-    "id": "d4",
-    "priority": "high",
-    "skills": [],
-    "status": "completed"
-  },
-  {
-    "content": "双门禁+dev+bundle+AGENTS.md 交付",
-    "id": "d5",
+    "content": "骰子+桌游引擎（吹牛骰/快艇骰/大富翁×2/飞行棋/中国跳棋/卡卡颂/宝石商人）",
+    "id": "g4",
     "priority": "medium",
     "skills": [],
-    "status": "completed"
+    "status": "pending"
+  },
+  {
+    "content": "UI：GameHall 大厅 + GameStage 通用对局壳 + 四种视图 + 规则卡",
+    "id": "g5",
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "duel-store 记忆/战绩多玩法化 + DuelApp 薄壳改造",
+    "id": "g6",
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "桌面图标入口 + 工具箱入口升级 + PhoneShell 参数化路由",
+    "id": "g7",
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "冒烟测试全玩法可终局 + 双门禁 + dev + 截图 + bundle + AGENTS.md",
+    "id": "g8",
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
   }
 ]

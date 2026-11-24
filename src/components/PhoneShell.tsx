@@ -35,14 +35,16 @@ interface Props {
   onSaveConfig: (cfg: AiConfig) => void;
 }
 
-/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App */
+/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App；?vpGame=uno&vpChar=xx 双弈直达 */
 const vpParams = new URLSearchParams(window.location.search);
+const vpGame = vpParams.get("vpGame") || undefined;
 
 export function PhoneShell({ config, onSaveConfig }: Props) {
   const [locked, setLocked] = useState(!vpParams.has("vpDesk"));
   const [screen, setScreen] = useState<ScreenId>(
     (vpParams.get("vpApp") as ScreenId) || "home",
   );
+  const vpChar = vpParams.get("vpChar") || "";
   const [passcode] = usePasscode();
   const [lockWp, setLockWp] = useLockWallpaper();
   const [homeWp, setHomeWp] = useHomeWallpaper();
@@ -357,7 +359,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                 <DeliveryApp onBack={goHome} onSend={(charId, order) => sendOrderToChat(charId, order)} />
               )}
               {screen === "voicecall" && <VoiceCallApp config={config} onBack={goHome} />}
-              {screen === "duel" && <DuelApp config={config} onBack={goHome} onFinish={duelFinish} />}
+              {screen === "duel" && <DuelApp config={config} gameId={vpGame} charId={vpChar || undefined} onBack={goHome} onFinish={duelFinish} />}
               {screen === "mcp" && <McpApp config={config} onBack={goHome} />}
             </div>
 

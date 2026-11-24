@@ -398,9 +398,12 @@ async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortS
   }
 }
 
+/** 工具清单缓存上限：掌心窗这类大服务有 138 个工具，旧上限 40 会把预置表静默截断 */
+export const TOOL_CACHE_MAX = 200;
+
 /** tools/list 原始项 → McpToolMeta（风险分级启发式：写操作=高危、涉私读取=中危、其余低风险） */
 function normalizeRpcTools(raw: unknown[]): McpToolMeta[] {
-  return raw.slice(0, 40).map((t0) => {
+  return raw.slice(0, TOOL_CACHE_MAX).map((t0) => {
     const t = t0 as { name?: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } };
     const desc = String(t?.description ?? "").slice(0, 120);
     const name = String(t?.name ?? "未命名工具").slice(0, 48);
@@ -520,7 +523,7 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
         else preWarnings.push(`OAuth 地址未通过安全校验（${a.ok ? t.reason : a.reason}），已按无认证处理`);
       }
       const auth: AuthKind = oauth ? "oauth" : AUTH_LABELS[authType] ?? (mf.auth?.type ? "apikey" : "none");
-      const tools: McpToolMeta[] = (mf.tools ?? []).slice(0, 40).map((t) => ({
+      const tools: McpToolMeta[] = (mf.tools ?? []).slice(0, TOOL_CACHE_MAX).map((t) => ({
         name: String(t?.name ?? "未命名工具").slice(0, 48),
         description: String(t?.description ?? "").slice(0, 120),
         risk: t?.risk === "medium" || (t?.risk === undefined && t?.isPrivate && !t?.sideEffect) ? "medium" : t?.sideEffect || t?.risk === "high" ? "high" : "low",
@@ -642,9 +645,9 @@ export function addManualServer(input: { name: string; url: string; auth: AuthKi
   const s: RemoteMcpServer = { id: `rs${Date.now()}m`, name, url: endpoint, host: v.host as string, auth: input.auth, addedAt: Date.now(), manual: true };
   saveServers([...loadServers(), s]);
   const cache = loadToolCache();
-  cache[s.id] = input.tools.slice(0, 40);
+  cache[s.id] = input.tools.slice(0, TOOL_CACHE_MAX);
   saveToolCache(cache);
-  console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} tools=${input.tools.length}`);
+  console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} tools=${input.tools.length} cached=${Math.min(input.tools.length, TOOL_CACHE_MAX)} max=${TOOL_CACHE_MAX}`);
   return { ok: true, server: s };
 }
 
@@ -659,9 +662,9 @@ export function setServerAuth(id: string, auth: AuthKind): void {
 /** 更新手动服务的工具清单（面板里增删改后调用） */
 export function setManualTools(serverId: string, tools: McpToolMeta[]) {
   const cache = loadToolCache();
-  cache[serverId] = tools.slice(0, 40);
+  cache[serverId] = tools.slice(0, TOOL_CACHE_MAX);
   saveToolCache(cache);
-  console.log(`[mcp-remote] manual tools updated server=${serverId} count=${tools.length}`);
+  console.log(`[mcp-remote] manual tools updated server=${serverId} count=${tools.length} cached=${Math.min(tools.length, TOOL_CACHE_MAX)} max=${TOOL_CACHE_MAX}`);
 }
 
 const CURL_ARG_RE = /^[A-Za-z0-9_\-./:@%+=,]*$/;

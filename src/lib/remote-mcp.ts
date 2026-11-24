@@ -23,7 +23,7 @@ export interface OAuthParams {
 export interface RemoteMcpServer {
   id: string;
   name: string;
-  /** https 端点（安装时已去 query/hash） */
+  /** https 端点（安装时已去 query/hash）；内置通道服务为 open-meteo://api 这类 scheme */
   url: string;
   host: string;
   auth: AuthKind;
@@ -33,6 +33,8 @@ export interface RemoteMcpServer {
   mediumConsents?: Record<string, number>;
   /** 手动登记的服务：握手/清单导入不可用时由用户填写，工具清单存 toolCache */
   manual?: boolean;
+  /** MCP 传输类型：缺省 Streamable HTTP；sse=经典 HTTP+SSE 双端点协议 */
+  transport?: "http" | "sse";
 }
 
 export interface McpToolMeta {
@@ -187,6 +189,12 @@ export function stripUrlSecrets(raw: string): string {
   } catch {
     return raw.trim();
   }
+}
+
+/** 内置直连通道（Open-Meteo 免 Key REST 伪装成 MCP 服务），scheme=open-meteo:// */
+export const OPEN_METEO_SCHEME = "open-meteo://";
+export function isBuiltinChannel(url: string): boolean {
+  return url.startsWith(OPEN_METEO_SCHEME);
 }
 
 /* ---------- GitHub 仓库链接 → 约定配置文件直读 ---------- */
@@ -400,7 +408,7 @@ async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortS
 
 /** tools/list 原始项 → McpToolMeta（风险分级启发式：写操作=高危、涉私读取=中危、其余低风险） */
 function normalizeRpcTools(raw: unknown[]): McpToolMeta[] {
-  return raw.slice(0, 40).map((t0) => {
+  return raw.slice(0, TOOL_CACHE_MAX).map((t0) => {
     const t = t0 as { name?: string; description?: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } };
     const desc = String(t?.description ?? "").slice(0, 120);
     const name = String(t?.name ?? "未命名工具").slice(0, 48);
@@ -415,6 +423,32 @@ function normalizeRpcTools(raw: unknown[]): McpToolMeta[] {
  * 标准 MCP 端点直连安装预览：initialize → tools/list。
  * 服务端 401 时自动探测 OAuth 授权服务器元数据；找不到 clientId 则留空由用户在面板补填后发起授权。
  */
+/** SSE 传输服务的安装预览：连 /sse 端点握手 + tools/list */
+export async function inspectBySse(sseUrlRaw: string, nameHint?: string, signal?: AbortSignal): Promise<{ ok: boolean; preview?: InstallPreview; reason?: string }> {
+  const raw = sseUrlRaw.trim();
+  // 允许用户只贴基础地址（不带 /sse），自动补全
+  const guess = raw.includes("/sse") ? raw : `${raw.replace(/\/$/, "")}/sse`;
+  const v = validateMcpUrl(guess);
+  if (!v.ok) return { ok: false, reason: v.reason ?? "地址无效" };
+  const endpoint = stripUrlSecrets(guess);
+  const probe = await sseListTools({ id: "__inspect__", name: nameHint || v.host!, url: endpoint, host: v.host as string, auth: "none", addedAt: 0, transport: "sse" }, signal);
+  if (!probe.ok) return { ok: false, reason: probe.reason ?? "SSE 握手失败" };
+  console.log(`[mcp-remote] sse inspect ${v.host} tools=${probe.tools?.length ?? 0}`);
+  return {
+    ok: true,
+    preview: {
+      sourceLabel: v.host as string,
+      kind: "url",
+      name: (nameHint || (v.host as string).split(".")[0]).slice(0, 30),
+      endpoint,
+      host: v.host as string,
+      auth: "none",
+      tools: probe.tools ?? [],
+      warnings: probe.tools?.length ? [] : ["已连上 SSE 会话但未取到工具清单，可在「手动添加服务」里补登记"],
+    },
+  };
+}
+
 export async function inspectByRpc(endpointRaw: string, signal?: AbortSignal): Promise<{ ok: boolean; preview?: InstallPreview; reason?: string }> {
   const v = validateMcpUrl(endpointRaw);
   if (!v.ok) return { ok: false, reason: v.reason ?? "地址无效" };
@@ -520,7 +554,7 @@ export async function inspectSource(input: string, signal?: AbortSignal): Promis
         else preWarnings.push(`OAuth 地址未通过安全校验（${a.ok ? t.reason : a.reason}），已按无认证处理`);
       }
       const auth: AuthKind = oauth ? "oauth" : AUTH_LABELS[authType] ?? (mf.auth?.type ? "apikey" : "none");
-      const tools: McpToolMeta[] = (mf.tools ?? []).slice(0, 40).map((t) => ({
+      const tools: McpToolMeta[] = (mf.tools ?? []).slice(0, TOOL_CACHE_MAX).map((t) => ({
         name: String(t?.name ?? "未命名工具").slice(0, 48),
         description: String(t?.description ?? "").slice(0, 120),
         risk: t?.risk === "medium" || (t?.risk === undefined && t?.isPrivate && !t?.sideEffect) ? "medium" : t?.sideEffect || t?.risk === "high" ? "high" : "low",
@@ -575,9 +609,11 @@ export function addServer(preview: InstallPreview, auth: AuthKind): RemoteMcpSer
     auth,
     addedAt: Date.now(),
     ...(preview.oauth && auth === "oauth" ? { oauth: preview.oauth } : {}),
+    // SSE 端点（如 lutopia.app/mcp/xxx/sse）自动标记传输类型，调用时走双端点会话
+    ...(preview.kind === "url" && /\/sse\b/i.test(preview.endpoint) ? { transport: "sse" as const } : {}),
   };
   saveServers([...loadServers(), s]);
-  console.log(`[mcp-remote] installed ${s.name} host=${s.host} auth=${auth}`);
+  console.log(`[mcp-remote] installed ${s.name} host=${s.host} auth=${auth} transport=${s.transport ?? "http"}`);
   return s;
 }
 
@@ -634,24 +670,37 @@ export function hasServerKey(id: string): boolean {
  * 手动添加一个 MCP 服务：只校验地址安全性，不发网络请求。
  * 工具清单由用户按服务方文档逐个登记，存进 toolCache（与自动发现同构）。
  */
-export function addManualServer(input: { name: string; url: string; auth: AuthKind; tools: McpToolMeta[] }): { ok: boolean; server?: RemoteMcpServer; reason?: string } {
-  const v = validateMcpUrl(input.url);
-  if (!v.ok) return { ok: false, reason: v.reason ?? "地址无效" };
-  const endpoint = stripUrlSecrets(input.url);
-  const name = (input.name.trim() || v.host!).slice(0, 30);
-  const s: RemoteMcpServer = { id: `rs${Date.now()}m`, name, url: endpoint, host: v.host as string, auth: input.auth, addedAt: Date.now(), manual: true };
+export function addManualServer(input: { name: string; url: string; auth: AuthKind; tools: McpToolMeta[]; transport?: "http" | "sse" }): { ok: boolean; server?: RemoteMcpServer; reason?: string } {
+  const builtin = input.url.trim().startsWith(OPEN_METEO_SCHEME);
+  if (!builtin) {
+    const v = validateMcpUrl(input.url);
+    if (!v.ok) return { ok: false, reason: v.reason ?? "地址无效" };
+  }
+  const endpoint = builtin ? input.url.trim() : stripUrlSecrets(input.url);
+  const host = builtin ? "Open-Meteo 内置通道" : (new URL(endpoint).hostname as string);
+  const name = (input.name.trim() || host).slice(0, 30);
+  const s: RemoteMcpServer = {
+    id: `rs${Date.now()}m`,
+    name,
+    url: endpoint,
+    host,
+    auth: builtin ? "none" : input.auth,
+    addedAt: Date.now(),
+    manual: true,
+    ...(input.transport === "sse" ? { transport: "sse" as const } : {}),
+  };
   saveServers([...loadServers(), s]);
   const cache = loadToolCache();
-  cache[s.id] = input.tools.slice(0, 40);
+  cache[s.id] = input.tools.slice(0, TOOL_CACHE_MAX);
   saveToolCache(cache);
-  console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} tools=${input.tools.length}`);
+  console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} transport=${input.transport ?? "http"} tools=${input.tools.length}`);
   return { ok: true, server: s };
 }
 
 /** 更新手动服务的工具清单（面板里增删改后调用） */
 export function setManualTools(serverId: string, tools: McpToolMeta[]) {
   const cache = loadToolCache();
-  cache[serverId] = tools.slice(0, 40);
+  cache[serverId] = tools.slice(0, TOOL_CACHE_MAX);
   saveToolCache(cache);
   console.log(`[mcp-remote] manual tools updated server=${serverId} count=${tools.length}`);
 }
@@ -945,6 +994,172 @@ export function clearLog() {
   writeLogEntries([]);
 }
 
+/** 工具清单缓存上限：一次导入的服务可能有上百个工具，40 会静默截断 */
+export const TOOL_CACHE_MAX = 200;
+
+/* ---------- SSE 传输（经典 HTTP+SSE 双端点协议，Lutopia 这类服务） ---------- */
+
+interface SseSession {
+  /** 服务端通过 endpoint 事件下发的 POST 地址（含 session_id） */
+  postUrl: string;
+  es: EventSource;
+  pending: Map<number, (msg: Record<string, unknown> | null) => void>;
+  closed: boolean;
+}
+const sseSessions = new Map<string, SseSession>();
+
+/** 把 SSE 帧文本里的 data: 行解析成 JSON-RPC message */
+function parseSseFrame(text: string): Record<string, unknown> | null {
+  let last: Record<string, unknown> | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith("data:")) continue;
+    try {
+      last = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
+    } catch {
+      /* 非 JSON 帧忽略 */
+    }
+  }
+  return last;
+}
+
+/**
+ * 建立经典 SSE 会话：GET sse 端点 → 等 endpoint 事件拿到带 session 的 POST 地址 → initialize。
+ * EventSource 无法带自定义头，故 SSE 服务仅支持 auth=none；失败抛人话错误。
+ */
+async function ensureSseSession(server: RemoteMcpServer, signal?: AbortSignal): Promise<SseSession> {
+  const existing = sseSessions.get(server.id);
+  if (existing && !existing.closed) return existing;
+  const sseUrl = server.url.includes("/sse") ? server.url : `${server.url.replace(/\/$/, "")}/sse`;
+  const session = await new Promise<SseSession>((resolve, reject) => {
+    const es = new EventSource(sseUrl);
+    const pending = new Map<number, (msg: Record<string, unknown> | null) => void>();
+    const guard = setTimeout(() => {
+      es.close();
+      reject(new Error(`连接超时：${sseUrl.replace(/^https:\/\//, "")} 未在 12 秒内下发 endpoint 事件（服务可能离线或不支持 SSE）`));
+    }, 12_000);
+    const onAbort = () => {
+      clearTimeout(guard);
+      es.close();
+      reject(new Error("已取消"));
+    };
+    signal?.addEventListener("abort", onAbort);
+    es.addEventListener("endpoint", (ev) => {
+      clearTimeout(guard);
+      signal?.removeEventListener("abort", onAbort);
+      // endpoint 事件是相对路径（如 /mcp/xxx/messages?session_id=...），基于 origin 解析
+      const raw = (ev as MessageEvent).data as string;
+      let postUrl = "";
+      try {
+        postUrl = new URL(raw, sseUrl).toString();
+      } catch {
+        postUrl = raw;
+      }
+      const s: SseSession = { postUrl, es, pending, closed: false };
+      // message 事件按 JSON-RPC id 分发给等待中的请求
+      es.onmessage = (m) => {
+        const msg = parseSseFrame(`data: ${String((m as MessageEvent).data ?? "")}`) ?? null;
+        if (!msg) return;
+        const id = Number(msg.id);
+        if (Number.isFinite(id)) {
+          const cb = s.pending.get(id);
+          if (cb) {
+            s.pending.delete(id);
+            cb(msg);
+          }
+        }
+      };
+      es.onerror = () => {
+        // EventSource 断线后浏览器自动重连会产生新 session，旧会话直接判死
+        s.closed = true;
+        s.pending.forEach((cb) => cb(null));
+        s.pending.clear();
+        sseSessions.delete(server.id);
+        console.warn(`[mcp-remote] sse connection error server=${server.name}`);
+      };
+      sseSessions.set(server.id, s);
+      console.log(`[mcp-remote] sse endpoint received server=${server.name} post=${postUrl.slice(0, 80)}`);
+      resolve(s);
+    });
+    es.addEventListener("error", () => {
+      if (es.readyState === EventSource.CLOSED) {
+        clearTimeout(guard);
+        signal?.removeEventListener("abort", onAbort);
+        reject(new Error("无法建立 SSE 连接（跨域被拒或服务未开放 /sse 端点）"));
+      }
+    });
+  });
+  // 握手 initialize + initialized 通知
+  const init = await sseRpcCall(session, 1, "initialize", { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "vp-phone", version: "1.0" } });
+  if (!init || init.error) throw new Error(`SSE 握手失败：${String((init?.error as { message?: string })?.message ?? "无响应")}`);
+  sseRpcPost(session, { jsonrpc: "2.0", method: "notifications/initialized", params: {} }).catch(() => undefined);
+  console.log(`[mcp-remote] sse session ready server=${server.name}`);
+  return session;
+}
+
+async function sseRpcPost(session: SseSession, body: Record<string, unknown>): Promise<void> {
+  const res = await fetch(session.postUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`SSE POST 被拒（HTTP ${res.status}）`);
+  await res.text().catch(() => "");
+}
+
+/** SSE 通道发起一次 JSON-RPC 请求，结果从 message 事件里取（20s 超时） */
+async function sseRpcCall(session: SseSession, id: number, method: string, params: unknown): Promise<Record<string, unknown> | null> {
+  const waiter = new Promise<Record<string, unknown> | null>((resolve) => {
+    const timer = setTimeout(() => {
+      session.pending.delete(id);
+      resolve(null);
+    }, 20_000);
+    session.pending.set(id, (msg) => {
+      clearTimeout(timer);
+      resolve(msg);
+    });
+  });
+  await sseRpcPost(session, { jsonrpc: "2.0", id, method, params });
+  return waiter;
+}
+
+/** SSE 服务的 tools/list */
+async function sseListTools(server: RemoteMcpServer, signal?: AbortSignal): Promise<{ ok: boolean; tools?: McpToolMeta[]; reason?: string }> {
+  try {
+    const session = await ensureSseSession(server, signal);
+    const msg = await sseRpcCall(session, Date.now() % 1_000_000, "tools/list", {});
+    if (!msg) return { ok: false, reason: "SSE 等待 tools/list 响应超时" };
+    if (msg.error) return { ok: false, reason: `服务返回错误：${String((msg.error as { message?: string }).message ?? "").slice(0, 80)}` };
+    const raw = ((msg.result as { tools?: unknown[] })?.tools ?? []) as unknown[];
+    return { ok: true, tools: normalizeRpcTools(raw) };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "SSE 连接失败" };
+  }
+}
+
+/** SSE 服务的 tools/call */
+async function callViaSse(server: RemoteMcpServer, tool: McpToolMeta, args: Record<string, unknown>): Promise<CallResult> {
+  try {
+    const session = await ensureSseSession(server);
+    const msg = await sseRpcCall(session, Date.now() % 1_000_000, "tools/call", { name: tool.name, arguments: args });
+    if (!msg) {
+      appendCallLog(server, tool.name, false, "SSE 响应超时");
+      return { ok: false, text: "SSE 调用超时（20 秒未收到响应）", content: "" };
+    }
+    if (msg.error) {
+      const m = String((msg.error as { message?: string }).message ?? "未知错误");
+      appendCallLog(server, tool.name, false, m.slice(0, 60));
+      return { ok: false, text: `服务返回错误：${maskSecrets(m).slice(0, 60)}`, content: "" };
+    }
+    const content = ((msg.result as { content?: { text?: string }[] })?.content ?? []).map((c) => c.text ?? "").join("\n").slice(0, 2000);
+    appendCallLog(server, tool.name, true, content ? `返回 ${content.length} 字 · SSE` : "无正文返回 · SSE");
+    return { ok: true, text: `已调用 ${server.name}·${tool.name}（${content ? `返回 ${content.length} 字` : "无正文"}）`, content: maskSecrets(content) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "SSE 网络错误";
+    appendCallLog(server, tool.name, false, msg);
+    return { ok: false, text: `调用失败：${msg}`, content: "" };
+  }
+}
+
 /* ---------- 运行时调用（每次高危再次确认由 UI 层完成后再调这里） ---------- */
 
 export interface CallResult {
@@ -954,14 +1169,125 @@ export interface CallResult {
   content: string;
 }
 
+/** Open-Meteo WMO 天气码 → 中文描述 */
+const WMO_DESC: Record<number, string> = {
+  0: "晴", 1: "大致晴朗", 2: "局部多云", 3: "阴", 45: "雾", 48: "雾凇", 51: "毛毛雨(小)", 53: "毛毛雨", 55: "毛毛雨(大)",
+  56: "冻毛毛雨", 57: "冻毛毛雨(大)", 61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨", 67: "强冻雨",
+  71: "小雪", 73: "中雪", 75: "大雪", 77: "米雪", 80: "阵雨(小)", 81: "阵雨", 82: "强阵雨",
+  85: "阵雪(小)", 86: "阵雪", 95: "雷暴", 96: "雷暴伴小冰雹", 99: "雷暴伴大冰雹",
+};
+
+/** 城市名 → 坐标（geocoding API，中英文均可）；失败返回 null */
+async function omGeocode(city: string, signal?: AbortSignal): Promise<{ name: string; lat: number; lon: number; country?: string } | null> {
+  try {
+    const u = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=zh`;
+    const res = await fetch(u, { signal });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { results?: { name: string; latitude: number; longitude: number; country?: string; admin1?: string }[] };
+    const r = j.results?.[0];
+    if (!r) return null;
+    return { name: [r.admin1, r.name].filter(Boolean).join("·") || r.name, lat: r.latitude, lon: r.longitude, country: r.country };
+  } catch {
+    return null;
+  }
+}
+
+/** 从参数里取坐标：lat/lon 优先，其次 city 走地理编码 */
+async function omLocate(args: Record<string, unknown>, signal?: AbortSignal): Promise<{ label: string; lat: number; lon: number } | null> {
+  const lat = Number(args.lat ?? args.latitude);
+  const lon = Number(args.lon ?? args.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+    return { label: `${lat.toFixed(2)},${lon.toFixed(2)}`, lat, lon };
+  }
+  const city = String(args.city ?? args.城市 ?? "").trim();
+  if (city) {
+    const g = await omGeocode(city.slice(0, 30), signal);
+    if (g) return { label: g.name, lat: g.lat, lon: g.lon };
+  }
+  return null;
+}
+
+/** 内置通道执行器：open-meteo://api → 直连 api.open-meteo.com（免 Key、CORS 全开、纯 GET） */
+async function callBuiltinTool(server: RemoteMcpServer, tool: McpToolMeta, args: Record<string, unknown>): Promise<CallResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    if (tool.name === "search_city") {
+      const city = String(args.city ?? args.name ?? "").trim();
+      if (!city) return { ok: false, text: "缺少城市名参数 city", content: "" };
+      const g = await omGeocode(city, controller.signal);
+      if (!g) {
+        appendCallLog(server, tool.name, false, "城市未找到");
+        return { ok: false, text: `没有找到城市「${city}」`, content: "" };
+      }
+      appendCallLog(server, tool.name, true, g.name);
+      return { ok: true, text: `已查询城市（来源：Open-Meteo）`, content: `${g.name}（${g.country ?? ""}）纬度 ${g.lat.toFixed(4)} 经度 ${g.lon.toFixed(4)}` };
+    }
+    const loc = await omLocate(args, controller.signal);
+    if (!loc) return { ok: false, text: "无法定位：请提供 city（城市名）或 lat/lon 坐标", content: "" };
+    let url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&timezone=auto`;
+    if (tool.name === "current_weather") url += "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m";
+    else if (tool.name === "weather_forecast") {
+      const days = Math.min(7, Math.max(1, Number(args.days) || 3));
+      url += `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&forecast_days=${days}`;
+    } else if (tool.name === "weather_hourly") {
+      const hours = Math.min(48, Math.max(1, Number(args.hours) || 24));
+      url += `&hourly=temperature_2m,precipitation_probability,precipitation,weather_code&forecast_hours=${hours}`;
+    } else {
+      return { ok: false, text: `内置通道不支持工具「${tool.name}」`, content: "" };
+    }
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      appendCallLog(server, tool.name, false, `HTTP ${res.status}`);
+      return { ok: false, text: `天气服务返回 HTTP ${res.status}`, content: "" };
+    }
+    const j = (await res.json()) as {
+      current?: Record<string, number | string>;
+      daily?: { time: string[]; temperature_2m_max: number[]; temperature_2m_min: number[]; precipitation_sum: number[]; weather_code: number[] };
+      hourly?: { time: string[]; temperature_2m: number[]; precipitation_probability?: number[]; precipitation?: number[]; weather_code?: number[] };
+    };
+    const lines: string[] = [];
+    if (tool.name === "current_weather" && j.current) {
+      const c = j.current;
+      lines.push(`${loc.label} 当前：${WMO_DESC[Number(c.weather_code)] ?? "天气码" + c.weather_code}，气温 ${c.temperature_2m}°C（体感 ${c.apparent_temperature}°C），湿度 ${c.relative_humidity_2m}%，降水 ${c.precipitation}mm，风速 ${c.wind_speed_10m}km/h`);
+    } else if (tool.name === "weather_forecast" && j.daily) {
+      lines.push(`${loc.label} 预报：`);
+      j.daily.time.forEach((d, i) => lines.push(`  ${d}：${WMO_DESC[j.daily!.weather_code[i]] ?? "?"} ${j.daily!.temperature_2m_min[i]}~${j.daily!.temperature_2m_max[i]}°C 降水${j.daily!.precipitation_sum[i]}mm`));
+    } else if (tool.name === "weather_hourly" && j.hourly) {
+      lines.push(`${loc.label} 逐小时：`);
+      j.hourly.time.forEach((t, i) => {
+        const hh = t.slice(11, 16);
+        const rain = j.hourly!.precipitation_probability?.[i];
+        lines.push(`  ${hh}时 ${j.hourly!.temperature_2m[i]}°C ${WMO_DESC[Number(j.hourly!.weather_code?.[i] ?? -1)] ?? ""}${rain != null ? ` 降水概率${rain}%` : ""}`);
+      });
+    }
+    if (!lines.length) return { ok: false, text: "天气服务返回数据为空", content: "" };
+    // 逐小时太长，摘要只留关键行
+    const content = lines.join("\n").slice(0, 1800);
+    appendCallLog(server, tool.name, true, `${loc.label} ok`);
+    console.log(`[mcp-remote] builtin open-meteo ${tool.name} city=${loc.label} ok`);
+    return { ok: true, text: `已查询天气（来源：Open-Meteo）`, content };
+  } catch (e) {
+    const msg = e instanceof Error ? (e.name === "AbortError" ? "请求超时（15 秒）" : e.message) : "网络错误";
+    appendCallLog(server, tool.name, false, msg);
+    return { ok: false, text: `调用失败：${msg}`, content: "" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args: Record<string, unknown>, confirmed: boolean): Promise<CallResult> {
   if ((tool.risk === "high" || tool.risk === "medium") && !confirmed) {
     appendCallLog(server, tool.name, false, `${tool.risk === "high" ? "高危" : "中危"}调用未经用户确认，已拒绝`);
     return { ok: false, text: "该操作需要你确认后才会执行", content: "" };
   }
+  // 内置直连通道（Open-Meteo 免 Key REST）：不走 JSON-RPC，直接拼 GET 查询
+  if (isBuiltinChannel(server.url)) return callBuiltinTool(server, tool, args);
+  // SSE 传输服务（Lutopia 类）：走经典 HTTP+SSE 双端点会话
+  if (server.transport === "sse") return callViaSse(server, tool, args);
   const check = validateMcpUrl(server.url);
   if (!check.ok) return { ok: false, text: `服务地址已被安全策略拒绝：${check.reason}`, content: "" };
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
   const key = (() => {
     try {
       return localStorage.getItem(`vp-phone:mcp-key:${server.id}`) || "";

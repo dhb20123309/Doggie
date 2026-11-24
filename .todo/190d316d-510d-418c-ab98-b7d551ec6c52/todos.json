@@ -1,0 +1,30 @@
+[
+  {
+    "content": "open-meteo-tools.ts：天气工具预置表",
+    "id": "c1",
+    "priority": "high",
+    "skills": [],
+    "status": "in_progress"
+  },
+  {
+    "content": "remote-mcp.ts：SSE 传输支持（Lutopia）",
+    "id": "c2",
+    "priority": "high",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "RemoteMcpPanel：一键载入 Open-Meteo + 传输类型选择",
+    "id": "c3",
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
+  },
+  {
+    "content": "双门禁+dev+bundle+AGENTS.md 交付",
+    "id": "c4",
+    "priority": "medium",
+    "skills": [],
+    "status": "pending"
+  }
+]

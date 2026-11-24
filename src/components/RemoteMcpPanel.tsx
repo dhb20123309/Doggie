@@ -3,7 +3,7 @@
 // 握手被跨域/白名单限制拦住的第三方服务（如 Galatea）可走「手动添加服务」逐个登记工具；
 // 已装服务可移除/清除授权/复制 curl 调用指令排障；调用日志遮盖 token 与私人内容。
 import { useState } from "react";
-import { AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Trash2, X } from "lucide-react";
+import { CloudSun, AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +14,7 @@ import {
   hasMediumConsent,
   hasServerKey,
   hasValidToken,
+  inspectBySse,
   inspectSource,
   loadLog,
   loadServers,
@@ -28,12 +29,14 @@ import {
   startOAuthForServer,
   stripUrlSecrets,
   validateMcpUrl,
+  OPEN_METEO_SCHEME,
   type AuthKind,
   type InstallPreview,
   type McpCallLog,
   type McpToolMeta,
   type RemoteMcpServer,
 } from "@/lib/remote-mcp";
+import { OPEN_METEO_TOOLS } from "@/lib/open-meteo-tools";
 
 interface Props {
   onClose: () => void;
@@ -80,7 +83,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   const [oauthFor, setOauthFor] = useState<string>("");
   // 手动登记表单
   const [manualOpen, setManualOpen] = useState(false);
-  const [manual, setManual] = useState({ name: "", url: "", auth: "bearer" as AuthKind, key: "" });
+  const [manual, setManual] = useState({ name: "", url: "", auth: "bearer" as AuthKind, key: "", transport: "http" as "http" | "sse" });
   const [manualTools, setManualToolsState] = useState<McpToolMeta[]>([]);
   const [toolDraft, setToolDraft] = useState({ name: "", description: "", risk: "low" as McpToolMeta["risk"], private: false, keywords: "" });
   // 工具编辑弹层（针对已装的手动服务）
@@ -100,6 +103,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
     if (!raw) return;
     // 本地先拦一次明显违规（file://、http、localhost、内网），省得白跑网络
     const repoLike = /github\.com/i.test(raw) || /^[\w.-]+\/[\w.-]+$/.test(raw);
+    const sseLike = !repoLike && /\/sse\b/i.test(raw);
     if (!repoLike) {
       const v = validateMcpUrl(raw);
       if (!v.ok) {
@@ -108,16 +112,33 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
       }
     }
     setBusy(true);
-    const r = await inspectSource(raw);
+    // 地址带 /sse → 走经典 HTTP+SSE 双端点握手（Lutopia 这类服务）
+    const r = sseLike ? await inspectBySse(raw) : await inspectSource(raw);
     setBusy(false);
     if (!r.ok || !r.preview) {
-      setErr(r.reason ?? "无法读取配置清单");
+      setErr(sseLike ? `${r.reason ?? "SSE 握手失败"}。也可改用「手动添加服务」：传输类型选 SSE，照服务方文档登记工具` : (r.reason ?? "无法读取配置清单"));
       return;
     }
     setPreview(r.preview);
     setAuthChoice(r.preview.auth);
     const o = r.preview.oauth;
     setOauthForm({ authorizeUrl: o?.authorizeUrl ?? "", tokenUrl: o?.tokenUrl ?? "", clientId: o?.clientId ?? "", scope: o?.scope ?? "" });
+  };
+
+  /** 一键载入 Open-Meteo 天气内置通道（免 Key、非 MCP、浏览器直连 REST） */
+  const doInstallOpenMeteo = () => {
+    setErr("");
+    const existing = loadServers().filter((x) => x.url.startsWith(OPEN_METEO_SCHEME));
+    existing.forEach((x) => removeServer(x.id));
+    if (existing.length) console.log(`[mcp-remote] open-meteo reinstalled, replaced ${existing.length} old record(s)`);
+    const r = addManualServer({ name: "Open-Meteo 天气", url: `${OPEN_METEO_SCHEME}api`, auth: "none", tools: OPEN_METEO_TOOLS });
+    if (!r.ok || !r.server) {
+      setErr(r.reason ?? "内置通道登记失败");
+      return;
+    }
+    console.log(`[mcp-remote] open-meteo builtin installed server=${r.server.name} tools=${OPEN_METEO_TOOLS.length}`);
+    setNotice("已接入 Open-Meteo 免费天气（4 个工具，免 Key 浏览器直连）。聊天里问「杭州现在多少度」「明天要带伞吗」即可触发。");
+    refresh();
   };
 
   const doInstall = () => {
@@ -143,17 +164,23 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
 
   const doManualInstall = () => {
     setErr("");
-    const r = addManualServer({ name: manual.name, url: manual.url, auth: manual.auth, tools: manualTools });
+    // 同名/同地址旧记录先替换（修复过截断或传输类型后重新登记不会留下 40 条的旧壳）
+    const oldList = loadServers();
+    const targetUrl = manual.url.trim();
+    const dup = oldList.filter((x) => x.name === manual.name.trim() || x.url === targetUrl || (x.host && targetUrl.includes(x.host)));
+    dup.forEach((x) => console.log(`[mcp-remote] manual install replaces old server=${x.name} id=${x.id} oldTools=${(loadToolCache()[x.id] ?? []).length}`));
+    dup.forEach((x) => removeServer(x.id));
+    const r = addManualServer({ name: manual.name, url: manual.url, auth: manual.auth, tools: manualTools, transport: manual.transport });
     if (!r.ok || !r.server) {
       setErr(r.reason ?? "手动添加失败");
       return;
     }
     if (manual.auth !== "none" && manual.key.trim()) setServerKey(r.server.id, manual.key.trim());
-    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length}`);
+    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length} transport=${manual.transport}`);
     setManualOpen(false);
-    setManual({ name: "", url: "", auth: "bearer", key: "" });
+    setManual({ name: "", url: "", auth: "bearer", key: "", transport: "http" });
     setManualToolsState([]);
-    setNotice(`「${r.server.name}」已手动登记。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
+    setNotice(`「${r.server.name}」已手动登记${dup.length ? `（替换了 ${dup.length} 条旧记录）` : ""}。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
     refresh();
   };
 
@@ -221,6 +248,13 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
           对方服务不允许本网页直连时（跨域限制/仅白名单客户端），用下方「手动添加服务」按它的文档登记工具。
         </p>
 
+        {/* 内置快捷通道 */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <button type="button" className="jelly-btn flex items-center gap-1 rounded-full bg-sky-500/10 px-2.5 py-1 text-[10.5px] font-semibold text-sky-600 hover:bg-sky-500/20" onClick={doInstallOpenMeteo}>
+            <CloudSun className="size-3.5" /> 一键接入 Open-Meteo 免费天气（免 Key）
+          </button>
+        </div>
+
         {/* 输入 + 检查 */}
         <div className="mt-3 flex gap-2">
           <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder="https://mcp.example.com/mcp 或 owner/repo" className="glass-input h-9 min-w-0 flex-1 text-[12px]" />
@@ -239,13 +273,20 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
           <section className="mt-2 space-y-2 rounded-2xl border border-border/60 bg-white/70 p-3">
             <div className="flex gap-1.5">
               <Input value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} placeholder="服务名（如 Galatea）" className="glass-input h-8 min-w-0 flex-1 text-[11px]" />
+              <select value={manual.transport} onChange={(e) => setManual({ ...manual, transport: e.target.value as "http" | "sse" })} className="glass-input h-8 shrink-0 rounded-xl bg-white/80 px-2 text-[11px]" title="MCP 传输类型">
+                <option value="http">HTTP</option>
+                <option value="sse">SSE</option>
+              </select>
               <select value={manual.auth} onChange={(e) => setManual({ ...manual, auth: e.target.value as AuthKind })} className="glass-input h-8 shrink-0 rounded-xl bg-white/80 px-2 text-[11px]">
                 <option value="none">无认证</option>
                 <option value="bearer">Bearer Token</option>
                 <option value="apikey">API Key</option>
               </select>
             </div>
-            <Input value={manual.url} onChange={(e) => setManual({ ...manual, url: e.target.value })} placeholder="MCP 端点 https://…（对照服务方文档）" className="glass-input h-8 text-[11px]" />
+            <Input value={manual.url} onChange={(e) => setManual({ ...manual, url: e.target.value })} placeholder={manual.transport === "sse" ? "SSE 连接地址 https://…/sse（照服务方文档原样填）" : "MCP 端点 https://…（对照服务方文档）"} className="glass-input h-8 text-[11px]" />
+            {manual.transport === "sse" && (
+              <p className="text-[9.5px] leading-relaxed text-muted-foreground">SSE 传输走经典 HTTP+SSE 双端点协议（先连 /sse 拿会话再调用），浏览器无法给 SSE 连接附加密钥头，请选「无认证」；带令牌的 SSE 服务暂不支持网页直连。</p>
+            )}
             {manual.auth !== "none" && (
               <Input value={manual.key} onChange={(e) => setManual({ ...manual, key: e.target.value })} type="password" placeholder="令牌/密钥（服务方生成，仅存本机浏览器）" className="glass-input h-8 text-[11px]" autoComplete="off" />
             )}
@@ -286,7 +327,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
                 ))}
               </ul>
             )}
-            <Button size="sm" className="jelly-btn h-8 w-full bg-primary text-[12px] text-primary-foreground" disabled={!manual.url.trim() || manualTools.length === 0} onClick={doManualInstall}>
+            <Button size="sm" className="jelly-btn h-8 w-full bg-primary text-[12px] text-primary-foreground" disabled={!manual.url.trim() || manualTools.length === 0 || (manual.transport === "sse" && manual.auth !== "none")} onClick={doManualInstall}>
               登记服务（{manualTools.length} 个工具）
             </Button>
             <p className="text-[9px] leading-relaxed text-muted-foreground">手动登记只做地址安全校验、不发网络请求；真正调用发生在 AI 使用工具时，若被跨域拦截会有明确提示。</p>
@@ -302,7 +343,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
             </div>
             <p className="break-all text-[10.5px] text-muted-foreground">服务域名：{preview.host}</p>
             <div className="flex flex-wrap gap-1.5 text-[9.5px] font-semibold">
-              <span className="rounded-full bg-sky-500/12 px-2 py-0.5 text-sky-600">传输：Streamable HTTP</span>
+              <span className="rounded-full bg-sky-500/12 px-2 py-0.5 text-sky-600">传输：{/\/sse\b/i.test(preview.endpoint) ? "HTTP+SSE（经典双端点）" : "Streamable HTTP"}</span>
               <span className={`rounded-full px-2 py-0.5 ${preview.auth === "none" ? "bg-emerald-500/12 text-emerald-600" : "bg-amber-500/15 text-amber-700"}`}>
                 认证：{preview.auth === "none" ? "无需密钥" : preview.auth === "bearer" ? "Bearer Token" : preview.auth === "apikey" ? "API Key" : "OAuth 授权"}
               </span>
@@ -372,7 +413,7 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
               return (
                 <div key={s.id} className="rounded-xl bg-white/60 px-2.5 py-2">
                   <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-800">{s.name}{s.manual && <span className="ml-1 rounded-full bg-sky-500/12 px-1.5 py-0.5 align-middle text-[8px] font-semibold text-sky-600">手动</span>}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-800">{s.name}{s.manual && <span className="ml-1 rounded-full bg-sky-500/12 px-1.5 py-0.5 align-middle text-[8px] font-semibold text-sky-600">手动</span>}{s.url.startsWith(OPEN_METEO_SCHEME) && <span className="ml-1 rounded-full bg-emerald-500/12 px-1.5 py-0.5 align-middle text-[8px] font-semibold text-emerald-600">内置通道</span>}{s.transport === "sse" && <span className="ml-1 rounded-full bg-violet-500/12 px-1.5 py-0.5 align-middle text-[8px] font-semibold text-violet-600">SSE</span>}</span>
                     <span className="shrink-0 text-[9.5px] text-muted-foreground">{s.host}</span>
                     <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8.5px] font-semibold ${b.cls}`}>{b.label}</span>
                   </div>

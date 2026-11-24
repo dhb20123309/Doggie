@@ -253,7 +253,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp,
         <McpEntryCard onOpen={onOpenMcp} />
         <WallpaperSection wallpapers={wallpapers} />
         <DesktopIconSection />
-        <ImageSection />
+        <ImageSection config={config} />
         <VoiceSection config={config} />
         <CallObserveSection />
         <MusicSourceSection />
@@ -586,14 +586,65 @@ function WallpaperPicker({
 }
 
 /** 独立生图通道：不影响聊天 API 地址。可选免费网关（Pollinations，免 Key）或自备 OpenAI 兼容图像网关 */
-function ImageSection() {
+function ImageSection({ config }: { config: AiConfig }) {
   const [form, setForm] = useState<ImageConfig>(() => loadImageConfig());
   const [savedMsg, setSavedMsg] = useState(false);
+  // 与聊天接口同款体验：填完站点 v1 链接和 Key 后可自动拉取模型列表 + 连接测试
+  const [models, setModels] = useState<string[]>([]);
+  const [pulling, setPulling] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testOk, setTestOk] = useState(false);
+  const [testErr, setTestErr] = useState("");
 
   const save = () => {
     saveImageConfig(form);
     setSavedMsg(true);
     setTimeout(() => setSavedMsg(false), 1500);
+  };
+
+  /** 实际生效的地址/Key：留空回落聊天接口配置（与 generateCharPhoto 的回落口径一致） */
+  const effBase = form.baseUrl.trim() || config.baseUrl;
+  const effKey = form.apiKey.trim() || config.apiKey;
+
+  const pullModels = async () => {
+    if (pulling) return;
+    setPulling(true);
+    setTestErr("");
+    try {
+      const list = await fetchModelList({ ...config, baseUrl: effBase, apiKey: effKey });
+      // 图像相关模型排前面，方便一眼找到；其余保留供自选
+      const imgFirst = [...list].sort((a, b) => Number(/image|diffusion|flux|dall|seedream/i.test(b)) - Number(/image|diffusion|flux|dall|seedream/i.test(a)));
+      setModels(imgFirst);
+      console.log(`[image] models pulled total=${list.length} first=${imgFirst.slice(0, 3).join(",")}`);
+    } catch (e) {
+      setTestErr(e instanceof Error ? e.message : "拉取模型失败");
+      console.warn("[image] models pull fail:", e);
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  /** 连接测试：最小对话请求验证该网关地址+Key 是否可用（生图走同套鉴权） */
+  const testChannel = async () => {
+    if (testing) return;
+    setTesting(true);
+    setTestErr("");
+    try {
+      const res = await testConnection({ ...config, baseUrl: effBase, apiKey: effKey });
+      if (res.status === "success") {
+        setTestOk(true);
+        console.log(`[image] channel test ok title=${res.title}`);
+        setTimeout(() => setTestOk(false), 2500);
+      } else {
+        setTestErr([res.title, res.detail].filter(Boolean).join("："));
+        console.warn(`[image] channel test fail status=${res.status} detail=${res.detail}`);
+      }
+    } catch (e) {
+      setTestErr(e instanceof Error ? e.message : "连接失败");
+      console.warn("[image] channel test threw:", e);
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -635,20 +686,49 @@ function ImageSection() {
         className="h-9 rounded-lg glass-input text-[12px]"
       />
       {form.mode === "openai" && (
-        <div className="flex flex-wrap gap-1.5">
-          {GPT_IMAGE_MODELS.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, model: m }))}
-              className={`jelly-btn h-6 rounded-full px-2.5 text-[10.5px] font-medium ${
-                form.model === m ? "bg-primary text-primary-foreground" : "glass-input text-muted-foreground"
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            {GPT_IMAGE_MODELS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, model: m }))}
+                className={`jelly-btn h-6 rounded-full px-2.5 text-[10.5px] font-medium ${
+                  form.model === m ? "bg-primary text-primary-foreground" : "glass-input text-muted-foreground"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          {/* 拉取模型 + 连接测试：与聊天接口同款操作 */}
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="jelly-btn h-8 flex-1 rounded-xl text-xs" disabled={pulling || testing} onClick={() => void pullModels()}>
+              {pulling ? "拉取中…" : "拉取模型列表"}
+            </Button>
+            <Button size="sm" variant="outline" className="jelly-btn h-8 flex-1 rounded-xl text-xs" disabled={testing || pulling} onClick={() => void testChannel()}>
+              {testOk ? "✓ 连接正常" : testing ? "测试中…" : "连接测试"}
+            </Button>
+          </div>
+          {models.length > 0 && (
+            <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg bg-white/50 p-1.5">
+              <p className="px-1 text-[10px] font-semibold text-muted-foreground">该网关可用模型（点选填入，图像类已排前）</p>
+              {models.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, model: m }))}
+                  className={`block w-full truncate rounded-md px-2 py-1 text-left text-[11px] transition-colors hover:bg-primary/10 ${
+                    form.model === m ? "bg-primary/15 font-semibold text-primary" : "text-neutral-700"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+          {testErr && <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-red-600">{testErr}</p>}
+        </>
       )}
       <div className="flex gap-2">
         <Button size="sm" className="jelly-btn h-8 flex-1 rounded-xl text-xs" onClick={save}>

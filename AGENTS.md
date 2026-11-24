@@ -128,6 +128,7 @@
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。
 - Button 没有 "success" variant；成功态用自定义 CSS token（--color-success）配合边框/背景类。
-- 外部网关返回 401 属鉴权业务失败（Key 错误/缺失），不是前端代码问题。
+- **掌心窗 MCP 预置清单（第93轮）**：`src/lib/linjian-tools.ts` 从 linjian-peek-public README「MCP 工具概览」整理 LINJIAN_TOOLS 50 个工具（状态截图/点击输入/App控制/通知提醒/日历窗语/归电关心/门禁休息/到访活动八组），risk/private/keywords 按 README 安全边界标注（截图读屏点击等一律 high）。RemoteMcpPanel 手动登记表单顶部「一键载入掌心窗完整工具清单」按钮 loadLinjianPreset：自动填服务名"掌心窗"+端点 https://zhangxinchuang-mcp-je93.onrender.com/mcp（用户 Render Blueprint "song" 部署的实际域名，地址框可改）+auth 缺省 bearer，去重合并进 manualTools，用户只需粘 LINJIAN_TOKEN 点登记。日志 [mcp-remote] linjian preset loaded。⚠️ 浏览器直连对方 MCP 仍可能受 CORS 拦，调用失败用面板「复制调用指令」终端验证；该仓库许可仅限个人自用部署，禁止再分发。
+- **Pages 同步链路排障沉淀（第89-92轮）**：❌ sync.bat 含中文注释在 GBK 码页 cmd 下把命令行咬断（'--ff-only'→'f-only'）→ 改纯 ASCII 重写并 node 校验非零字节数=0；❌ 沙箱 main 与 GitHub main 历史分叉（远端有本地没有的发布线 c250074）导致 bundle pull 永远非快进 → 沙箱 git merge FETCH_HEAD 正式并入（index.html 冲突保留 viewport-fit+禁缓存 meta 双要素）；用户侧连环坑逐个解决：git 身份未配置→bundle 缺 main 引用→旧 merge 残局（.git\MERGE_HEAD 检测自动 abort）→schannel TLS 握手失败（国内网络，v3 三级重试：TLS1.2+关吊销→SSH→提示代理/热点）。push 成功即 Actions 自动构建发布，deploy.yml 健康无需动。
 - 非 async 回调里不能 await（如 onChange 处理压缩图片），改 .then 写法。
 - 表情/头像图片必须转 base64 data URL 持久化，blob URL 刷新即失效导致裂图；上传时 canvas 压缩到 200KB 内。

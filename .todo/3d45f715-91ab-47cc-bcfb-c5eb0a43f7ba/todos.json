@@ -44,14 +44,14 @@
   {
     "content": "桌面图标入口 + 工具箱入口升级 + PhoneShell 参数化路由",
     "id": "g7",
-    "status": "in_progress",
+    "status": "completed",
     "priority": "high",
     "skills": []
   },
   {
     "content": "冒烟测试全玩法可终局 + 双门禁 + dev + 截图 + bundle + AGENTS.md",
     "id": "g8",
-    "status": "pending",
+    "status": "completed",
     "priority": "medium",
     "skills": []
   }

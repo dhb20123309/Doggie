@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!-- GitHub Pages 边缘缓存最长10分钟，手机浏览器还会再缓存 HTML：禁缓存让每次打开都拉最新版（JS/CSS 带内容哈希不受影响） -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
@@ -19,7 +19,8 @@
     </style>
   </head>
   <body>
+    <link rel="icon" href="data:," />
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>

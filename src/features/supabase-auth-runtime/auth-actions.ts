@@ -1,6 +1,9 @@
 // Supabase Auth 第一因子动作；调用方必须只选择 authentication.md 已确认的一种 SOP。
-import { supabase } from '@/supabase/client';
+// 云端客户端统一经 requireSupabase() 惰性获取：无云服务配置时返回带 code 的失败结果，
+// 由 useAuthSubmit 转成用户可读反馈，而不是抛错打断页面。
 import { normalizeMainlandPhone } from './auth-phone';
+import { requireSupabase } from './cloud-auth';
+import type { AuthResponse } from './optional/auth-verification';
 import {
   emailVerificationActions,
   phoneVerificationActions,
@@ -27,6 +30,16 @@ export interface PhonePasswordSignUpInput {
   phone: string;
   password: string;
   username: string;
+}
+
+/** 无云配置时的统一失败响应（SDK 形状：data 空 + error） */
+async function cloudless<T>(): Promise<AuthResponse<T>> {
+  try {
+    await requireSupabase();
+  } catch (error) {
+    return { data: {} as T, error: error as Error };
+  }
+  return { data: {} as T, error: null };
 }
 
 function requireValue(value: string, fieldName: string): string {
@@ -71,7 +84,9 @@ function toAuthEmail(username: string): string {
 }
 
 const sharedActions = {
-  signOut() {
+  async signOut() {
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return { data: {} as Record<string, never>, error: null };
     return supabase.auth.signOut();
   },
 };
@@ -80,17 +95,23 @@ const basicAuthActions = {
   ...sharedActions,
   mode: 'basic_auth' as const,
   supportsPasswordRecovery: false as const,
-  signUp({ username, password }: BasicAuthSignUpInput) {
+  async signUp({ username, password }: BasicAuthSignUpInput) {
     const normalizedUsername = username.trim();
+    const email = toAuthEmail(normalizedUsername);
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return cloudless<{ session: unknown; user: unknown }>();
     return supabase.auth.signUp({
-      email: toAuthEmail(normalizedUsername),
+      email,
       password,
       options: { data: { username: normalizedUsername } },
     });
   },
-  signIn({ username, password }: BasicAuthSignUpInput) {
+  async signIn({ username, password }: BasicAuthSignUpInput) {
+    const email = toAuthEmail(username);
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return cloudless<{ session: unknown; user: unknown }>();
     return supabase.auth.signInWithPassword({
-      email: toAuthEmail(username),
+      email,
       password,
     });
   },
@@ -101,7 +122,7 @@ const emailPasswordActions = {
   ...sharedActions,
   mode: 'auth_email_password' as const,
   supportsPasswordRecovery: true as const,
-  signUp({
+  async signUp({
     email,
     password,
     username,
@@ -109,6 +130,8 @@ const emailPasswordActions = {
   }: EmailPasswordSignUpInput) {
     const normalizedEmail = requireValue(email, '邮箱');
     const normalizedUsername = requireValue(username, '用户名');
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return cloudless<{ session: unknown; user: unknown }>();
     return supabase.auth.signUp({
       email: normalizedEmail,
       password,
@@ -118,12 +141,15 @@ const emailPasswordActions = {
       },
     });
   },
-  signIn({
+  async signIn({
     email,
     password,
   }: Pick<EmailPasswordSignUpInput, 'email' | 'password'>) {
+    const normalizedEmail = requireValue(email, '邮箱');
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return cloudless<{ session: unknown; user: unknown }>();
     return supabase.auth.signInWithPassword({
-      email: requireValue(email, '邮箱'),
+      email: normalizedEmail,
       password,
     });
   },
@@ -134,21 +160,26 @@ const phonePasswordActions = {
   ...sharedActions,
   mode: 'auth_sms_password' as const,
   supportsPasswordRecovery: true as const,
-  signUp({ phone, password, username }: PhonePasswordSignUpInput) {
+  async signUp({ phone, password, username }: PhonePasswordSignUpInput) {
     const normalizedPhone = normalizeMainlandPhone(phone);
     const normalizedUsername = requireValue(username, '用户名');
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return cloudless<{ session: unknown; user: unknown }>();
     return supabase.auth.signUp({
       phone: normalizedPhone,
       password,
       options: { data: { username: normalizedUsername } },
     });
   },
-  signIn({
+  async signIn({
     phone,
     password,
   }: Pick<PhonePasswordSignUpInput, 'phone' | 'password'>) {
+    const normalizedPhone = normalizeMainlandPhone(phone);
+    const supabase = await requireSupabase().catch(() => null);
+    if (!supabase) return cloudless<{ session: unknown; user: unknown }>();
     return supabase.auth.signInWithPassword({
-      phone: normalizeMainlandPhone(phone),
+      phone: normalizedPhone,
       password,
     });
   },

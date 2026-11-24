@@ -26,6 +26,8 @@ const TMP_DIRECTORY = normalizeWatchPath(resolve(PROJECT_ROOT, "tmp"));
  * - outDir 'dist' / assetsDir 'assets' — 归一化产物目录
  */
 export default defineConfig({
+  // GitHub Pages 子路径（/Doggie/）部署用相对资源引用；沙箱预览不受影响
+  base: "./",
   plugins: [
     {
       name: "meoo-require-real-homepage",

@@ -1,0 +1,59 @@
+# push 到 main 即自动构建并发布 GitHub Pages
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm run build
+      # 发布完整性自检：入口 JS/CSS 必须真实存在于 dist/assets，缺了直接红叉，
+      # 不再"部署成功但线上白屏"（曾出现 index.html 引用与产物哈希不一致的事故）
+      - name: Verify dist integrity
+        run: |
+          set -e
+          ls -la dist dist/assets
+          entry_js=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' dist/index.html | head -1)
+          entry_css=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.css' dist/index.html | head -1)
+          echo "index.html entries: $entry_js / $entry_css"
+          test -f "dist/$entry_js" || { echo "::error::入口 JS 不存在于 dist/assets，构建产物异常"; exit 1; }
+          test -f "dist/$entry_css" || { echo "::error::入口 CSS 不存在于 dist/assets，构建产物异常"; exit 1; }
+          echo "dist integrity OK"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

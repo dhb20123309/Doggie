@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth, useAuthSubmit } from "@/features/supabase-auth-runtime";
 import { authActions } from "@/lib/auth";
+import { cloudAvailable } from "@/lib/cloud-client";
 
 interface Props {
   /** 登录/注册成功（Session 已建立）后回调 */

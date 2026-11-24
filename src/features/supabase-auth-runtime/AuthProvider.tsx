@@ -1,4 +1,6 @@
 // 应用根部只挂载一次；业务查询放在 Auth 状态更新后的 effect 中。
+// GitHub Pages 等无云服务配置部署：cloudAvailable=false 时直接以 anonymous 渲染，
+// 不触碰 @/supabase/client（该模块在无 env 时会抛错），登录入口由上层显示"未配置云服务"。
 import {
   createContext,
   type ReactNode,
@@ -9,7 +11,7 @@ import {
   useState,
 } from 'react';
 import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/supabase/client';
+import { cloudAvailable, getSupabase } from '@/lib/cloud-client';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous' | 'error';
 export type AuthFlow = 'standard' | 'password_recovery';
@@ -49,6 +51,8 @@ function resolveAuthFlow(
 }
 
 async function readInitialSnapshot(): Promise<AuthSnapshot> {
+  const supabase = await getSupabase();
+  if (!supabase) return { ...initialSnapshot, status: 'anonymous' };
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
   if (!data.session) return { ...initialSnapshot, status: 'anonymous' };
@@ -71,45 +75,51 @@ async function readInitialSnapshot(): Promise<AuthSnapshot> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [snapshot, setSnapshot] = useState<AuthSnapshot>(initialSnapshot);
+  const [snapshot, setSnapshot] = useState<AuthSnapshot>(() =>
+    cloudAvailable ? initialSnapshot : { ...initialSnapshot, status: 'anonymous' },
+  );
   useEffect(() => {
+    if (!cloudAvailable) return;
     let active = true;
     let authRevision = 0;
     const initialRevision = authRevision;
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      // 初始快照统一由 getSession + getUser 核对；INITIAL_SESSION 不提前认证，
-      // 也不作废正在进行的核对或覆盖已得到的错误结果。
-      if (!active || event === 'INITIAL_SESSION') return;
-      authRevision += 1;
-      // 回调只同步状态，不在 Auth 回调内 await 其他 Supabase 请求。
-      if (active)
-        setSnapshot(current => ({
-          status: session ? 'authenticated' : 'anonymous',
-          session,
-          user: session?.user ?? null,
-          error: null,
-          authFlow: resolveAuthFlow(event, current, session),
-        }));
-    });
-    // 先订阅再初始化；真实认证变更（包括订阅时同步收到的事件）优先于旧查询。
-    void readInitialSnapshot()
-      .then(next => {
-        if (active && authRevision === initialRevision) setSnapshot(next);
-      })
-      .catch(error => {
-        if (active && authRevision === initialRevision)
-          setSnapshot({
-            ...initialSnapshot,
-            status: 'error',
-            error:
-              error instanceof Error ? error : new Error('登录状态初始化失败'),
-          });
+    let subscription: { unsubscribe: () => void } | null = null;
+    void getSupabase().then((client) => {
+      if (!active || !client) return;
+      const sub = client.auth.onAuthStateChange((event, session) => {
+        // 初始快照统一由 getSession + getUser 核对；INITIAL_SESSION 不提前认证，
+        // 也不作废正在进行的核对或覆盖已得到的错误结果。
+        if (!active || event === 'INITIAL_SESSION') return;
+        authRevision += 1;
+        // 回调只同步状态，不在 Auth 回调内 await 其他 Supabase 请求。
+        if (active)
+          setSnapshot(current => ({
+            status: session ? 'authenticated' : 'anonymous',
+            session,
+            user: session?.user ?? null,
+            error: null,
+            authFlow: resolveAuthFlow(event, current, session),
+          }));
       });
+      subscription = sub.data.subscription;
+      // 先订阅再初始化；真实认证变更（包括订阅时同步收到的事件）优先于旧查询。
+      void readInitialSnapshot()
+        .then(next => {
+          if (active && authRevision === initialRevision) setSnapshot(next);
+        })
+        .catch(error => {
+          if (active && authRevision === initialRevision)
+            setSnapshot({
+              ...initialSnapshot,
+              status: 'error',
+              error:
+                error instanceof Error ? error : new Error('登录状态初始化失败'),
+            });
+        });
+    });
     return () => {
       active = false;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, []);
 

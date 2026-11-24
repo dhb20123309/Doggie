@@ -1,8 +1,7 @@
 // 仅在角色权限或 MFA 场景读取和使用。
 import type { ReactNode } from 'react';
 import { AuthRedirect } from '../AuthRedirect';
-
-import { supabase } from '@/supabase/client';
+import { requireSupabase } from '../cloud-auth';
 
 export type RoleGateStatus = 'loading' | 'granted' | 'denied' | 'error';
 
@@ -40,6 +39,15 @@ function deriveMfaStatus(
 }
 
 export async function resolveMfaSnapshot(): Promise<MfaSnapshot> {
+  const supabase = await requireSupabase().catch(() => null);
+  if (!supabase) {
+    return {
+      status: 'error',
+      currentLevel: null,
+      nextLevel: null,
+      error: new Error('当前部署未配置云服务'),
+    };
+  }
   const { data, error } =
     await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
 

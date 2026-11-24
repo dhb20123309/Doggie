@@ -3,7 +3,7 @@
 // 握手被跨域/白名单限制拦住的第三方服务（如 Galatea）可走「手动添加服务」逐个登记工具；
 // 已装服务可移除/清除授权/复制 curl 调用指令排障；调用日志遮盖 token 与私人内容。
 import { useState } from "react";
-import { AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Trash2, X } from "lucide-react";
+import { AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -34,6 +34,7 @@ import {
   type McpToolMeta,
   type RemoteMcpServer,
 } from "@/lib/remote-mcp";
+import { LINJIAN_TOOLS } from "@/lib/linjian-tools";
 
 interface Props {
   onClose: () => void;
@@ -164,6 +165,25 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
     setToolDraft({ name: "", description: "", risk: "low", private: false, keywords: "" });
   };
 
+  /** 一键载入掌心窗公开版工具清单（README 全量整理，含关键词与风险分级），免去逐个手敲 */
+  const loadLinjianPreset = () => {
+    setManualOpen(true);
+    setManual((m) => ({
+      name: m.name.trim() || "掌心窗",
+      url: m.url.trim() || "https://zhangxinchuang-mcp-je93.onrender.com/mcp",
+      auth: m.auth === "none" ? "bearer" : m.auth,
+      key: m.key,
+    }));
+    // 去重合并：已有同名工具不重复加入
+    setManualToolsState((prev) => {
+      const have = new Set(prev.map((t) => t.name));
+      const added = LINJIAN_TOOLS.filter((t) => !have.has(t.name));
+      console.log(`[mcp-remote] linjian preset loaded total=${prev.length + added.length} new=${added.length}`);
+      return [...prev, ...added];
+    });
+    setNotice("已载入掌心窗工具清单（截图/读屏等敏感动作均为高危·每次确认）。请核对端点地址、粘贴 Render 的 LINJIAN_TOKEN 后点「登记服务」。");
+  };
+
   const copyCurl = async (s: RemoteMcpServer) => {
     const cmd = buildCurlCommand(s, (loadToolCache()[s.id] ?? [])[0]?.name ?? "");
     try {
@@ -250,6 +270,9 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
               <Input value={manual.key} onChange={(e) => setManual({ ...manual, key: e.target.value })} type="password" placeholder="令牌/密钥（服务方生成，仅存本机浏览器）" className="glass-input h-8 text-[11px]" autoComplete="off" />
             )}
             <p className="text-[10px] font-semibold text-neutral-700">工具清单（照服务方文档逐个登记，至少一个才能被使用）</p>
+            <Button size="sm" variant="outline" className="jelly-btn h-7 w-full gap-1.5 border-primary/40 text-[11px] text-primary" onClick={loadLinjianPreset}>
+              <Sparkles className="size-3.5" /> 一键载入「掌心窗」完整工具清单（{LINJIAN_TOOLS.length} 个）
+            </Button>
             <div className="flex flex-wrap gap-1.5">
               {TOOL_TEMPLATES.map((tp) => (
                 <button key={tp.label} type="button" className="rounded-full bg-primary/10 px-2 py-0.5 text-[9.5px] font-semibold text-primary hover:bg-primary/20" onClick={() => setToolDraft({ name: tp.tool.name, description: tp.tool.description, risk: tp.tool.risk, private: tp.tool.private, keywords: (tp.tool.keywords ?? []).join("，") })}>

@@ -120,6 +120,8 @@
 
 - **索要照片仍显示文字标记修复（第88轮）**：用户反馈"报备一下"后屏幕上出现【照片】xxx 这类文字而不是真图——生图通道本身没问题，是标记没被消化成图。四层修：①PHOTO_PROTOCOL 改写：明确 [照片:场景] 是系统生图指令不是聊天内容，**绝对禁止用文字描述画面代替真图**（"画面里是我握着方向盘的手"属严重违规）、禁止只说"拍了给你看"不给图；能拍就必须写标记。②流式气泡 strip：chatStream onChunk 前 stripPhotoMark（正则滤 `[照片:` 开头闭合/未闭合标记），治"生图等待期间先看到一行标记文字"。③渲染层保险丝：MessageList photoStripped 过滤残留标记行（旧版本落库的历史消息也不显示文字标记），日志 [photo] render strip residual mark。④失败重试记忆：模块级 photoAskAt Map（charId→时间戳，digestPhoto 成功即删、失败即记），askedPhoto 兜底条件加"5 分钟内曾生图失败"——网关抖一次之后用户随便再说句话即自动重试，不再永久沉默。日志 [photo] digest（带 mode/hasBase/model 现场配置）/ passive ok|fail / request fallback。⚠️ 坑记：RoleChatApp 用 loadImageConfig 需从 media.ts import（曾漏报 TS2552）。
 
+- **bundle 同步链路三轮排障实录（第89-91轮，用户本地 DHB20123309/Doggie）**：①git 身份未配置 → "Committer identity unknown"，pull 合并提交失败；②沙箱 main 与 GitHub main 历史分叉（远端有 8 个用户本地"发布线"提交不在沙箱史：f843c7d 清理/.9c48272 Pages部署/e82727f 真机沉浸/dd9da10 头像兜底/9dc8f2a App5个/d08d96d ci自检/607bf53 hash路由/c250074 Dock上移）→ 沙箱 git fetch github main + merge（index.html 冲突取 viewport-fit+禁缓存meta 并立、AGENTS.md modify/delete 保留沙箱版、.plan 按远端规则 rm --cached），merge-base --is-ancestor FETCH_HEAD main 验证 FF_OK 后才导 bundle；③sync.bat UTF-8 中文被 cmd GBK 码页咬断命令行（'--ff-only'→'f-only'）→ 脚本必须纯 ASCII（node 校验 non-ascii=0）；④用户本地残留未完成 merge（unmerged files）→ sync.bat v2 先检测 .git\MERGE_HEAD 自动 merge --abort，另备 reset.bat（merge --abort + fetch bundle + reset --hard FETCH_HEAD + clean -fd）作最后手段。诊断入口优先 curl GitHub API：/repos/.../commits/main 对比沙箱 HEAD、/actions/runs 看部署结论。⚠️ 教训：Pages"没同步"先查 push 是否真的成功过（API commits），不要猜缓存。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

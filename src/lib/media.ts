@@ -379,11 +379,44 @@ async function tryOpenAIImages(baseUrl: string, key: string, model: string, prom
         // 负面提示词随请求透传：官方 gpt-image 会忽略未知字段，中转网关常支持 negative_prompt
         body: JSON.stringify({ prompt, n: 1, size, response_format: "b64_json", negative_prompt: PHOTO_STYLE_NEGATIVE, ...(model.trim() ? { model: model.trim() } : {}) }),
       });
-      if (!res.ok) continue; // 该网关可能没有图像能力，换候选或回落
-      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        // 网关有调用记录但聊天看不到图，多半死在这一步：把状态码+响应体前200字打出来定位
+        const body = await res.text().catch(() => "");
+        console.warn(`[photo] gateway ${res.status} url=${url} model=${model.trim() || "默认"} body=${body.slice(0, 200)}`);
+        continue; // 该网关可能没有图像能力，换候选或回落
+      }
+      const json = await res.json().catch((e) => {
+        console.warn(`[photo] gateway resp not-json url=${url}:`, e instanceof Error ? e.message : e);
+        return null;
+      });
+      // 中转站兼容：图可能在顶层 url/images/result/oss 等私有字段，或 data[0].image（base64 无 data: 前缀）
       const item = json?.data?.[0];
-      if (item?.url) return String(item.url);
-      if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`;
+      if (item?.url) {
+        console.log(`[photo] gateway ok url=${String(item.url).slice(0, 80)}`);
+        return String(item.url);
+      }
+      if (item?.b64_json) {
+        console.log(`[photo] gateway ok b64 len=${item.b64_json.length}`);
+        return `data:image/png;base64,${item.b64_json}`;
+      }
+      if (typeof item?.image === "string" && item.image.length > 1024) {
+        console.log(`[photo] gateway ok data[0].image b64 len=${item.image.length}`);
+        return `data:image/png;base64,${String(item.image).replace(/^data:image\/\w+;base64,/, "")}`;
+      }
+      const topUrl = [json?.url, json?.images?.[0]?.url ?? json?.images?.[0], json?.result?.url, json?.data?.url, json?.output?.[0]].find(
+        (v): v is string => typeof v === "string" && /^https?:\/\//.test(v)
+      );
+      if (topUrl) {
+        console.log(`[photo] gateway ok top-level url=${topUrl.slice(0, 80)}`);
+        return topUrl;
+      }
+      const topB64 = [json?.b64_json, json?.data?.b64_json, json?.result?.b64_json, json?.output_b64].find((v): v is string => typeof v === "string" && v.length > 1024);
+      if (topB64) {
+        console.log(`[photo] gateway ok top-level b64 len=${topB64.length}`);
+        return `data:image/png;base64,${topB64}`;
+      }
+      // 200 但结构不认识——留现场供排查
+      console.warn(`[photo] gateway 200 no-image-field url=${url} keys=${Object.keys(json ?? {}).join(",")} itemKeys=${item ? Object.keys(item).join(",") : "无data[0]"}`);
     } catch {
       /* 继续尝试下一候选 */
     }

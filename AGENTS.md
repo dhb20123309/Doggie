@@ -110,6 +110,8 @@
 
 - **MCP 工具聊天关键词触发（第83轮，对标小红书 MCP 工具箱表单）**：McpToolMeta 加 keywords?: string[]。RemoteMcpPanel 手动登记表单与"编辑工具"追加行均有「聊天关键词（逗号分隔）」输入（parseKeywords 去重截断≤8个），快捷模板带默认词；buildRemoteMcpContext 新增第三参 recentText——RoleChatApp mcpCtx 处传最近3条用户消息 content（⚠️ ChatEntry 字段是 content 不是 text），命中≥2字关键词即在 system 追加【关键词命中】服务名:工具名清单并打 [mcp-remote] keyword hits 日志；使用规则句同步加"提到工具关键词"。
 
+- **生图通道拉模型+连接测试（第84轮）**：SettingsApp ImageSection 收 config prop，openai 模式下新增两按钮——pullModels 复用 ai-api.fetchModelList（effBase/effKey = 生图地址/Key 留空回落聊天配置，与 generateCharPhoto 回落口径一致；图像类模型名排序靠前、点选填入 form.model）、testChannel 复用 testConnection（⚠️ TestResult 成功态是 status==="success" 不是 ok，title/detail/hints 拼人话红字）。日志 [image] models pulled / channel test ok|fail。
+
 ## Lessons
 - 祖先元素做 transform 动画会破坏后代 backdrop-filter（内容变糊/半透明）：入场动画容器只动 opacity（lock-fade），玻璃子元素不做 transform 祖先；壁纸放独立 absolute 层。
 - 浅色壁纸上白字对比度不足：用整屏 rgba 压暗层（lock-scrim）+ textShadow，不要用渐变遮罩（截图时机易出现局部空白）。

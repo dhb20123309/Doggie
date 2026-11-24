@@ -100,6 +100,7 @@ import {
 import { loadVoiceConfig, voiceReady, synthesizeSpeech, MINIMAX_VOICES } from "@/lib/tts";
 import { generateCharPhoto, generateCharPhotoSafe, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS, loadImageConfig } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
+import { buildDuelMemorySection } from "@/lib/duel-store";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
 import {
@@ -878,6 +879,8 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
       // 面具（世界线关系包）：每次现算同步读存储——只注入当前启用的那一个，切换/修改立刻生效；
       // 若会话里发生过切换，追加世界线锚点提醒模型旧对话属另一条世界线
       const maskText = buildMaskSection(getActiveMask(ch.id, ch)) + maskAnchorNote(entries);
+      // 棋局记忆：一起玩过的对局（同步现算，终局/退出即更新），私聊与剧情链路共用
+      const duelText = buildDuelMemorySection(ch.id);
       if (story) {
         // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单；
         // 人设保真协议（哈基米4.0+反机械关怀世界书）剧情同样适用，聊天经济性不注入（保持叙事文体）
@@ -898,6 +901,7 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
           REALITY_MCP_PROTOCOL +
           worldText +
           maskText +
+          duelText +
           groupDigestFor(ch.id, characters) +
           memeText
         );
@@ -927,6 +931,7 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
         maskText +
+        duelText +
         memeText +
         TRANSFER_PROTOCOL +
         PHOTO_PROTOCOL +

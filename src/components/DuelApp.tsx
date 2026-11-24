@@ -24,7 +24,7 @@ import {
   type Pt,
   type XState,
 } from "@/lib/duel-engine";
-import { bumpStats, isLiveValid, useDuelLive, useDuelStats, type DuelRecord } from "@/lib/duel-store";
+import { bumpStats, isLiveValid, recordDuel, useDuelLive, useDuelStats, type DuelRecord } from "@/lib/duel-store";
 
 interface Props {
   config: AiConfig;
@@ -196,11 +196,19 @@ function DuelBoard({
         delete next[ch.id];
         return next;
       });
+      recordDuel(ch.id, game, res);
       console.log(`[duel] end ${game} char=${ch.id} result=${res}`);
       onFinish?.(ch.id, res, GAME_NAME[game]);
     },
     [ch.id, game, onFinish, setLive, setStats],
   );
+
+  // 中途退出：有局面就算"下过但没下完"，写进记忆（角色会记得这盘悬着的棋）
+  const exitWithPending = useCallback(() => {
+    const played = game === "gomoku" ? history.length > 0 : xq.last != null;
+    if (!result && played) recordDuel(ch.id, game, "ongoing");
+    onBack();
+  }, [ch.id, game, history.length, xq.last, result, onBack]);
 
   // 持久化当前局面
   const persist = useCallback(
@@ -329,6 +337,8 @@ function DuelBoard({
     }
   };
   const restart = () => {
+    // 终局卡上点"再来一局"时旧局已记过；未终局直接重开（顶栏重开钮）则把上一局记为中途退出
+    if (!result && (game === "gomoku" ? history.length > 0 : xq.last != null)) recordDuel(ch.id, game, "ongoing");
     if (game === "gomoku") {
       setGBoard(gomokuCreate());
       setGTurnBlack(true);
@@ -357,7 +367,7 @@ function DuelBoard({
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-amber-50 to-orange-50">
       <header className="glass-nav flex items-center gap-2 px-3 pb-2 pt-9">
-        <button type="button" onClick={onBack} className="jelly-icon p-1.5 text-neutral-700">
+        <button type="button" onClick={exitWithPending} className="jelly-icon p-1.5 text-neutral-700">
           <ArrowLeft className="size-5" />
         </button>
         <img src={ch.avatar} alt="" className="size-7 rounded-lg object-cover" />

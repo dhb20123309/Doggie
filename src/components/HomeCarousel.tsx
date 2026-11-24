@@ -179,7 +179,7 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
           <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#a8c8f0] to-[#7b9fe0] shadow-[0_4px_14px_-4px_rgba(120,150,220,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">
             <Swords className="size-7 text-white" />
           </span>
-          <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">双弈游戏</span>
+          <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">游戏大厅</span>
         </button>
         <button type="button" onClick={() => onOpen("mcp")} className="group flex flex-col items-center gap-1">
           <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#c7b9f5] to-[#8ea3e8] shadow-[0_4px_14px_-4px_rgba(140,130,220,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">

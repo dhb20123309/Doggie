@@ -418,7 +418,7 @@ export function ToolboxMenu({ hasProfile, onOpenProfile, onShowOpener, onImport,
           </button>
           <button type="button" onClick={onDuel} className="jelly-btn col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-white/55 px-2 py-2.5 text-[11px] font-medium text-foreground">
             <Gamepad2 className="size-4 text-primary" />
-            双弈 · 游戏中心
+            游戏大厅
           </button>
         </div>
       </div>

@@ -29,7 +29,7 @@ export function GameHall({ characters, activeCharId, onPickChar, liveGameId, onR
       <div className="glass-nav flex items-center gap-2 px-3 py-2">
         <button type="button" className="jelly-icon rounded-full p-1.5 text-neutral-600" onClick={onBack} aria-label="返回"><ChevronLeft size={18} /></button>
         <div className="flex-1">
-          <p className="text-sm font-bold text-neutral-800">双弈 · 游戏中心</p>
+          <p className="text-sm font-bold text-neutral-800">游戏大厅</p>
           <p className="text-[11px] text-neutral-500">{GAME_SPECS.length} 款玩法，和 TA 本地对战</p>
         </div>
         <Gamepad2 size={16} className="text-neutral-400" />

@@ -173,12 +173,16 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
   /** 一键载入掌心窗公开版工具清单（README 全量整理，含关键词与风险分级），免去逐个手敲 */
   const loadLinjianPreset = () => {
     setManualOpen(true);
-    setManual((m) => ({
-      name: m.name.trim() || "掌心窗",
-      url: m.url.trim() || "https://zhangxinchuang-mcp-je93.onrender.com/mcp",
-      auth: m.auth === "none" ? "bearer" : m.auth,
-      key: m.key,
-    }));
+    setManual((m) => {
+      console.log(`[mcp-remote] linjian preset form auth=${m.auth === "none" ? "bearer(forced)" : m.auth}`);
+      return {
+        name: m.name.trim() || "掌心窗",
+        url: m.url.trim() || "https://zhangxinchuang-mcp-je93.onrender.com/mcp",
+        // 掌心窗 MCP 要求 Bearer Token（LINJIAN_TOKEN）；自动探测判成 none 会导致调用 401/无认证
+        auth: m.auth === "none" ? "bearer" : m.auth,
+        key: m.key,
+      };
+    });
     // 去重合并：已有同名工具不重复加入
     setManualToolsState((prev) => {
       const have = new Set(prev.map((t) => t.name));

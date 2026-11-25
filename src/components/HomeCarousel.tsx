@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Calendar, Images, MessageSquare, Settings, Play, Pause, RotateCcw, Timer, CloudSun, Pencil, PhoneCall, Sparkles, UtensilsCrossed, SmilePlus, Swords } from "lucide-react";
 import type { AiConfig, ScreenId } from "@/lib/types";
-import { useCharacters, unreadCount, useReadMarks, presetPhoto } from "@/lib/chat-store";
+import { useCharacters, unreadCount, useReadMarks } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
 import { ICON_URLS, AVATAR_BG, iconFor, useDiaries, useMemo, useBond, useProfile, HEART_LINES, seedDiaries } from "@/lib/companion-store";
 
@@ -19,38 +19,14 @@ const APPS: { key: keyof typeof ICON_URLS; label: string; screen: ScreenId }[] =
   { key: "worldbook", label: "世界书", screen: "worldbook" },
   { key: "memory", label: "偏好记忆", screen: "preference" },
 ];
-/** 第一屏放不下 9 个 App：后 4 个移到第二屏顶部一排（用户指令：给头像底座留位置） */
-const SCREEN2_APPS: { label: string; screen: ScreenId; from: string; to: string; shadow: string; Icon: typeof UtensilsCrossed }[] = [
-  { label: "饿了么恋人", screen: "delivery", from: "#f7b267", to: "#e56b6f", shadow: "rgba(220,120,90,0.45)", Icon: UtensilsCrossed },
-  { label: "表情包", screen: "sticker", from: "#f6a5c0", to: "#b48ae2", shadow: "rgba(220,130,180,0.45)", Icon: SmilePlus },
-  { label: "语音通话", screen: "voicecall", from: "#fda4af", to: "#f43f5e", shadow: "rgba(240,110,140,0.5)", Icon: PhoneCall },
-  { label: "手机能力", screen: "mcp", from: "#c7b9f5", to: "#8ea3e8", shadow: "rgba(140,130,220,0.45)", Icon: Sparkles },
-];
+/** 外卖 App 无抠图素材，用渐变底 + lucide 图标单独渲染，追加在网格末位 */
+const EXTRA_APP = { label: "饿了么恋人", screen: "delivery" as ScreenId };
 
 export function HomeCarousel({ config, wallpaper, onOpen }: Props) {
   const [page, setPage] = useState(0);
   const [dx, setDx] = useState(0);
   const drag = useRef<{ x: number; y: number; on: boolean; t: number } | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
-
-  // 真机（iPhone Safari）视口矮 + Dock/指示点占底，App 排曾被 Dock 压住：
-  // 记录内容区高度供 Screen1 计算 min-height；同时把 App 排底部实测位置与 Dock 顶边打日志对比
-  useEffect(() => {
-    const el = trackRef.current?.parentElement;
-    if (!el) return;
-    const sync = () => {
-      el.style.setProperty("--vp-screen-h", `${el.clientHeight}px`);
-      const apps = el.querySelector("[data-apps-row]");
-      const dock = el.querySelector("[data-dock]");
-      if (apps && dock) {
-        const gap = dock.getBoundingClientRect().top - apps.getBoundingClientRect().bottom;
-        console.log(`[home-layout] screenH=${el.clientHeight} appsToDockGap=${Math.round(gap)}${gap < 8 ? " ⚠️App排被Dock压住" : ""}`);
-      }
-    };
-    sync();
-    window.addEventListener("resize", sync);
-    return () => window.removeEventListener("resize", sync);
-  }, [page]);
 
   const down = (e: React.PointerEvent) => {
     drag.current = { x: e.clientX, y: e.clientY, on: false, t: Date.now() };
@@ -91,11 +67,11 @@ export function HomeCarousel({ config, wallpaper, onOpen }: Props) {
         onPointerCancel={up}
       >
         <Screen1 onOpen={onOpen} />
-        <Screen2 onOpen={onOpen} />
+        <Screen2 />
       </div>
 
-      {/* 分页指示点：必须高于 Dock（Dock 顶边≈20px+64px高），否则真机上被玻璃 Dock 压住 */}
-      <div className="pointer-events-auto absolute bottom-[calc(96px+env(safe-area-inset-bottom))] left-1/2 z-40 flex -translate-x-1/2 items-center gap-1.5">
+      {/* 分页指示点 */}
+      <div className="pointer-events-auto absolute bottom-[86px] left-1/2 z-40 flex -translate-x-1/2 items-center gap-1.5">
         {[0, 1].map((i) => (
           <button
             key={i}
@@ -123,8 +99,6 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   const [profile] = useProfile();
   const [diaries] = useDiaries();
   const activeId = localStorage.getItem("vp-phone:active-character:v1") || "";
-  // 与 useActiveCharId 同口径兜底：存储里的 id 失效（导入角色后删除等）时回落第一个角色，
-  // 否则真机旧数据上 ch=undefined，整个头像底座会被条件渲染隐藏（"人不见了"）
   const ch = characters.find((c) => c.id === activeId) ?? characters[0];
   const latest = diaries[0] ?? seedDiaries(ch?.id ?? "")[0];
   const hour = now.getHours();
@@ -132,9 +106,9 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   const week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][now.getDay()];
 
   return (
-    <section className="flex min-h-full w-full shrink-0 flex-col px-4 pb-[132px]">
+    <section className="flex h-full w-full shrink-0 flex-col px-4 pb-28">
       {/* 时钟 + 日期胶囊 */}
-      <div className="mt-6 text-center">
+      <div className="mt-10 text-center">
         <p className="text-[56px] font-extralight leading-none tracking-tight text-[oklch(0.34_0.04_80)] tabular-nums [text-shadow:0_2px_10px_oklch(1_0_0/0.6)]">
           {String(now.getHours()).padStart(2, "0")}:{String(now.getMinutes()).padStart(2, "0")}
         </p>
@@ -144,32 +118,22 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
         </div>
       </div>
 
-      {/* 头像底座（no-shrink：真机视口矮时禁止 flex 压缩裁切——"人不见了"根因修复） */}
-      <button type="button" onClick={() => onOpen("profile")} className="jelly-btn no-shrink relative mx-auto mt-6 block w-full max-w-[240px] overflow-hidden rounded-[28px] border border-white/80 shadow-[0_4px_20px_rgba(180,150,90,0.12)]">
+      {/* 头像底座 */}
+      <button type="button" onClick={() => onOpen("profile")} className="jelly-btn relative mx-auto mt-6 block w-full max-w-[240px] overflow-hidden rounded-[28px] border border-white/80 shadow-[0_4px_20px_rgba(180,150,90,0.12)]">
         <span className="absolute inset-0 bg-gradient-to-br from-[oklch(0.97_0.025_85)] via-[oklch(0.95_0.035_78)] to-[oklch(0.93_0.045_70)]" />
         <span className="relative flex items-center justify-center py-7">
           <span className="flex size-[110px] items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gradient-to-br from-[oklch(0.95_0.04_85)] to-[oklch(0.88_0.06_75)] shadow-[0_6px_18px_-6px_rgba(180,150,90,0.4)]">
-            {(() => {
-              const id = ch?.id ?? "";
-              const src = ch?.avatar || presetPhoto(id);
-              const isImg = src.startsWith("data:") || src.startsWith("http");
-              if (!isImg) return <span className="text-[46px] leading-none">{src || "💛"}</span>;
-              return (
-                <img
-                  src={src}
-                  alt={ch?.name ?? "TA"}
-                  className="size-full object-cover"
-                  onError={() => console.warn(`[home-avatar] img load failed char=${id || "?"} src=${src.slice(0, 80)}`)}
-                />
-              );
-            })()}
+            {ch?.avatar?.startsWith("data:") || ch?.avatar?.startsWith("http") ? (
+              <img src={ch.avatar} alt="" className="size-full object-cover" />
+            ) : (
+              <span className="text-[46px] leading-none">{ch?.avatar || "💛"}</span>
+            )}
           </span>
-          {!!ch && !ch.avatar && <span className="sr-only">{ch.name}</span>}
         </span>
       </button>
 
       {/* 日记预览条 */}
-      <button type="button" onClick={() => onOpen("diary")} className="jelly-btn no-shrink glass mt-5 flex w-full items-center gap-2.5 rounded-full px-3.5 py-2.5 text-left">
+      <button type="button" onClick={() => onOpen("diary")} className="jelly-btn glass mt-5 flex w-full items-center gap-2.5 rounded-full px-3.5 py-2.5 text-left">
         <img src={ICON_URLS.diary} alt="" className="size-6 shrink-0 object-contain" />
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-[oklch(0.38_0.04_80)]">
           {ch?.name ?? "TA"}的新日记：{latest?.title ?? "等待第一篇随笔…"}
@@ -180,8 +144,8 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
       {/* 音乐胶囊 */}
       <MusicPill onOpen={onOpen} />
 
-      {/* 第一屏只放 5 个 App：mt-auto 把这一排推到底部留白区上沿（pb-[132px] 已给 Dock+指示点让位） */}
-      <div data-apps-row className="no-shrink mt-auto grid gap-x-2 pt-4" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+      {/* 8 App 网格（5 图标素材 + 外卖 + 表情包 + 手机能力） */}
+      <div className="mt-auto grid grid-cols-4 gap-x-2 gap-y-3 pt-4 sm:grid-cols-5">
         {APPS.map((app, i) => (
           <button key={app.key} type="button" onClick={() => onOpen(app.screen)} className="group flex flex-col items-center gap-1">
             <span
@@ -193,8 +157,6 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
             <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{app.label}</span>
           </button>
         ))}
-<<<<<<< HEAD
-=======
         <button type="button" onClick={() => onOpen(EXTRA_APP.screen)} className="group flex flex-col items-center gap-1">
           <span className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 bg-gradient-to-br from-[#f7b267] to-[#e56b6f] shadow-[0_4px_14px_-4px_rgba(220,120,90,0.45)] transition-transform duration-200 group-hover:-translate-y-0.5">
             <UtensilsCrossed className="size-7 text-white" />
@@ -225,7 +187,6 @@ function Screen1({ onOpen }: { onOpen: (s: ScreenId) => void }) {
           </span>
           <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">手机能力</span>
         </button>
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
       </div>
     </section>
   );
@@ -253,8 +214,8 @@ function MusicPill({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   );
 }
 
-/* ---------- 屏2：生活 Bento（顶部一排从第一屏挪来的 4 个 App） ---------- */
-function Screen2({ onOpen }: { onOpen: (s: ScreenId) => void }) {
+/* ---------- 屏2：生活 Bento ---------- */
+function Screen2() {
   const [memo, setMemo] = useMemo();
   const [characters] = useCharacters();
   const activeId = localStorage.getItem("vp-phone:active-character:v1") || "";
@@ -267,22 +228,7 @@ function Screen2({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   );
 
   return (
-    <section className="flex min-h-full w-full shrink-0 flex-col gap-3 px-4 pb-[150px] pt-8">
-      {/* 第二屏 App 一排：饿了么恋人/表情包/语音通话/手机能力（第一屏放不下，给头像底座让位） */}
-      <div className="no-shrink grid gap-x-2" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
-        {SCREEN2_APPS.map((app) => (
-          <button key={app.screen} type="button" onClick={() => onOpen(app.screen)} className="group flex flex-col items-center gap-1">
-            <span
-              className="jelly-icon relative flex size-[56px] items-center justify-center rounded-[18px] border border-white/80 shadow-[0_4px_14px_-4px_var(--app-shadow)] transition-transform duration-200 group-hover:-translate-y-0.5"
-              style={{ backgroundImage: `linear-gradient(to bottom right, ${app.from}, ${app.to})`, ["--app-shadow" as string]: app.shadow }}
-            >
-              <app.Icon className="size-7 text-white" />
-            </span>
-            <span className="max-w-full truncate text-[10px] font-medium text-[oklch(0.38_0.04_80)] [text-shadow:0_1px_4px_oklch(1_0_0/0.65)]">{app.label}</span>
-          </button>
-        ))}
-      </div>
-
+    <section className="flex h-full w-full shrink-0 flex-col gap-3 px-4 pb-28 pt-11">
       <div className="grid grid-cols-2 gap-3">
         <PomodoroCard nickname={ch?.name ?? "TA"} />
         <WeatherCard />
@@ -405,7 +351,7 @@ function Dock({ onOpen }: { onOpen: (s: ScreenId) => void }) {
   const btn = "jelly-icon flex w-16 flex-col items-center gap-0.5";
   const box = "relative flex size-9 items-center justify-center rounded-[13px] border border-white/80 bg-white/70 text-[oklch(0.42_0.05_80)] shadow-[0_3px_10px_-3px_rgba(180,150,90,0.3)]";
   return (
-    <div data-dock className="glass-strong absolute bottom-[calc(20px+env(safe-area-inset-bottom))] left-1/2 z-40 flex -translate-x-1/2 items-center gap-8 rounded-full px-6 py-2 shadow-[0_8px_28px_-8px_rgba(180,150,90,0.35)]">
+    <div className="glass-strong absolute bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-8 rounded-full px-6 py-2 shadow-[0_8px_28px_-8px_rgba(180,150,90,0.35)]">
       <button type="button" className={btn} onClick={() => onOpen("album")}>
         <span className={box}><Images className="size-[18px]" /></span>
         <span className="text-[10px] text-[oklch(0.4_0.04_80)]">相册</span>
@@ -421,5 +367,6 @@ function Dock({ onOpen }: { onOpen: (s: ScreenId) => void }) {
         <span className={box}><Settings className="size-[18px]" /></span>
         <span className="text-[10px] text-[oklch(0.4_0.04_80)]">设置</span>
       </button>
-    </div>  );
+    </div>
+  );
 }

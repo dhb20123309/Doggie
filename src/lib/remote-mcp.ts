@@ -406,9 +406,6 @@ async function rpcDirectProbe(endpoint: string, bearer?: string, signal?: AbortS
   }
 }
 
-/** 工具清单缓存上限：掌心窗这类大服务有 138 个工具，旧上限 40 会把预置表静默截断 */
-export const TOOL_CACHE_MAX = 200;
-
 /** tools/list 原始项 → McpToolMeta（风险分级启发式：写操作=高危、涉私读取=中危、其余低风险） */
 function normalizeRpcTools(raw: unknown[]): McpToolMeta[] {
   return raw.slice(0, TOOL_CACHE_MAX).map((t0) => {
@@ -696,20 +693,8 @@ export function addManualServer(input: { name: string; url: string; auth: AuthKi
   const cache = loadToolCache();
   cache[s.id] = input.tools.slice(0, TOOL_CACHE_MAX);
   saveToolCache(cache);
-<<<<<<< HEAD
-  console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} tools=${input.tools.length} cached=${Math.min(input.tools.length, TOOL_CACHE_MAX)} max=${TOOL_CACHE_MAX}`);
-=======
   console.log(`[mcp-remote] manual installed ${s.name} host=${s.host} auth=${s.auth} transport=${input.transport ?? "http"} tools=${input.tools.length}`);
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
   return { ok: true, server: s };
-}
-
-/** 修正已登记服务的认证方式（掌心窗等被自动探测误判为"无认证"时，面板登记后调用） */
-export function setServerAuth(id: string, auth: AuthKind): void {
-  const list = loadServers().map((s) => (s.id === id ? { ...s, auth } : s));
-  saveServers(list);
-  const s = list.find((x) => x.id === id);
-  console.log(`[mcp-remote] server auth updated name=${s?.name ?? id} auth=${auth}`);
 }
 
 /** 更新手动服务的工具清单（面板里增删改后调用） */
@@ -717,7 +702,7 @@ export function setManualTools(serverId: string, tools: McpToolMeta[]) {
   const cache = loadToolCache();
   cache[serverId] = tools.slice(0, TOOL_CACHE_MAX);
   saveToolCache(cache);
-  console.log(`[mcp-remote] manual tools updated server=${serverId} count=${tools.length} cached=${Math.min(tools.length, TOOL_CACHE_MAX)} max=${TOOL_CACHE_MAX}`);
+  console.log(`[mcp-remote] manual tools updated server=${serverId} count=${tools.length}`);
 }
 
 const CURL_ARG_RE = /^[A-Za-z0-9_\-./:@%+=,]*$/;
@@ -1302,10 +1287,6 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
   if (server.transport === "sse") return callViaSse(server, tool, args);
   const check = validateMcpUrl(server.url);
   if (!check.ok) return { ok: false, text: `服务地址已被安全策略拒绝：${check.reason}`, content: "" };
-<<<<<<< HEAD
-  // MCP Streamable HTTP 规范强制要求 Accept 同时声明 json 与 event-stream，缺失会被服务端 406 Not Acceptable 拒绝（掌心窗实测命中）
-=======
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
   const key = (() => {
     try {
@@ -1326,7 +1307,6 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
-  console.log(`[mcp-remote] call → ${server.name}·${tool.name} auth=${server.auth} accept=json+sse`);
   try {
     const res = await fetch(server.url, {
       method: "POST",
@@ -1335,35 +1315,12 @@ export async function callTool(server: RemoteMcpServer, tool: McpToolMeta, args:
       signal: controller.signal,
     });
     const text = await res.text();
-    console.log(`[mcp-remote] call ← HTTP ${res.status} ct=${res.headers.get("content-type")?.slice(0, 40) ?? "?"}`);
     if (!res.ok) {
       appendCallLog(server, tool.name, false, `HTTP ${res.status}`);
       return { ok: false, text: `调用失败（HTTP ${res.status}）`, content: "" };
     }
     let summary = "已完成";
     let content = "";
-    const ct0 = res.headers.get("content-type") ?? "";
-    if (ct0.includes("text/event-stream")) {
-      // SSE 帧响应：取最后一个 data: JSON（tools/call 结果帧）
-      let last: { result?: { content?: { text?: string }[] }; error?: { message?: string } } | null = null;
-      for (const line of text.split(/\r?\n/)) {
-        if (!line.startsWith("data:")) continue;
-        try {
-          last = JSON.parse(line.slice(5).trim());
-        } catch {
-          /* 忽略非 JSON 帧 */
-        }
-      }
-      if (last?.error?.message) {
-        appendCallLog(server, tool.name, false, last.error.message);
-        return { ok: false, text: `服务返回错误：${maskSecrets(last.error.message).slice(0, 60)}`, content: "" };
-      }
-      content = ((last?.result?.content ?? []).map((c) => c.text ?? "").join("\n")).slice(0, 2000);
-      summary = content ? `返回 ${content.length} 字` : "无正文返回";
-      appendCallLog(server, tool.name, true, `${summary}${tool.private ? " · 结果含私人内容，仅本次会话可见" : ""}`);
-      console.log(`[mcp-remote] call ok via SSE len=${content.length}`);
-      return { ok: true, text: `已调用 ${server.name}·${tool.name}（${summary}）`, content: maskSecrets(content) };
-    }
     try {
       const j = JSON.parse(text) as { result?: { content?: { text?: string }[] }; error?: { message?: string } };
       if (j.error?.message) {
@@ -1412,8 +1369,8 @@ export function buildRemoteMcpContext(servers: RemoteMcpServer[], toolCache: Rec
     }
   }
   lines.push(
-    "使用方式：单独一行输出 [远程MCP:服务名:工具名:参数JSON]（参数为 JSON 对象，可省略则写 {}），系统会替你真实执行并把结果回传给你。",
-    "硬性规则：①对方问到你这边的真实情况（手机状态/在做什么/屏幕/电量/位置/通知/日程等）且清单里有对应工具时，【必须先输出标记调用工具】，拿到结果再回答——严禁不查就凭想象编答案（如随口说\"在线啊\"\"刚在看视频\"属于严重违规）；本轮拿不到结果就用文字自然带过，也不要编。②这些标记与调用方法是系统内部机制：绝对禁止把 curl 命令、请求地址、token、JSON 报文或任何代码发给对方，对方看不懂也不该看到。③标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
+    "使用方式：单独一行输出 [远程MCP:服务名:工具名:参数JSON]（参数为 JSON 对象，可省略则写 {}）。",
+    "规则：只在对方明确要求、提到工具关键词或明显需要时调用；标注〔中危〕的工具首次使用时系统会请你确认授权范围、之后自动执行；〔高危〕的工具每次都会先请你确认并展示参数；〔涉私〕工具的返回只做摘要转述，不得整段复述原文；低风险工具调用后要在回复里说明信息来源；绝不调用未在清单中的工具。",
   );
   return lines.join("\n");
 }

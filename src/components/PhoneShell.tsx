@@ -26,7 +26,6 @@ import { AuthSheet } from "./AuthSheet";
 import { CloudOnboard } from "./CloudOnboard";
 import { backupNow, installDirtyTracker, isAutoBackupOn, isDirty, readLastBackupAt } from "@/lib/cloud-store";
 import { handleOAuthCallback } from "@/lib/remote-mcp";
-import { useIsRealDevice } from "@/lib/real-device";
 
 const ONBOARD_KEY = "vp-pho…d:v1";
 const AUTO_GAP_MS = 30 * 60 * 1000; // 自动备份节流：距上次成功至少 30 分钟
@@ -36,30 +35,11 @@ interface Props {
   onSaveConfig: (cfg: AiConfig) => void;
 }
 
-<<<<<<< HEAD
-/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App
- *  hash 路由后参数可能挂在 #/ 之后（#/Doggie/?vpApp=...），两处都取一次 */
-const vpParams = (() => {
-  const sp = new URLSearchParams(window.location.search);
-  const h = window.location.hash;
-  const q = h.indexOf("?");
-  if (q >= 0) {
-    new URLSearchParams(h.slice(q + 1)).forEach((v, k) => {
-      if (!sp.has(k)) sp.set(k, v);
-    });
-  }
-  console.log(`[vp-params] search=${window.location.search} hash=${h} merged=${sp.toString()}`);
-  return sp;
-})();
-=======
 /** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App；?vpGame=uno&vpChar=xx 双弈直达 */
 const vpParams = new URLSearchParams(window.location.search);
 const vpGame = vpParams.get("vpGame") || undefined;
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
 
 export function PhoneShell({ config, onSaveConfig }: Props) {
-  // 真机沉浸模式：隐藏自绘状态栏/灵动岛，顶部留白改走 safe-top
-  const isReal = useIsRealDevice();
   const [locked, setLocked] = useState(!vpParams.has("vpDesk"));
   const [screen, setScreen] = useState<ScreenId>(
     (vpParams.get("vpApp") as ScreenId) || "home",
@@ -269,12 +249,10 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
       <span className="absolute -right-[3px] top-[110px] hidden h-16 w-[3px] rounded-r bg-frame-edge sm:block" />
 
       <div className="screen-glare relative h-full w-full overflow-hidden rounded-none bg-background sm:h-[min(720px,calc(100dvh-56px))] sm:w-[min(360px,calc(100dvw-48px))] sm:rounded-[38px]">
-        {/* 灵动岛（桌面模拟专用；真机沉浸模式下系统已有刘海/状态栏，隐藏） */}
-        {!isReal && (
-          <div className="absolute left-1/2 top-2 z-50 flex h-[26px] w-[92px] -translate-x-1/2 items-center justify-end rounded-full bg-notch pr-3">
-            <span className="size-2.5 rounded-full bg-[oklch(0.25_0.03_260)] ring-1 ring-white/10" />
-          </div>
-        )}
+        {/* 灵动岛 */}
+        <div className="absolute left-1/2 top-2 z-50 flex h-[26px] w-[92px] -translate-x-1/2 items-center justify-end rounded-full bg-notch pr-3">
+          <span className="size-2.5 rounded-full bg-[oklch(0.25_0.03_260)] ring-1 ring-white/10" />
+        </div>
 
         {/* 消息通知横幅：锁屏与所有 App 之上（iOS 式顶部下滑卡） */}
         {banner && (
@@ -341,12 +319,12 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
         )}
 
         {locked ? (
-          <LockScreen passcode={passcode} wallpaper={lockWp} onUnlock={() => setLocked(false)} immersive={isReal} />
+          <LockScreen passcode={passcode} wallpaper={lockWp} onUnlock={() => setLocked(false)} />
         ) : (
           <>
-            {!isReal && <StatusBar dark={screen === "home"} />}
+            <StatusBar dark={screen === "home"} />
 
-            <div key={screen} className={`h-full ${isReal ? "safe-top" : "pt-8"} ${screen === "home" ? "" : "app-open"}`}>
+            <div key={screen} className={`h-full pt-8 ${screen === "home" ? "" : "app-open"}`}>
               {screen === "home" && <HomeCarousel config={config} wallpaper={homeWp} onOpen={setScreen} />}
               {screen === "settings" && (
                 <SettingsApp
@@ -391,7 +369,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               type="button"
               onClick={goHome}
               aria-label="回到主屏"
-              className="absolute bottom-[calc(6px+env(safe-area-inset-bottom))] left-1/2 z-50 h-1.5 w-[110px] -translate-x-1/2 rounded-full backdrop-blur transition-colors hover:bg-black/40"
+              className="absolute bottom-1.5 left-1/2 z-50 h-1.5 w-[110px] -translate-x-1/2 rounded-full backdrop-blur transition-colors hover:bg-black/40"
               style={{ backgroundColor: screen === "home" ? "oklch(1 0 0 / 0.5)" : "oklch(0.4 0.02 275 / 0.4)" }}
             />
 

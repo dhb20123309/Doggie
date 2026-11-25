@@ -3,11 +3,7 @@
 // 握手被跨域/白名单限制拦住的第三方服务（如 Galatea）可走「手动添加服务」逐个登记工具；
 // 已装服务可移除/清除授权/复制 curl 调用指令排障；调用日志遮盖 token 与私人内容。
 import { useState } from "react";
-
-import { AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
-
 import { CloudSun, AlertTriangle, ClipboardCopy, Globe2, Plug, PlusCircle, ShieldCheck, Trash2, X } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,7 +25,6 @@ import {
   saveServers,
   saveToolCache,
   setManualTools,
-  setServerAuth,
   setServerKey,
   startOAuthForServer,
   stripUrlSecrets,
@@ -41,11 +36,7 @@ import {
   type McpToolMeta,
   type RemoteMcpServer,
 } from "@/lib/remote-mcp";
-
-import { LINJIAN_TOOLS } from "@/lib/linjian-tools";
-
 import { OPEN_METEO_TOOLS } from "@/lib/open-meteo-tools";
-
 
 interface Props {
   onClose: () => void;
@@ -173,18 +164,6 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
 
   const doManualInstall = () => {
     setErr("");
-<<<<<<< HEAD
-    // 同名/同 host 旧登记先移除——否则重复点登记会留下多条服务，界面显示的永远是旧的（如被截断的 40 条）缓存
-    const dupes = loadServers().filter((x) => x.name === manual.name.trim() || (manual.url.trim() && (() => { try { return new URL(x.url).host === new URL(manual.url.trim()).host; } catch { return false; } })()));
-    for (const d of dupes) {
-      removeServer(d.id);
-      const c = loadToolCache();
-      delete c[d.id];
-      saveToolCache(c);
-      console.log(`[mcp-remote] manual install replaced old server name=${d.name} id=${d.id} oldTools=${(loadToolCache()[d.id] ?? []).length}`);
-    }
-    const r = addManualServer({ name: manual.name, url: manual.url, auth: manual.auth, tools: manualTools });
-=======
     // 同名/同地址旧记录先替换（修复过截断或传输类型后重新登记不会留下 40 条的旧壳）
     const oldList = loadServers();
     const targetUrl = manual.url.trim();
@@ -192,30 +171,16 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
     dup.forEach((x) => console.log(`[mcp-remote] manual install replaces old server=${x.name} id=${x.id} oldTools=${(loadToolCache()[x.id] ?? []).length}`));
     dup.forEach((x) => removeServer(x.id));
     const r = addManualServer({ name: manual.name, url: manual.url, auth: manual.auth, tools: manualTools, transport: manual.transport });
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
     if (!r.ok || !r.server) {
       setErr(r.reason ?? "手动添加失败");
       return;
     }
-<<<<<<< HEAD
-    // 自动探测可能把服务判成"无认证"：只要用户填了密钥就强制按所选方式修正，保证调用时带上 Authorization
-    if (manual.auth !== "none" && manual.key.trim()) {
-      if (r.server.auth !== manual.auth) setServerAuth(r.server.id, manual.auth);
-      setServerKey(r.server.id, manual.key.trim());
-    }
-    console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length} auth=${manual.auth} keySaved=${Boolean(manual.key.trim())} replaced=${dupes.length}`);
-=======
     if (manual.auth !== "none" && manual.key.trim()) setServerKey(r.server.id, manual.key.trim());
     console.log(`[mcp-remote] manual install confirmed server=${r.server.name} tools=${manualTools.length} transport=${manual.transport}`);
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
     setManualOpen(false);
     setManual({ name: "", url: "", auth: "bearer", key: "", transport: "http" });
     setManualToolsState([]);
-<<<<<<< HEAD
-    setNotice(`「${r.server.name}」已手动登记${dupes.length ? `（已自动替换 ${dupes.length} 条旧登记）` : ""}。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
-=======
     setNotice(`「${r.server.name}」已手动登记${dup.length ? `（替换了 ${dup.length} 条旧记录）` : ""}。注意：若对方服务不允许本网页直连，实际调用仍可能被拦截，可用「复制调用指令」在电脑终端验证。`);
->>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
     refresh();
   };
 
@@ -224,30 +189,6 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
     if (!name) return;
     setManualToolsState((prev) => [...prev, { name: name.slice(0, 48), description: toolDraft.description.trim().slice(0, 120), risk: toolDraft.risk, private: toolDraft.private, keywords: parseKeywords(toolDraft.keywords) }]);
     setToolDraft({ name: "", description: "", risk: "low", private: false, keywords: "" });
-  };
-
-  /** 一键载入掌心窗公开版工具清单（README 全量整理，含关键词与风险分级），免去逐个手敲 */
-  const loadLinjianPreset = () => {
-    setManualOpen(true);
-    setManual((m) => {
-      console.log(`[mcp-remote] linjian preset form auth=${m.auth === "none" ? "bearer(forced)" : m.auth}`);
-      return {
-        name: m.name.trim() || "掌心窗",
-        url: m.url.trim() || "https://zhangxinchuang-mcp-je93.onrender.com/mcp",
-        // 掌心窗 MCP 要求 Bearer Token（LINJIAN_TOKEN）；自动探测判成 none 会导致调用 401/无认证
-        auth: m.auth === "none" ? "bearer" : m.auth,
-        key: m.key,
-      };
-    });
-    // 全量覆盖：掌心窗服务端 tools/list 有 138 个工具，旧预置表只是 README 子集；
-    // 残留旧表会让模型只看得见部分能力，且用户手动改过的条目按名字保留
-    setManualToolsState((prev) => {
-      const kept = prev.filter((t) => !LINJIAN_TOOLS.some((p) => p.name === t.name) && t.name !== "");
-      const merged = [...LINJIAN_TOOLS, ...kept];
-      console.log(`[mcp-remote] linjian preset synced total=${merged.length} kept-custom=${kept.length}`);
-      return merged;
-    });
-    setNotice("已同步掌心窗完整工具清单（以服务端实时清单为准，截图/锁屏/门禁等敏感动作均为高危·每次确认）。⚠️ 请务必再点下方「登记服务」保存——旧的同名登记会被自动替换，只载入不登记不会生效。");
   };
 
   const copyCurl = async (s: RemoteMcpServer) => {
@@ -350,9 +291,6 @@ export function RemoteMcpPanel({ onClose, onChanged }: Props) {
               <Input value={manual.key} onChange={(e) => setManual({ ...manual, key: e.target.value })} type="password" placeholder="令牌/密钥（服务方生成，仅存本机浏览器）" className="glass-input h-8 text-[11px]" autoComplete="off" />
             )}
             <p className="text-[10px] font-semibold text-neutral-700">工具清单（照服务方文档逐个登记，至少一个才能被使用）</p>
-            <Button size="sm" variant="outline" className="jelly-btn h-7 w-full gap-1.5 border-primary/40 text-[11px] text-primary" onClick={loadLinjianPreset}>
-              <Sparkles className="size-3.5" /> 一键载入「掌心窗」完整工具清单（{LINJIAN_TOOLS.length} 个）
-            </Button>
             <div className="flex flex-wrap gap-1.5">
               {TOOL_TEMPLATES.map((tp) => (
                 <button key={tp.label} type="button" className="rounded-full bg-primary/10 px-2 py-0.5 text-[9.5px] font-semibold text-primary hover:bg-primary/20" onClick={() => setToolDraft({ name: tp.tool.name, description: tp.tool.description, risk: tp.tool.risk, private: tp.tool.private, keywords: (tp.tool.keywords ?? []).join("，") })}>

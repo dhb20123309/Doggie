@@ -1,0 +1,30 @@
+[
+  {
+    "id": "b1",
+    "status": "completed",
+    "content": "GameStage cellMatch 支持 a.n 单点落子（修五子棋）",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "b2",
+    "status": "completed",
+    "content": "photo-store addPhotos 批量 + ShellApps 相册多选导入",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "b3",
+    "status": "completed",
+    "content": "sendSticker 持久化 + ToolboxMenu 表情条目 + 表情选择浮层",
+    "priority": "high",
+    "skills": []
+  },
+  {
+    "id": "b4",
+    "status": "completed",
+    "content": "双门禁+dev+验证+bundle+AGENTS.md",
+    "priority": "medium",
+    "skills": []
+  }
+]

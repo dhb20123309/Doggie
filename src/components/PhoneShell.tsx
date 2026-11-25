@@ -52,7 +52,8 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const [notifyOn, setNotifyOn] = useNotifyOn();
   const { status: authStatus } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
-  const [onboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY));
+  // 截图验收直达参数 vpOnboard=0 时跳过云备份引导弹层（仅诊断用途，不影响正常使用）
+  const [onboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY) && !new URLSearchParams(window.location.search).has("vpOnboard"));
   const [oauthMsg, setOauthMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // OAuth 回调接收：URL 带 code/state（或 error）时处理一次并清理地址栏，只认本次发起的授权

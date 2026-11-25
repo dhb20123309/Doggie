@@ -123,6 +123,7 @@ import { emitNotify } from "@/lib/notification-store";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, extractRemoteMarks, execRemoteMarks, answerRemoteConfirm, type McpAction } from "@/lib/reality-mcp";
 import { loadServers as loadRemoteServers, loadToolCache, callTool, buildRemoteMcpContext, hasMediumConsent, grantMediumConsent, type RemoteMcpServer } from "@/lib/remote-mcp";
 import { GroupChatView } from "@/components/GroupChatView";
+import { loadRealPhone, realPhoneReady, loadRealData, buildRealPhoneSection, realPhoneTrigger, REALPHONE_LOCK_PROTOCOL, extractLockMark, lockApp, unlockApp } from "@/lib/realphone";
 import { Avatar } from "@/components/Avatar";
 import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog, groupDigestFor } from "@/lib/group-chat-store";
 
@@ -753,6 +754,19 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
     return { text: reply };
   };
 
+  /** 真机锁定标记拆行动作：[锁App:xx]/[解App:xx] → 写回使用者 GitHub 仓库，手机端自动化轮询执行 */
+  const digestLock = async (reply: string): Promise<{ text: string; note?: string }> => {
+    if (!realPhoneReady(loadRealPhone())) return { text: reply };
+    const mark = extractLockMark(reply);
+    if (!mark) return { text: reply };
+    const r = mark.on ? await lockApp(mark.app) : await unlockApp(mark.app);
+    console.log(`[realphone] ${mark.on ? "lock" : "unlock"} app=${mark.app} ok=${r.ok}`);
+    return {
+      text: mark.clean,
+      note: r.ok ? `✓ ${mark.on ? `已让对方手机锁定「${mark.app}」` : `已解禁「${mark.app}」`}` : `✗ 锁定指令未送达（${r.msg ?? "网络异常"}）`,
+    };
+  };
+
   /** 用户发定位卡片：即时上屏并请求 TA 回复 */
   const sendLocation = (place: string, addr: string) => {
     if (!active || pending) return;
@@ -881,6 +895,8 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
       const maskText = buildMaskSection(getActiveMask(ch.id, ch)) + maskAnchorNote(entries);
       // 棋局记忆：一起玩过的对局（同步现算，终局/退出即更新），私聊与剧情链路共用
       const duelText = buildDuelMemorySection(ch.id);
+      // 真机联动：使用者授权后，TA"知道"对方真实手机状态（每次现算读缓存，60s 轮询刷新）
+      const realText = realPhoneReady(loadRealPhone()) ? buildRealPhoneSection(loadRealData()) : "";
       if (story) {
         // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单；
         // 人设保真协议（哈基米4.0+反机械关怀世界书）剧情同样适用，聊天经济性不注入（保持叙事文体）
@@ -902,6 +918,7 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
           worldText +
           maskText +
           duelText +
+          realText +
           groupDigestFor(ch.id, characters) +
           memeText
         );
@@ -932,11 +949,13 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
         worldText +
         maskText +
         duelText +
+        realText +
         memeText +
         TRANSFER_PROTOCOL +
         PHOTO_PROTOCOL +
         LOCATION_PROTOCOL +
         ORDER_PROTOCOL +
+        REALPHONE_LOCK_PROTOCOL +
         REALITY_MCP_PROTOCOL +
         QUOTE_PROTOCOL +
         quoteTable +
@@ -1196,6 +1215,9 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
         // 远程 MCP 标记消化：[远程MCP:服务:工具:参数] → 授权校验 + 高危确认 + 真实调用
         let remote = clean ? extractRemoteMarks(clean) : { clean, marks: [] };
         clean = remote.clean;
+        // 真机锁定标记消化：[锁App:xx]/[解App:xx] → 写回使用者仓库（联动未开启时标记原样滤掉不留文字）
+        let lockD = clean ? await digestLock(clean) : { text: clean };
+        clean = lockD.text;
         // 照片标记拆图：[照片:场景] → 按人设真实生图（失败只回文字）；剧情模式叙事文体不带标记协议，跳过
         let photo = clean && !storyMode ? await digestPhoto(clean, ch, cfgSnapshot) : { text: clean };
         clean = photo.text;
@@ -1261,11 +1283,13 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
             const againRich = !storyMode ? digestRichCards(againTrans.text) : { text: againTrans.text };
             const againMcp = extractMcpMarks(againRich.text);
             const againRemote = extractRemoteMarks(againMcp.clean);
+            const againLock = await digestLock(againRemote.clean);
             // 重生成的回复同样消化照片标记（OOC/复读抢救后仍可能带 [照片:]）
-            const againPhoto = storyMode ? { text: againRemote.clean } : await digestPhoto(againRemote.clean, ch, cfgSnapshot);
+            const againPhoto = storyMode ? { text: againLock.text } : await digestPhoto(againLock.text, ch, cfgSnapshot);
             const againNote = [
               againMcp.actions.length ? await execMcpActions(againMcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
               againRemote.marks.length ? await execRemoteMarks(againRemote.marks, remoteBridge()) : "",
+              againLock.note ?? "",
             ].filter(Boolean).join(" ｜ ") || undefined;
             settleReply(ch.id, userMsgId, againPhoto.text, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote, againPhoto.photoUrl);
           } else {
@@ -1279,6 +1303,7 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
           const notes = [
             mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
             remote.marks.length ? await execRemoteMarks(remote.marks, remoteBridge()) : "",
+            lockD.note ?? "",
           ].filter(Boolean).join(" ｜ ");
           const mcpNote = notes || undefined;
           clearStreamBubble();
@@ -1545,6 +1570,8 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
     const fireOne = async (ch: Character, last: ChatEntry | null) => {
       // 剧情模式下角色不"不请自来"发私聊式碎句——主动 tick 跳过带 storyMode 的角色
       if (ch.storyMode) return;
+      // 真机联动：闲置窗口内发生了真机事件（充电/锁屏/到家…）则优先围绕该事件搭话
+      const rpTrigger = realPhoneReady(loadRealPhone()) ? realPhoneTrigger(loadRealData(), PROACTIVE_CHECK_MS * 3) : null;
       const sys =
         buildSys(ch, false, memeFor(last ? [last] : []), last?.content ?? "", "", readLastEntries(ch.id, 20)) +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
@@ -1554,6 +1581,9 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
         // 《Ai恋人主动报备指令》by你闻起来像小猫：内容随机池八类+情绪过滤（她近期低落时屏蔽吐槽/炫耀/求助类）
         PROACTIVE_REPORT_POOL +
         REALITY_MCP_PROTOCOL +
+        (rpTrigger
+          ? `\n【此刻由头】对方的手机刚刚发生了这件事：${rpTrigger.line}（这是真实情况）。本轮主动消息请围绕它自然开口，别用下面给的参考句原样发送。`
+          : "") +
         "\n注意：主动消息同样遵守反油腻底线与活人主体性——报备内容要像你真实生活里发生的事，条数与语气延续你当前状态。" +
         "\n\n" +
         pickTopicSeeds() +

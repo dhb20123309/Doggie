@@ -16,14 +16,14 @@
   {
     "content": "sendSticker 持久化 + ToolboxMenu 表情条目 + 表情选择浮层",
     "id": "b3",
-    "status": "in_progress",
+    "status": "completed",
     "priority": "high",
     "skills": []
   },
   {
     "content": "双门禁+dev+验证+bundle+AGENTS.md",
     "id": "b4",
-    "status": "pending",
+    "status": "completed",
     "priority": "medium",
     "skills": []
   }

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ImagePlus, Trash2, Camera as CameraIcon, Music, Pause, Play, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { usePhotos, addPhoto, removePhoto } from "@/lib/photo-store";
+import { usePhotos, addPhoto, addPhotos, removePhoto } from "@/lib/photo-store";
 import { useCharacters, useWorldBooks, useStickers } from "@/lib/chat-store";
 import { loadMusicTracks } from "@/lib/media";
 
@@ -23,11 +23,23 @@ export function AlbumApp({ onBack }: { onBack: () => void }) {
   const [photos, setPhotos] = usePhotos();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const pick = (file?: File) => {
-    if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => setPhotos((p) => addPhoto(p, String(reader.result)));
-    reader.readAsDataURL(file);
+  const pick = (files?: FileList | null) => {
+    const imgs = Array.from(files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    // 批量读取全部选中图片，全部完成后一次性写入相册（单张也走同一路径）
+    const urls: string[] = [];
+    let done = 0;
+    imgs.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        urls.push(String(reader.result));
+        if (++done === imgs.length) {
+          setPhotos((p) => addPhotos(p, urls));
+          console.log(`[album] import batch n=${urls.length}`);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   return (
@@ -41,7 +53,7 @@ export function AlbumApp({ onBack }: { onBack: () => void }) {
           </Button>
         }
       />
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+      <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
       <div className="h-full overflow-y-auto px-3 pb-6 pt-2">
         {photos.length === 0 ? (
           <p className="pt-16 text-center text-xs leading-relaxed text-muted-foreground">

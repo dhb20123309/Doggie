@@ -255,6 +255,9 @@ export const OOC_PATTERNS =
 /** 转账/收款话术白名单：形似"收到…转账/已到账"的 OOC 兜底词在带 transfer 上下文的回复里放行（真人收钱就会说这些） */
 const MONEY_OK_RE = /(收到|领取|收下|转入|打款).{0,6}转账|转账.{0,6}(成功|已到账|已收取)|已(经)?到账|到账了|(钱|红包).{0,4}(收下|收了)/i;
 
+/** 真机锁定标记行放行：[锁App:xx]/[解App:xx] 是系统协议指令不是出戏话 */
+const LOCK_MARK_RE = /\[(锁|解)App[:：][^\]]{1,16}\]/;
+
 /** 整行英文检测（≥12 字符且拉丁字母占比 ≥70%）：外国角色卡模型易切英文，整行英文按出戏拦截重生成；
  *  中文为主夹杂英文短句（真人聊天习惯）不误伤，短英文（lol / ok / emmm）天然不触发 */
 const LATIN_RUN_RE = /[A-Za-zÀ-ÿ][a-zA-Z'’\-À-ÿ]*/g;
@@ -274,6 +277,8 @@ export function isOocLine(line: string): boolean {
   if (MONEY_OK_RE.test(line)) return false;
   // 照片标记行放行：[照片:场景] 是系统协议指令不是出戏话
   if (PHOTO_MARK_RE.test(line)) return false;
+  // 真机锁定标记行放行：[锁App:xx]/[解App:xx] 同理
+  if (LOCK_MARK_RE.test(line)) return false;
   if (EN_OOC_RE.test(line) || EN_PROFANITY_RE.test(line)) return true;
   return OOC_PATTERNS.test(line) || isMostlyEnglish(line);
 }

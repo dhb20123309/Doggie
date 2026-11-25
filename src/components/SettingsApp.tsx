@@ -17,6 +17,7 @@ import { usePersisted } from "@/lib/chat-store";
 import { listCachedTakes, clearAllCachedAudio } from "@/lib/call-observe";
 import { ICON_URLS, loadCustomIcons, setCustomIcon, ICON_MAX_BYTES } from "@/lib/companion-store";
 import { CloudAccountSection } from "@/components/CloudAccountSection";
+import { RealPhoneSection } from "@/components/RealPhonePanel";
 
 interface Props {
   config: AiConfig;
@@ -251,6 +252,7 @@ export function SettingsApp({ config, onSave, onBack, onLock, notify, onOpenMcp,
         <CloudAccountSection onOpenAuth={onOpenAuth} />
         <NotificationSection notify={notify} />
         <McpEntryCard onOpen={onOpenMcp} />
+        <RealPhoneSection />
         <WallpaperSection wallpapers={wallpapers} />
         <DesktopIconSection />
         <ImageSection config={config} />

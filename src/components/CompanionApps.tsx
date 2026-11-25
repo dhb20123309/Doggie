@@ -26,6 +26,7 @@ import {
   type SceneNode,
   type Script,
 } from "@/lib/companion-store";
+import { useRealPhoneData, realPhoneReady, loadRealPhone } from "@/lib/realphone";
 
 interface AppProps {
   config?: AiConfig;
@@ -161,6 +162,13 @@ export function PhonePeekApp({ onBack }: AppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [charId]);
   const avatarIsImg = ch?.avatar?.startsWith("data:") || ch?.avatar?.startsWith("http");
+  // 真机联动：开启且拉到数据时，查手机顶部插入"你的真机实况"卡（真实设备快照+今日 App 打开记录），其余板块仍是角色模拟数据
+  const { data: realData, refresh: refreshReal } = useRealPhoneData();
+  const realOn = realPhoneReady(loadRealPhone()) && realData.fetchedAt > 0;
+  const todayAct = realData.activity.filter((a) => a.at >= new Date().setHours(0, 0, 0, 0));
+  const actCounts = new Map<string, number>();
+  for (const a of todayAct) actCounts.set(a.app, (actCounts.get(a.app) ?? 0) + 1);
+  const topApps = [...actCounts.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5);
   const maxMins = Math.max(...data.appUsage.map((a) => a.mins), 1);
   return (
     <div className="lock-fade flex h-full flex-col">
@@ -187,6 +195,48 @@ export function PhonePeekApp({ onBack }: AppProps) {
         </div>
       )}
       <div className="flex-1 space-y-3 overflow-y-auto px-3 pb-6 pt-3">
+        {/* 真机实况：联动开启后置顶展示你自己的真实手机状态（数据来自你的 GitHub 仓库） */}
+        {realOn && (
+          <div className="rounded-2xl border border-primary/30 bg-primary/5 p-3.5">
+            <p className={`mb-2 flex items-center justify-between text-[12px] font-semibold ${INK}`}>
+              <span>📡 你的真机实况（联动已接入）</span>
+              <button type="button" onClick={refreshReal} className="jelly-icon rounded-full p-1 text-muted-foreground hover:text-primary" aria-label="立即刷新真机数据">
+                <RefreshCw className="size-3.5" />
+              </button>
+            </p>
+            {realData.device && (
+              <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-foreground/80">
+                {typeof realData.device.battery === "number" && <span>🔋 {Math.round(realData.device.battery)}%{realData.device.charging ? " ⚡充电中" : ""}</span>}
+                {typeof realData.device.brightness === "number" && <span>☀️ 亮度 {Math.round(realData.device.brightness)}%</span>}
+                {typeof realData.device.volume === "number" && <span>🔊 音量 {Math.round(realData.device.volume)}%</span>}
+                {realData.device.network && <span>📶 {realData.device.network}</span>}
+                {realData.device.place && <span>📍 {realData.device.place}</span>}
+                {typeof realData.device.steps === "number" && <span>👟 {realData.device.steps} 步</span>}
+                {realData.device.music && <span>🎵 {realData.device.music}</span>}
+                <span className="w-full text-[10px] opacity-60">快照时间 {new Date(realData.device.at).toLocaleString("zh-CN", { hour12: false })}</span>
+              </div>
+            )}
+            {topApps.length > 0 && (
+              <ul className="space-y-1.5">
+                {topApps.map(([name, n]) => (
+                  <li key={name} className={`text-[11.5px] ${INK}`}>
+                    <div className="flex items-center justify-between">
+                      <span>{name}</span>
+                      <span className={`text-[10.5px] ${SUB}`}>今日打开 {n} 次</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/50">
+                      <div className="h-full rounded-full bg-gradient-to-r from-primary/70 to-primary" style={{ width: `${Math.round((n / topApps[0][1]) * 100)}%` }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {todayAct.length === 0 && !realData.device && <p className={`text-[11px] ${SUB}`}>仓库里还没有上报数据——手机端配置跑一次后即出现。</p>}
+            {realData.locks.apps.length > 0 && (
+              <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[10.5px] text-red-600">🔒 TA 锁住了：{realData.locks.apps.join("、")}（手机端自动化收到后会提醒你）</p>
+            )}
+          </div>
+        )}
         {/* 模拟锁屏 */}
         <div className={`glass rounded-2xl px-4 py-5 text-center ${INK}`}>
           <p className="font-display text-4xl font-extralight tabular-nums tracking-tight">

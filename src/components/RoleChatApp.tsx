@@ -100,6 +100,7 @@ import {
 import { loadVoiceConfig, voiceReady, synthesizeSpeech, MINIMAX_VOICES } from "@/lib/tts";
 import { generateCharPhoto, generateCharPhotoSafe, photoPrompt, matchPhotoScene, GPT_IMAGE_MODELS, loadImageConfig } from "@/lib/media";
 import { PROACTIVE_PROTOCOL, pickTopicSeeds } from "@/lib/proactive-protocol";
+import { buildDuelMemorySection } from "@/lib/duel-store";
 import { HUMAN_TYPING_PROTOCOL, buildCountHint, countReplyLines } from "@/lib/human-typing";
 import { CHARACTER_FIDELITY, ONLINE_CHAT_ECONOMY, PROACTIVE_REPORT_POOL } from "@/lib/adult-worldbook";
 import {
@@ -123,6 +124,7 @@ import { readVpParam } from "@/lib/vp-params";
 import { REALITY_MCP_PROTOCOL, extractMcpMarks, execMcpActions, buildMcpContext, loadMcpPrefs, extractRemoteMarks, execRemoteMarks, answerRemoteConfirm, type McpAction } from "@/lib/reality-mcp";
 import { loadServers as loadRemoteServers, loadToolCache, callTool, buildRemoteMcpContext, hasMediumConsent, grantMediumConsent, type RemoteMcpServer } from "@/lib/remote-mcp";
 import { GroupChatView } from "@/components/GroupChatView";
+import { loadRealPhone, realPhoneReady, loadRealData, buildRealPhoneSection, realPhoneTrigger, REALPHONE_LOCK_PROTOCOL, extractLockMark, lockApp, unlockApp } from "@/lib/realphone";
 import { Avatar } from "@/components/Avatar";
 import { type GroupChat, useGroups, readGroupLast, readGroupLog, newGroupId, clearGroupLog, groupDigestFor } from "@/lib/group-chat-store";
 
@@ -131,6 +133,8 @@ interface Props {
   /** 聊天背景（用户上传替换，默认内置奶油图） */
   background?: string;
   onBack: () => void;
+  /** 打开双弈下棋全屏页（工具箱入口） */
+  onOpenDuel?: (charId: string) => void;
 }
 
 /** 消息时间戳：当天只显示 HH:MM，跨日补上日期 */
@@ -188,7 +192,7 @@ function lastPhotoAt(charId: string): number {
 
 type View = "list" | "chat" | "edit" | "prefs" | "worldbooks" | "stickers" | "import" | "detail" | "masks" | "group";
 
-export function RoleChatApp({ config, background, onBack }: Props) {
+export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
   const [characters, setCharacters] = useCharacters();
   const [activeId, setActiveId] = useActiveCharId(characters.map((c) => c.id));
   const active = characters.find((c) => c.id === activeId);
@@ -260,6 +264,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
   // ===== 工具箱-人物档案（模块独立：只负责展示与剧情加载，不碰 system/黑白名单） =====
   const [profiles, setProfiles] = useProfiles();
   const [toolboxOpen, setToolboxOpen] = useState(false);
+  // 工具箱「表情包」浮层：点选即发，发一张留一页方便连发
+  const [stickerSheetOpen, setStickerSheetOpen] = useState(false);
   /** 拉黑彩蛋问询弹窗（在聊天页展示，只有"不拉黑了ovo"一个出口） */
   const [blockedAsk, setBlockedAsk] = useState(false);
   /** drawer=侧边抽屉（首次进会话点白条弹出）；page=独立静态页（清空记录后从工具箱进入） */
@@ -751,6 +757,19 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     return { text: reply };
   };
 
+  /** 真机锁定标记拆行动作：[锁App:xx]/[解App:xx] → 写回使用者 GitHub 仓库，手机端自动化轮询执行 */
+  const digestLock = async (reply: string): Promise<{ text: string; note?: string }> => {
+    if (!realPhoneReady(loadRealPhone())) return { text: reply };
+    const mark = extractLockMark(reply);
+    if (!mark) return { text: reply };
+    const r = mark.on ? await lockApp(mark.app) : await unlockApp(mark.app);
+    console.log(`[realphone] ${mark.on ? "lock" : "unlock"} app=${mark.app} ok=${r.ok}`);
+    return {
+      text: mark.clean,
+      note: r.ok ? `✓ ${mark.on ? `已让对方手机锁定「${mark.app}」` : `已解禁「${mark.app}」`}` : `✗ 锁定指令未送达（${r.msg ?? "网络异常"}）`,
+    };
+  };
+
   /** 用户发定位卡片：即时上屏并请求 TA 回复 */
   const sendLocation = (place: string, addr: string) => {
     if (!active || pending) return;
@@ -877,6 +896,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       // 面具（世界线关系包）：每次现算同步读存储——只注入当前启用的那一个，切换/修改立刻生效；
       // 若会话里发生过切换，追加世界线锚点提醒模型旧对话属另一条世界线
       const maskText = buildMaskSection(getActiveMask(ch.id, ch)) + maskAnchorNote(entries);
+      // 棋局记忆：一起玩过的对局（同步现算，终局/退出即更新），私聊与剧情链路共用
+      const duelText = buildDuelMemorySection(ch.id);
+      // 真机联动：使用者授权后，TA"知道"对方真实手机状态（每次现算读缓存，60s 轮询刷新）
+      const realText = realPhoneReady(loadRealPhone()) ? buildRealPhoneSection(loadRealData()) : "";
       if (story) {
         // 互动剧情：第三人称小说叙事者视角——保留完整历史记忆，不注入私聊气泡式铁律与表情名单；
         // 人设保真协议（哈基米4.0+反机械关怀世界书）剧情同样适用，聊天经济性不注入（保持叙事文体）
@@ -897,6 +920,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           REALITY_MCP_PROTOCOL +
           worldText +
           maskText +
+          duelText +
+          realText +
           groupDigestFor(ch.id, characters) +
           memeText
         );
@@ -926,11 +951,14 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         `【最近对话（对方是"${ch.name || "她"}"，请接住她最后一条消息再回复）】\n` +
         worldText +
         maskText +
+        duelText +
+        realText +
         memeText +
         TRANSFER_PROTOCOL +
         PHOTO_PROTOCOL +
         LOCATION_PROTOCOL +
         ORDER_PROTOCOL +
+        REALPHONE_LOCK_PROTOCOL +
         REALITY_MCP_PROTOCOL +
         QUOTE_PROTOCOL +
         quoteTable +
@@ -1190,6 +1218,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         // 远程 MCP 标记消化：[远程MCP:服务:工具:参数] → 授权校验 + 高危确认 + 真实调用
         let remote = clean ? extractRemoteMarks(clean) : { clean, marks: [] };
         clean = remote.clean;
+        // 真机锁定标记消化：[锁App:xx]/[解App:xx] → 写回使用者仓库（联动未开启时标记原样滤掉不留文字）
+        let lockD = clean ? await digestLock(clean) : { text: clean };
+        clean = lockD.text;
         // 照片标记拆图：[照片:场景] → 按人设真实生图（失败只回文字）；剧情模式叙事文体不带标记协议，跳过
         let photo = clean && !storyMode ? await digestPhoto(clean, ch, cfgSnapshot) : { text: clean };
         clean = photo.text;
@@ -1255,11 +1286,13 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             const againRich = !storyMode ? digestRichCards(againTrans.text) : { text: againTrans.text };
             const againMcp = extractMcpMarks(againRich.text);
             const againRemote = extractRemoteMarks(againMcp.clean);
+            const againLock = await digestLock(againRemote.clean);
             // 重生成的回复同样消化照片标记（OOC/复读抢救后仍可能带 [照片:]）
-            const againPhoto = storyMode ? { text: againRemote.clean } : await digestPhoto(againRemote.clean, ch, cfgSnapshot);
+            const againPhoto = storyMode ? { text: againLock.text } : await digestPhoto(againLock.text, ch, cfgSnapshot);
             const againNote = [
               againMcp.actions.length ? await execMcpActions(againMcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
               againRemote.marks.length ? await execRemoteMarks(againRemote.marks, remoteBridge()) : "",
+              againLock.note ?? "",
             ].filter(Boolean).join(" ｜ ") || undefined;
             settleReply(ch.id, userMsgId, againPhoto.text, storyMode, againDigest.quote, againTrans.transfer, againRich.location, againRich.order, againNote, againPhoto.photoUrl);
           } else {
@@ -1273,6 +1306,7 @@ export function RoleChatApp({ config, background, onBack }: Props) {
           const notes = [
             mcp.actions.length ? await execMcpActions(mcp.actions, loadMcpPrefs(), cfgSnapshot) : "",
             remote.marks.length ? await execRemoteMarks(remote.marks, remoteBridge()) : "",
+            lockD.note ?? "",
           ].filter(Boolean).join(" ｜ ");
           const mcpNote = notes || undefined;
           clearStreamBubble();
@@ -1414,9 +1448,10 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     }
   };
 
-  /** 从表情库手动发一张表情包（用户侧） */
+  /** 从表情库手动发一张表情包（用户侧）：先 setLog 上屏、再 writeLogNow 直写存储，刷新/切会话不丢 */
   const sendSticker = (s: Sticker) => {
-    if (pending || !ready) return;
+    if (!active || pending || !ready) return;
+    const cid = active.id;
     const userMsg: ChatEntry = {
       id: `u${Date.now()}`,
       role: "user",
@@ -1424,8 +1459,17 @@ export function RoleChatApp({ config, background, onBack }: Props) {
       stickerUrl: s.url,
       at: Date.now(),
     };
-    setLog((prev) => [...prev, userMsg]);
+    console.log(`[sticker] manual send name=${s.name} char=${cid}`);
+    // 与 flushDraft 同序：先界面后直写存储；用函数式 prev 取完整上下文，避免 stateRef 滞后
+    let full: ChatEntry[] = [];
+    setLog((prev) => {
+      full = [...prev, userMsg];
+      return full;
+    });
+    writeLogNow(cid, (prev) => [...prev, userMsg]);
     scrollBottom();
+    // 表情也是一次输入：请 TA 基于 [表情:] 语境接话（剧情模式同样适用）
+    void requestReply(full, userMsg.id, Boolean(active.storyMode));
   };
 
   const generate = () => {
@@ -1539,6 +1583,8 @@ export function RoleChatApp({ config, background, onBack }: Props) {
     const fireOne = async (ch: Character, last: ChatEntry | null) => {
       // 剧情模式下角色不"不请自来"发私聊式碎句——主动 tick 跳过带 storyMode 的角色
       if (ch.storyMode) return;
+      // 真机联动：闲置窗口内发生了真机事件（充电/锁屏/到家…）则优先围绕该事件搭话
+      const rpTrigger = realPhoneReady(loadRealPhone()) ? realPhoneTrigger(loadRealData(), PROACTIVE_CHECK_MS * 3) : null;
       const sys =
         buildSys(ch, false, memeFor(last ? [last] : []), last?.content ?? "", "", readLastEntries(ch.id, 20)) +
         "\n\n【场景】现在没有对方发来的消息，是你（" +
@@ -1548,6 +1594,9 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         // 《Ai恋人主动报备指令》by你闻起来像小猫：内容随机池八类+情绪过滤（她近期低落时屏蔽吐槽/炫耀/求助类）
         PROACTIVE_REPORT_POOL +
         REALITY_MCP_PROTOCOL +
+        (rpTrigger
+          ? `\n【此刻由头】对方的手机刚刚发生了这件事：${rpTrigger.line}（这是真实情况）。本轮主动消息请围绕它自然开口，别用下面给的参考句原样发送。`
+          : "") +
         "\n注意：主动消息同样遵守反油腻底线与活人主体性——报备内容要像你真实生活里发生的事，条数与语气延续你当前状态。" +
         "\n\n" +
         pickTopicSeeds() +
@@ -2224,6 +2273,15 @@ export function RoleChatApp({ config, background, onBack }: Props) {
         {locationOpen && (
           <LocationPanel disabled={!ready || pending} onPick={(p, a) => sendLocation(p, a)} onClose={() => setLocationOpen(false)} />
         )}
+        {/* 工具箱「表情包」浮层：全局+本角色可用表情网格，点选即发、页面保留可连发 */}
+        {stickerSheetOpen && (
+          <StickerSheet
+            stickers={stickers.filter((s) => s.isGlobal)}
+            disabled={!ready || pending}
+            onSend={(s) => sendSticker(s)}
+            onClose={() => setStickerSheetOpen(false)}
+          />
+        )}
         {/* 引用条：待发引用显示在输入框上方，微信式浅灰小块 + 关闭按钮 */}
         {quoteDraft && (
           <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-1.5">
@@ -2429,6 +2487,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             setToolboxOpen(false);
             setLocationOpen(true);
           }}
+          onSticker={() => {
+            console.log(`[inputbar] toolbox→表情包 char=${active.id}`);
+            setToolboxOpen(false);
+            setStickerSheetOpen(true);
+          }}
           onShowOpener={() => {
             console.log(`[profile] toolbox→opener char=${active.id} 聊天流内展开`);
             setToolboxOpen(false);
@@ -2443,6 +2506,11 @@ export function RoleChatApp({ config, background, onBack }: Props) {
             console.log(`[profile] toolbox→导入面板 char=${active.id}`);
             setToolboxOpen(false);
             setProfileImportOpen(true);
+          }}
+          onDuel={() => {
+            console.log(`[duel] toolbox→下棋 char=${active.id}`);
+            setToolboxOpen(false);
+            onOpenDuel?.(active.id);
           }}
           onClose={() => setToolboxOpen(false)}
         />
@@ -3302,6 +3370,46 @@ function LocationPanel({ disabled, onPick, onClose }: { disabled: boolean; onPic
 }
 
 /* ================= 表情库速览（可点发） ================= */
+
+/* ================= 工具箱「表情包」浮层（点选即发、面板保留可连发） ================= */
+
+function StickerSheet({ stickers, disabled, onSend, onClose }: { stickers: Sticker[]; disabled: boolean; onSend: (s: Sticker) => void; onClose: () => void }) {
+  return (
+    <>
+      <div className="absolute inset-0 z-30 bg-black/20" onClick={onClose} aria-hidden />
+      <div className="glass-strong fade-up absolute bottom-16 left-3 right-3 z-40 max-h-[52%] overflow-y-auto rounded-2xl p-3 shadow-xl">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-muted-foreground">表情包 · 点一下直接发出</p>
+          <button type="button" onClick={onClose} aria-label="关闭表情面板" className="jelly-icon flex size-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground">
+            <X className="size-4" />
+          </button>
+        </div>
+        {stickers.length === 0 ? (
+          <p className="py-6 text-center text-xs leading-relaxed text-muted-foreground">
+            还没有可用表情。
+            <br />
+            去桌面「表情包」应用上传，这里就会出现。
+          </p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {stickers.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => onSend(s)}
+                className="jelly-icon rounded-xl border border-border bg-card p-1.5 text-left disabled:opacity-40"
+              >
+                <img src={s.url} alt={s.name} className="aspect-square w-full rounded-lg object-cover" />
+                <p className="mt-1 truncate text-center text-[11px]">{s.name}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 function StickerPanel({ stickers, onSend, onBack }: { stickers: Sticker[]; onSend: (s: Sticker) => void; onBack: () => void }) {
   const usable = stickers.filter((s) => s.isGlobal);

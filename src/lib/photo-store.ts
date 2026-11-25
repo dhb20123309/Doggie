@@ -17,6 +17,13 @@ export function addPhoto(prev: Photo[], url: string): Photo[] {
   return [{ id: `p${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url, at: Date.now() }, ...prev];
 }
 
+/** 批量导入：一次写入多张（urls 按选择顺序传入，倒序展开保证最新在前） */
+export function addPhotos(prev: Photo[], urls: string[]): Photo[] {
+  const now = Date.now();
+  const items = urls.map((url, i) => ({ id: `p${now}${i}${Math.random().toString(36).slice(2, 6)}`, url, at: now - (urls.length - 1 - i) }));
+  return [...items.reverse(), ...prev];
+}
+
 export function removePhoto(prev: Photo[], id: string): Photo[] {
   return prev.filter((p) => p.id !== id);
 }

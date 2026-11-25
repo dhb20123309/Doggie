@@ -32,6 +32,7 @@ export type ScreenId =
   | "profile"
   | "delivery"
   | "voicecall"
+  | "duel"
   | "mcp";
 
 export type TestStatus = "idle" | "testing" | "success" | "error";

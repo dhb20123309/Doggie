@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { startUsageTracker } from "@/lib/reality-mcp";
 import type { AiConfig, ScreenId } from "@/lib/types";
+import type { ChatEntry } from "@/lib/chat-types";
 import { isConfigured } from "@/lib/types";
 import { StatusBar } from "./StatusBar";
 import { LockScreen } from "./LockScreen";
@@ -16,6 +17,7 @@ import { AlbumApp, CameraApp, MemoryApp, MusicApp } from "./ShellApps";
 import { DiaryApp, PhonePeekApp, BondApp, PreferenceApp, TheaterApp, ProfileApp } from "./CompanionApps";
 import { DeliveryApp } from "./DeliveryApp";
 import { VoiceCallApp } from "./VoiceCallApp";
+import { DuelApp } from "./DuelApp";
 import { McpApp } from "./McpApp";
 import { usePasscode, useLockWallpaper, useHomeWallpaper, useChatBackground } from "@/lib/lock-store";
 import { onNotify, onOpenChat, requestOpenChat, useNotifyOn, type NotifyPayload } from "@/lib/notification-store";
@@ -34,6 +36,7 @@ interface Props {
   onSaveConfig: (cfg: AiConfig) => void;
 }
 
+<<<<<<< HEAD
 /** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App
  *  hash 路由后参数可能挂在 #/ 之后（#/Doggie/?vpApp=...），两处都取一次 */
 const vpParams = (() => {
@@ -48,6 +51,11 @@ const vpParams = (() => {
   console.log(`[vp-params] search=${window.location.search} hash=${h} merged=${sp.toString()}`);
   return sp;
 })();
+=======
+/** 仅用于截图验收的 URL 参数：?vpDesk=1 直达桌面；?vpApp=rolechat 直达某 App；?vpGame=uno&vpChar=xx 双弈直达 */
+const vpParams = new URLSearchParams(window.location.search);
+const vpGame = vpParams.get("vpGame") || undefined;
+>>>>>>> f0e70ed8fee8c333d035ead04694c883fe5f020d
 
 export function PhoneShell({ config, onSaveConfig }: Props) {
   // 真机沉浸模式：隐藏自绘状态栏/灵动岛，顶部留白改走 safe-top
@@ -56,6 +64,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const [screen, setScreen] = useState<ScreenId>(
     (vpParams.get("vpApp") as ScreenId) || "home",
   );
+  const vpChar = vpParams.get("vpChar") || "";
   const [passcode] = usePasscode();
   const [lockWp, setLockWp] = useLockWallpaper();
   const [homeWp, setHomeWp] = useHomeWallpaper();
@@ -63,7 +72,8 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
   const [notifyOn, setNotifyOn] = useNotifyOn();
   const { status: authStatus } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
-  const [onboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY));
+  // 截图验收直达参数 vpOnboard=0 时跳过云备份引导弹层（仅诊断用途，不影响正常使用）
+  const [onboard, setOnboard] = useState(() => !localStorage.getItem(ONBOARD_KEY) && !new URLSearchParams(window.location.search).has("vpOnboard"));
   const [oauthMsg, setOauthMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // OAuth 回调接收：URL 带 code/state（或 error）时处理一次并清理地址栏，只认本次发起的授权
@@ -231,6 +241,21 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
     console.log(`[delivery] outbox → char=${charId} ${order.kind} ¥${order.amount}`);
     setScreen("rolechat");
   };
+  /** 双弈终局：把结果写进该角色会话（居中系统灰字），并切回聊天页让角色感想自然衔接 */
+  const duelFinish = (charId: string, result: "win" | "lose" | "draw", gameName: string) => {
+    try {
+      const key = `vp-phone:rolechat-log:${charId}`;
+      const prev = JSON.parse(localStorage.getItem(key) || "[]") as ChatEntry[];
+      const tip: ChatEntry = { id: `d${Date.now()}`, role: "assistant", content: "", at: Date.now(), blockedTip: true };
+      // 复用拒收提示的居中灰字渲染形态：文案按对局结果生成
+      tip.content = result === "win" ? `「你赢了这局${gameName}」` : result === "lose" ? `「${gameName}对局结束，你输了」` : `「${gameName}对局结束，和棋」`;
+      localStorage.setItem(key, JSON.stringify([...prev, tip]));
+    } catch {
+      /* ignore */
+    }
+    localStorage.setItem("vp-phone:active-character:v1", charId);
+    console.log(`[duel] finish → chat char=${charId} result=${result}`);
+  };
   const lock = () => {
     setScreen("home");
     setLocked(true);
@@ -338,7 +363,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
               {screen === "chat" && (
                 <ChatApp config={config} onBack={goHome} onOpenSettings={() => setScreen("settings")} />
               )}
-              {screen === "rolechat" && <RoleChatApp config={config} background={chatBg} onBack={goHome} />}
+              {screen === "rolechat" && <RoleChatApp config={config} background={chatBg} onBack={goHome} onOpenDuel={() => setScreen("duel")} />}
               {screen === "worldbook" && <WorldBookApp onBack={goHome} />}
               {screen === "sticker" && <StickerApp onBack={goHome} />}
               {screen === "album" && <AlbumApp onBack={goHome} />}
@@ -357,6 +382,7 @@ export function PhoneShell({ config, onSaveConfig }: Props) {
                 <DeliveryApp onBack={goHome} onSend={(charId, order) => sendOrderToChat(charId, order)} />
               )}
               {screen === "voicecall" && <VoiceCallApp config={config} onBack={goHome} />}
+              {screen === "duel" && <DuelApp config={config} gameId={vpGame} charId={vpChar || undefined} onBack={goHome} onFinish={duelFinish} />}
               {screen === "mcp" && <McpApp config={config} onBack={goHome} />}
             </div>
 

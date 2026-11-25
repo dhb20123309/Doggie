@@ -121,10 +121,11 @@ export function GameStage({ spec, opponents, config, initial, onExit, onTurnEnd 
       if (hit) { doDirect(hit); return; }
       const reselect = acts.find((a) => a.from?.r === r && a.from?.c === c && a.to);
       setSelected(reselect ?? null);
-      if (!reselect) { const put = acts.find((a) => (a.n !== undefined || a.to) && !a.from && cellMatch(a, r, c)); if (put) doDirect(put); }
+      if (!reselect) { const put = acts.find((a) => (a.n !== undefined || a.to) && !a.from && cellMatch(a, r, c, view.kind === "grid" ? view.cols ?? 15 : 15)); if (put) doDirect(put); }
       return;
     }
-    const put = acts.find((a) => cellMatch(a, r, c));
+    const boardCols = view.kind === "grid" ? view.cols ?? 15 : 15;
+    const put = acts.find((a) => cellMatch(a, r, c, boardCols));
     if (!put) return;
     if (put.to || (put.from && acts.some((x) => x !== put && x.from && (x.from.r !== put.from!.r || x.from.c !== put.from!.c)))) {
       // 有落点含义的直接执行；纯"选中源"的先选中
@@ -263,8 +264,10 @@ export function GameStage({ spec, opponents, config, initial, onExit, onTurnEnd 
 }
 
 /** 把格子坐标映射到动作：支持 n(索引)/from/to 三种定位 */
-function cellMatch(a: GAction, r: number, c: number): boolean {
+function cellMatch(a: GAction, r: number, c: number, cols = 15): boolean {
   if (a.from && a.from.r === r && a.from.c === c) return true;
   if (a.to && !a.from && a.to.r === r && a.to.c === c) return true;
+  // 单点落子玩法（五子棋/井字/四子连珠等）：动作用 n=行*cols+列 索引定位，此前漏判导致点棋盘无反应
+  if (a.n !== undefined && !a.from && !a.to) return Math.floor(a.n / cols) === r && a.n % cols === c;
   return false;
 }

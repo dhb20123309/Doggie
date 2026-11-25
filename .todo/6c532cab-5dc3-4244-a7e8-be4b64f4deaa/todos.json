@@ -1,43 +1,29 @@
 [
   {
-    "content": "realphone.ts 真机联动数据层（GitHub Contents 读写+缓存+摘要）",
-    "id": "r1",
+    "content": "GameStage cellMatch 支持 a.n 单点落子（修五子棋）",
+    "id": "b1",
     "status": "completed",
     "priority": "high",
     "skills": []
   },
   {
-    "content": "快捷指令/Tasker/Termux 配置生成器 + 下载分享",
-    "id": "r2",
+    "content": "photo-store addPhotos 批量 + ShellApps 相册多选导入",
+    "id": "b2",
     "status": "completed",
     "priority": "high",
     "skills": []
   },
   {
-    "content": "SettingsApp 真机联动开关与授权面板",
-    "id": "r3",
-    "status": "completed",
+    "content": "sendSticker 持久化 + ToolboxMenu 表情条目 + 表情选择浮层",
+    "id": "b3",
+    "status": "in_progress",
     "priority": "high",
     "skills": []
   },
   {
-    "content": "PhonePeekApp 真实数据优先展示（时间轴/统计/设备快照）",
-    "id": "r4",
-    "status": "completed",
-    "priority": "high",
-    "skills": []
-  },
-  {
-    "content": "RoleChatApp 接线：system 感知注入+事件驱动主动消息+锁App指令",
-    "id": "r5",
-    "status": "completed",
-    "priority": "high",
-    "skills": []
-  },
-  {
-    "content": "双门禁+dev+截图验收+bundle+AGENTS.md",
-    "id": "r6",
-    "status": "completed",
+    "content": "双门禁+dev+验证+bundle+AGENTS.md",
+    "id": "b4",
+    "status": "pending",
     "priority": "medium",
     "skills": []
   }

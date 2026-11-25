@@ -263,6 +263,8 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
   // ===== 工具箱-人物档案（模块独立：只负责展示与剧情加载，不碰 system/黑白名单） =====
   const [profiles, setProfiles] = useProfiles();
   const [toolboxOpen, setToolboxOpen] = useState(false);
+  // 工具箱「表情包」浮层：点选即发，发一张留一页方便连发
+  const [stickerSheetOpen, setStickerSheetOpen] = useState(false);
   /** 拉黑彩蛋问询弹窗（在聊天页展示，只有"不拉黑了ovo"一个出口） */
   const [blockedAsk, setBlockedAsk] = useState(false);
   /** drawer=侧边抽屉（首次进会话点白条弹出）；page=独立静态页（清空记录后从工具箱进入） */
@@ -1445,9 +1447,10 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
     }
   };
 
-  /** 从表情库手动发一张表情包（用户侧） */
+  /** 从表情库手动发一张表情包（用户侧）：先 setLog 上屏、再 writeLogNow 直写存储，刷新/切会话不丢 */
   const sendSticker = (s: Sticker) => {
-    if (pending || !ready) return;
+    if (!active || pending || !ready) return;
+    const cid = active.id;
     const userMsg: ChatEntry = {
       id: `u${Date.now()}`,
       role: "user",
@@ -1455,8 +1458,17 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
       stickerUrl: s.url,
       at: Date.now(),
     };
-    setLog((prev) => [...prev, userMsg]);
+    console.log(`[sticker] manual send name=${s.name} char=${cid}`);
+    // 与 flushDraft 同序：先界面后直写存储；用函数式 prev 取完整上下文，避免 stateRef 滞后
+    let full: ChatEntry[] = [];
+    setLog((prev) => {
+      full = [...prev, userMsg];
+      return full;
+    });
+    writeLogNow(cid, (prev) => [...prev, userMsg]);
     scrollBottom();
+    // 表情也是一次输入：请 TA 基于 [表情:] 语境接话（剧情模式同样适用）
+    void requestReply(full, userMsg.id, Boolean(active.storyMode));
   };
 
   const generate = () => {
@@ -2260,6 +2272,15 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
         {locationOpen && (
           <LocationPanel disabled={!ready || pending} onPick={(p, a) => sendLocation(p, a)} onClose={() => setLocationOpen(false)} />
         )}
+        {/* 工具箱「表情包」浮层：全局+本角色可用表情网格，点选即发、页面保留可连发 */}
+        {stickerSheetOpen && (
+          <StickerSheet
+            stickers={stickers.filter((s) => s.isGlobal)}
+            disabled={!ready || pending}
+            onSend={(s) => sendSticker(s)}
+            onClose={() => setStickerSheetOpen(false)}
+          />
+        )}
         {/* 引用条：待发引用显示在输入框上方，微信式浅灰小块 + 关闭按钮 */}
         {quoteDraft && (
           <div className="fade-up mb-2 flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-1.5">
@@ -2464,6 +2485,11 @@ export function RoleChatApp({ config, background, onBack, onOpenDuel }: Props) {
             console.log(`[inputbar] toolbox→定位 char=${active.id}`);
             setToolboxOpen(false);
             setLocationOpen(true);
+          }}
+          onSticker={() => {
+            console.log(`[inputbar] toolbox→表情包 char=${active.id}`);
+            setToolboxOpen(false);
+            setStickerSheetOpen(true);
           }}
           onShowOpener={() => {
             console.log(`[profile] toolbox→opener char=${active.id} 聊天流内展开`);
@@ -3339,6 +3365,46 @@ function LocationPanel({ disabled, onPick, onClose }: { disabled: boolean; onPic
 }
 
 /* ================= 表情库速览（可点发） ================= */
+
+/* ================= 工具箱「表情包」浮层（点选即发、面板保留可连发） ================= */
+
+function StickerSheet({ stickers, disabled, onSend, onClose }: { stickers: Sticker[]; disabled: boolean; onSend: (s: Sticker) => void; onClose: () => void }) {
+  return (
+    <>
+      <div className="absolute inset-0 z-30 bg-black/20" onClick={onClose} aria-hidden />
+      <div className="glass-strong fade-up absolute bottom-16 left-3 right-3 z-40 max-h-[52%] overflow-y-auto rounded-2xl p-3 shadow-xl">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-muted-foreground">表情包 · 点一下直接发出</p>
+          <button type="button" onClick={onClose} aria-label="关闭表情面板" className="jelly-icon flex size-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground">
+            <X className="size-4" />
+          </button>
+        </div>
+        {stickers.length === 0 ? (
+          <p className="py-6 text-center text-xs leading-relaxed text-muted-foreground">
+            还没有可用表情。
+            <br />
+            去桌面「表情包」应用上传，这里就会出现。
+          </p>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {stickers.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => onSend(s)}
+                className="jelly-icon rounded-xl border border-border bg-card p-1.5 text-left disabled:opacity-40"
+              >
+                <img src={s.url} alt={s.name} className="aspect-square w-full rounded-lg object-cover" />
+                <p className="mt-1 truncate text-center text-[11px]">{s.name}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 function StickerPanel({ stickers, onSend, onBack }: { stickers: Sticker[]; onSend: (s: Sticker) => void; onBack: () => void }) {
   const usable = stickers.filter((s) => s.isGlobal);

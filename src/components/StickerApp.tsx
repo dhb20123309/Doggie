@@ -1,10 +1,11 @@
 // 手机内「表情包」应用：上传图片存 base64，AI 按 [表情:名字] 调用
 import { useRef, useState } from "react";
-import { ChevronLeft, Plus, Trash2, Globe, Lock, ImagePlus } from "lucide-react";
+import { ChevronLeft, Plus, Trash2, Globe, Lock, ImagePlus, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Sticker } from "@/lib/worldbook";
 import { useStickers } from "@/lib/chat-store";
+import { MemeSquarePanel } from "./MemeSquarePanel";
 
 interface Props {
   onBack: () => void;
@@ -45,7 +46,19 @@ async function compressToDataUrl(file: File): Promise<string> {
 export function StickerApp({ onBack }: Props) {
   const [stickers, setStickers] = useStickers();
   const [editing, setEditing] = useState<Sticker | null>(null);
+  const [squareOpen, setSquareOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  if (squareOpen) {
+    return (
+      <MemeSquarePanel
+        stickers={stickers}
+        onAddStickers={(items) => setStickers((prev) => [...prev, ...items.filter((it) => !prev.some((s) => s.id === it.id))])}
+        onRemoveStickers={(ids) => setStickers((prev) => prev.filter((s) => !ids.includes(s.id)))}
+        onBack={() => setSquareOpen(false)}
+      />
+    );
+  }
 
   const save = (st: Sticker & { __del?: boolean }) => {
     setStickers((prev) =>
@@ -63,15 +76,20 @@ export function StickerApp({ onBack }: Props) {
           <ChevronLeft className="size-5" />
         </Button>
         <span className="text-sm font-semibold">表情包</span>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="jelly-icon size-8 text-primary"
-          onClick={() => setEditing({ id: `st_${Date.now()}`, name: "", url: "", isGlobal: true })}
-          aria-label="新建表情"
-        >
-          <Plus className="size-5" />
-        </Button>
+        <div className="flex items-center">
+          <Button variant="ghost" size="icon" className="jelly-icon size-8 text-primary" onClick={() => setSquareOpen(true)} aria-label="表情包广场">
+            <Store className="size-5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="jelly-icon size-8 text-primary"
+            onClick={() => setEditing({ id: `st_${Date.now()}`, name: "", url: "", isGlobal: true })}
+            aria-label="新建表情"
+          >
+            <Plus className="size-5" />
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">

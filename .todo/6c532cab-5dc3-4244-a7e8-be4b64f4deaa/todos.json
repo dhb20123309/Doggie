@@ -30,14 +30,14 @@
   {
     "content": "RoleChatApp 接线：system 感知注入+事件驱动主动消息+锁App指令",
     "id": "r5",
-    "status": "in_progress",
+    "status": "completed",
     "priority": "high",
     "skills": []
   },
   {
     "content": "双门禁+dev+截图验收+bundle+AGENTS.md",
     "id": "r6",
-    "status": "pending",
+    "status": "completed",
     "priority": "medium",
     "skills": []
   }
